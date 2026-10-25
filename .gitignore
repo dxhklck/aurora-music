@@ -1,0 +1,18 @@
+node_modules
+out
+dist
+release
+*.log
+.DS_Store
+
+# 引擎：虚拟环境与临时工作目录不进仓库，vendor 由 npm run engine:vendor 生成
+engine/.venv
+engine/.tmp
+engine/vendor
+engine/python
+
+# 坏损环境备份（2026-10-25 修复 musicdl 时的现场留存，确认无误后手动删除）
+engine/.venv.broken-*
+
+# 工作区本地数据
+.workbuddy/

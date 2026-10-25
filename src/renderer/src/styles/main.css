@@ -1,0 +1,343 @@
+:root {
+  --bg: #07070b;
+  --bg-soft: #0c0c13;
+  --bg-elev: rgba(18, 18, 26, 0.72);
+  --panel: rgba(255, 255, 255, 0.045);
+  --panel-strong: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #f4f5f9;
+  --text-2: rgba(244, 245, 249, 0.66);
+  --text-3: rgba(244, 245, 249, 0.4);
+  --accent: #7c6cff;
+  --accent-2: #4facfe;
+  --danger: #ff5c7c;
+  --radius-lg: 22px;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --titlebar: 48px;
+  --sidebar: 240px;
+  --player: 92px;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Inter', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Noto Sans CJK SC',
+    'Source Han Sans SC', 'Segoe UI', 'Ubuntu', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* macOS：给原生红绿灯留出空间，隐藏自绘窗口按钮 */
+html[data-platform='darwin'] .titlebar {
+  padding-left: 86px;
+}
+html[data-platform='darwin'] .titlebar .brand {
+  width: auto;
+}
+html[data-platform='darwin'] .win-controls {
+  display: none !important;
+}
+
+/* 桌面歌词窗口：整窗透明 */
+html.lyric-window,
+html.lyric-window body,
+html.lyric-window #app {
+  background: transparent !important;
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+input {
+  font-family: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 布局 ---------- */
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  grid-template-rows: var(--titlebar) minmax(0, 1fr) var(--player);
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 迷你播放器：放弃网格，独占整窗 */
+.shell.mini {
+  display: block;
+}
+
+.shell::before {
+  content: '';
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 70%;
+  background:
+    radial-gradient(45% 55% at 20% 30%, color-mix(in srgb, var(--accent) 40%, transparent), transparent 70%),
+    radial-gradient(40% 60% at 80% 10%, color-mix(in srgb, var(--accent-2) 32%, transparent), transparent 70%);
+  filter: blur(70px);
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.8s var(--ease);
+}
+
+.titlebar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px 0 18px;
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 20;
+}
+
+/* 歌词舞台打开时盖住整个标题栏：Chromium 的拖拽区域按元素几何框计算、
+   不理会被谁盖住，那 48px 会把「收起」等按钮的 mousedown 当成拖窗口吃掉。
+   舞台期间标题栏反正也露不出来，直接关掉它的拖拽区。 */
+.shell.stage-open .titlebar {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar .no-drag,
+.titlebar button,
+.titlebar input {
+  -webkit-app-region: no-drag;
+}
+
+.sidebar {
+  padding: 10px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  position: relative;
+  z-index: 10;
+}
+
+.page {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 30px 36px 14px;
+  position: relative;
+  z-index: 5;
+}
+
+.playerbar {
+  grid-column: 1 / -1;
+  position: relative;
+  z-index: 30;
+}
+
+/* ---------- 通用 ---------- */
+.glass {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(26px) saturate(1.5);
+  -webkit-backdrop-filter: blur(26px) saturate(1.5);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+}
+
+.muted {
+  color: var(--text-2);
+}
+
+.dim {
+  color: var(--text-3);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--text-2);
+  transition: all 0.2s var(--ease);
+}
+.icon-btn:hover {
+  background: var(--panel-strong);
+  color: var(--text);
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.icon-btn.active {
+  color: var(--accent);
+}
+
+.btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  color: var(--text);
+  transition: all 0.2s var(--ease);
+}
+.btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.btn.primary {
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+}
+
+.section-title {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  margin: 26px 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(20px);
+  transition: all 0.25s var(--ease);
+}
+.card:hover {
+  background: var(--panel-strong);
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 64px 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.empty strong {
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.05) 30%, rgba(255, 255, 255, 0.1) 45%, rgba(255, 255, 255, 0.05) 60%);
+  background-size: 300% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -150% 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- 路由过渡 ---------- */
+.route-enter-active,
+.route-leave-active {
+  transition: opacity 0.28s var(--ease), transform 0.28s var(--ease);
+}
+.route-enter-from {
+  opacity: 0;
+  transform: translateY(12px) scale(0.995);
+}
+.route-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}

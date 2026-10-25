@@ -1,0 +1,62 @@
+appId: com.aurora.music
+productName: Aurora Music
+directories:
+  buildResources: build
+  output: release
+
+asar: true
+# 国内网络从 GitHub 拉 Electron 发行包经常超时，走 npmmirror 镜像（同文件，校验和不变）
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+files:
+  - out/**/*
+  - package.json
+
+# 演示音源是独立资源，不打进 asar，便于主进程按路径直接读取
+extraResources:
+  - from: resources/demo
+    to: demo
+  # 托盘图标
+  - from: resources/icons
+    to: icons
+  # 引擎桥：主进程按 resources/engine/musicdl/bridge.py 拉起 Python
+  - from: engine/musicdl
+    to: engine/musicdl
+  # 随包内置的 musicdl 源码（npm run engine:vendor 生成）。
+  # 只带纯源码，不带 .venv —— 虚拟环境与平台/解释器版本绑定，不能跨机分发。
+  - from: engine/vendor
+    to: engine/vendor
+  # 自带 Python 运行时（engine/python，Windows 为嵌入式 3.12）：
+  # 主进程探测 resources/python/python.exe，安装版开箱即用引擎音源
+  - from: engine/python
+    to: python
+
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.music
+  # 未配置开发者证书时跳过公证，本地可直接产出可运行的 .app
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: AudioVideo
+  synopsis: 跨平台桌面音乐播放器
+  description: 多音源统一适配的沉浸式音乐播放器，支持搜索、榜单、下载与逐行歌词。
+  artifactName: ${productName}-${version}-${arch}.${ext}

@@ -1,0 +1,111 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { IPC } from '../shared/ipc'
+import type { AuroraApi } from '../shared/api'
+
+const api: AuroraApi = {
+  platform: process.platform,
+  providers: () => ipcRenderer.invoke(IPC.providerList),
+  search: (args) => ipcRenderer.invoke(IPC.search, args),
+  onSearchPartial: (cb) => {
+    const listener = (_event: unknown, payload: any): void => cb(payload)
+    ipcRenderer.on(IPC.searchPartial, listener)
+    return () => ipcRenderer.removeListener(IPC.searchPartial, listener)
+  },
+  charts: (platform) => ipcRenderer.invoke(IPC.charts, platform),
+  chartDetail: (args) => ipcRenderer.invoke(IPC.chartDetail, args),
+  lyric: (song) => ipcRenderer.invoke(IPC.lyric, song),
+  resolveTrack: (args) => ipcRenderer.invoke(IPC.resolveTrack, args),
+  coverResolve: (song) => ipcRenderer.invoke(IPC.coverResolve, song),
+
+  enqueueDownload: (song) => ipcRenderer.invoke(IPC.downloadEnqueue, song),
+  enqueueDownloads: (songs) => ipcRenderer.invoke(IPC.downloadEnqueueMany, songs),
+  listDownloads: () => ipcRenderer.invoke(IPC.downloadList),
+  cancelDownload: (id) => ipcRenderer.invoke(IPC.downloadCancel, id),
+  retryDownload: (id) => ipcRenderer.invoke(IPC.downloadRetry, id),
+  retryFailedDownloads: () => ipcRenderer.invoke(IPC.downloadRetryFailed),
+  removeDownload: (id) => ipcRenderer.invoke(IPC.downloadRemove, id),
+  clearDownloads: () => ipcRenderer.invoke(IPC.downloadClear),
+  openDownload: (id) => ipcRenderer.invoke(IPC.downloadOpen, id),
+  revealDownload: (id) => ipcRenderer.invoke(IPC.downloadReveal, id),
+  downloadDir: () => ipcRenderer.invoke(IPC.downloadDir),
+  chooseDownloadDir: () => ipcRenderer.invoke(IPC.downloadChooseDir),
+
+  engineStatus: () => ipcRenderer.invoke(IPC.engineStatus),
+  engineRestart: () => ipcRenderer.invoke(IPC.engineRestart),
+  engineChoosePython: () => ipcRenderer.invoke(IPC.engineChoosePython),
+
+  listLibrary: () => ipcRenderer.invoke(IPC.libraryList),
+  removeLibrary: (id) => ipcRenderer.invoke(IPC.libraryRemove, id),
+  refreshLibrary: () => ipcRenderer.invoke(IPC.libraryRefresh),
+  revealLibrary: (id) => ipcRenderer.invoke(IPC.libraryReveal, id),
+  importMusicDir: () => ipcRenderer.invoke(IPC.libraryImportDir),
+  removeMusicDir: (dir) => ipcRenderer.invoke(IPC.libraryRemoveDir, dir),
+  listMusicDirs: () => ipcRenderer.invoke(IPC.libraryDirs),
+
+  listPlaylists: () => ipcRenderer.invoke(IPC.playlistList),
+  createPlaylist: (name, songs) => ipcRenderer.invoke(IPC.playlistCreate, { name, songs }),
+  renamePlaylist: (id, name) => ipcRenderer.invoke(IPC.playlistRename, { id, name }),
+  removePlaylist: (id) => ipcRenderer.invoke(IPC.playlistRemove, id),
+  addPlaylistSongs: (id, songs) => ipcRenderer.invoke(IPC.playlistAddSongs, { id, songs }),
+  removePlaylistSong: (id, platform, songId) =>
+    ipcRenderer.invoke(IPC.playlistRemoveSong, { id, platform, songId }),
+  toggleFavorite: (song) => ipcRenderer.invoke(IPC.playlistToggleFavorite, song),
+
+  getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
+  setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),
+
+  winMinimize: () => ipcRenderer.send(IPC.winMinimize),
+  winMaximize: () => ipcRenderer.send(IPC.winMaximize),
+  winClose: () => ipcRenderer.send(IPC.winClose),
+  isMaximized: () => ipcRenderer.invoke(IPC.winIsMaximized),
+
+  toggleLyricWindow: () => ipcRenderer.invoke(IPC.lyricWindowToggle),
+  closeLyricWindow: () => ipcRenderer.send(IPC.lyricWindowClose),
+  setLyricWindowLock: (locked) => ipcRenderer.send(IPC.lyricWindowLock, locked),
+  pushLyricState: (state) => ipcRenderer.send(IPC.lyricWindowPush, state),
+  getLyricMode: () => ipcRenderer.invoke(IPC.lyricWindowMode),
+  setLyricMode: (mode) => ipcRenderer.invoke(IPC.lyricWindowMode, mode),
+  sendLyricCommand: (command) => ipcRenderer.send(IPC.lyricWindowCommand, command),
+
+  pushTrayState: (state) => ipcRenderer.send(IPC.trayState, state),
+  onTrayCommand: (cb) => {
+    const listener = (_event: unknown, command: any): void => cb(command)
+    ipcRenderer.on(IPC.trayCommand, listener)
+    return () => ipcRenderer.removeListener(IPC.trayCommand, listener)
+  },
+
+  startQrLogin: (platform) => ipcRenderer.invoke(IPC.qrLoginStart, platform),
+  pollQrLogin: () => ipcRenderer.invoke(IPC.qrLoginPoll),
+  cancelQrLogin: () => ipcRenderer.send(IPC.qrLoginCancel),
+
+  openLoginWindow: (platform) => ipcRenderer.invoke(IPC.loginWindowOpen, platform),
+  closeLoginWindow: () => ipcRenderer.send(IPC.loginWindowClose),
+  onLoginWindowResult: (cb) => {
+    const listener = (_event: unknown, result: any): void => cb(result)
+    ipcRenderer.on(IPC.loginWindowResult, listener)
+    return () => ipcRenderer.removeListener(IPC.loginWindowResult, listener)
+  },
+
+  onDownloadProgress: (cb) => {
+    const listener = (_event: unknown, tasks: any): void => cb(tasks)
+    ipcRenderer.on(IPC.downloadProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.downloadProgress, listener)
+  },
+  onSettingsChanged: (cb) => {
+    const listener = (_event: unknown, settings: any): void => cb(settings)
+    ipcRenderer.on(IPC.settingsChanged, listener)
+    return () => ipcRenderer.removeListener(IPC.settingsChanged, listener)
+  },
+  onLyricWindowState: (cb) => {
+    const listener = (_event: unknown, state: any): void => cb(state)
+    ipcRenderer.on(IPC.lyricWindowState, listener)
+    return () => ipcRenderer.removeListener(IPC.lyricWindowState, listener)
+  },
+  onToast: (cb) => {
+    const listener = (_event: unknown, payload: any): void => cb(payload)
+    ipcRenderer.on(IPC.toast, listener)
+    return () => ipcRenderer.removeListener(IPC.toast, listener)
+  }
+}
+
+contextBridge.exposeInMainWorld('api', api)
