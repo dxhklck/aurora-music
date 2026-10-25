@@ -35,6 +35,25 @@ jobs:
       - name: Vendor engine sources
         run: npm run engine:vendor
 
+      # 生成随包内置的 Python 运行时（engine/python，gitignore，不进仓库）：
+      # 嵌入式 3.12 + pip 引导 + musicdl 全量依赖，主进程探测 resources/python/python.exe
+      # 只有 Windows 打这个包；macOS/Linux 仍回落系统解释器
+      - name: Bundle portable Python (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = '3.12.10'
+          Invoke-WebRequest "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip" -OutFile python-embed.zip
+          Expand-Archive python-embed.zip -DestinationPath engine/python
+          # 启用 site 并把依赖目录挂进搜索路径（与本地 engine/python 的 ._pth 一致）
+          $pth = (Get-Item engine/python/python*._pth).FullName
+          (Get-Content $pth) -replace '^#import site', 'import site' | Set-Content $pth -Encoding ascii
+          Add-Content $pth "`n# engine deps installed here by pip`nLib/site-packages" -Encoding ascii
+          Invoke-WebRequest https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
+          engine\python\python.exe get-pip.py --no-warn-script-location
+          engine\python\python.exe -m pip install --disable-pip-version-check -q "musicdl==2.14.2"
+
       - name: Package
         env:
           # 没有证书时跳过签名与公证，产出可直接运行的安装包
