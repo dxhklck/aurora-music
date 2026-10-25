@@ -107,6 +107,11 @@ def write_placeholder(reason: str) -> None:
 
 
 def main() -> int:
+    # Windows CI 控制台默认 cp1252，中文输出会直接 UnicodeEncodeError
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="忽略现有 vendor 重新拉取")
     args = parser.parse_args()

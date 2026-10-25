@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "Aurora Music - 沉浸式跨平台桌面音乐播放器",
   "main": "./out/main/index.js",
-  "author": "Aurora",
+  "author": {
+    "name": "信息科技练老师",
+    "email": "54947961@qq.com"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {
