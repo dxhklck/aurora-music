@@ -19,6 +19,7 @@ import {
 } from './services/qrlogin'
 import { musicdl } from './engine/musicdl'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
+import { checkForUpdate, installUpdate } from './updater'
 import {
   createLyricWindow,
   destroyLyricWindow,
@@ -217,6 +218,16 @@ export function registerIpc(): void {
     await settings.set({ pythonPath: picked.filePaths[0] })
     return musicdl.restart()
   })
+  // 引擎自愈：上游音源失效时重拉官方源码覆盖 vendor，然后重启引擎
+  handle(IPC.engineRepairVendor, async () => {
+    const repair = await musicdl.repairVendor()
+    if (!repair.ok) throw new Error(repair.message ?? '修复失败')
+    return musicdl.restart()
+  })
+
+  // ---------- 更新 ----------
+  handle(IPC.updateCheck, () => checkForUpdate())
+  on(IPC.updateInstall, () => installUpdate())
 
   // ---------- 窗口 ----------
   on(IPC.winMinimize, () => getMainWindow()?.minimize())

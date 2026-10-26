@@ -15,6 +15,7 @@ import { settings } from './services/settings'
 import { downloads } from './services/download'
 import { engine } from './engine/python'
 import { runSelfTest } from './selftest'
+import { initUpdater } from './updater'
 
 // 自定义协议必须在 app ready 之前登记
 registerMediaScheme()
@@ -64,7 +65,11 @@ function registerGlobalShortcuts(): void {
   const bindings: Array<[string, 'toggle' | 'next' | 'prev']> = [
     [`${mod}+P`, 'toggle'],
     [`${mod}+Left`, 'prev'],
-    [`${mod}+Right`, 'next']
+    [`${mod}+Right`, 'next'],
+    // 键盘媒体键：笔记本/耳机的播放暂停键，无需组合键
+    ['MediaPlayPause', 'toggle'],
+    ['MediaPreviousTrack', 'prev'],
+    ['MediaNextTrack', 'next']
   ]
   for (const [accelerator, command] of bindings) {
     const ok = globalShortcut.register(accelerator, () => {
@@ -156,6 +161,8 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     registerIpc()
+    // 自动更新：仅打包后的 Windows 生效（内部自判，dev/其他平台是空操作）
+    initUpdater()
 
     downloads.on('update', (tasks) => {
       for (const win of BrowserWindow.getAllWindows()) {

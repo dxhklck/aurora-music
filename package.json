@@ -1,6 +1,6 @@
 {
   "name": "aurora-music",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Aurora Music - 沉浸式跨平台桌面音乐播放器",
   "main": "./out/main/index.js",
   "author": {
@@ -24,6 +24,7 @@
     "dist": "npm run engine:vendor && electron-vite build && electron-builder"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "pinia": "3.0.4",
     "qrcode": "^1.5.4",
     "vue": "3.5.44",

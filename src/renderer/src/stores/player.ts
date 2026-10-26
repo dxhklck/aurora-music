@@ -112,6 +112,8 @@ export const usePlayerStore = defineStore('player', () => {
     })
     audio.on('playing', (value: boolean) => {
       playing.value = value
+      // 同步给系统媒体面板（Windows SMTC 等），暂停/播放状态要跟手
+      syncPlaybackState(value)
     })
     audio.on('waiting', (value: boolean) => {
       waiting.value = value
@@ -402,17 +404,32 @@ export const usePlayerStore = defineStore('player', () => {
   function updateMediaSession(song: Song): void {
     if (!('mediaSession' in navigator)) return
     try {
+      const artwork = song.coverUrl
+        ? [{ src: song.coverUrl, sizes: '512x512', type: 'image/jpeg' }]
+        : undefined
       navigator.mediaSession.metadata = new MediaMetadata({
         title: song.name,
         artist: song.artists.join(' / '),
-        album: song.album
+        album: song.album,
+        ...(artwork ? { artwork } : {})
       })
       navigator.mediaSession.setActionHandler('play', () => void toggle())
       navigator.mediaSession.setActionHandler('pause', () => void toggle())
       navigator.mediaSession.setActionHandler('nexttrack', () => void next())
       navigator.mediaSession.setActionHandler('previoustrack', () => void prev())
+      syncPlaybackState(playing.value)
     } catch {
       /* 部分环境不支持 */
+    }
+  }
+
+  /** 把播放/暂停状态同步到系统媒体面板（不支持的浏览器是 no-op） */
+  function syncPlaybackState(isPlaying: boolean): void {
+    if (!('mediaSession' in navigator)) return
+    try {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
+    } catch {
+      /* ignore */
     }
   }
 

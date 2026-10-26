@@ -76,6 +76,8 @@ export interface AuroraApi {
   engineRestart(): Promise<EngineStatusView>
   /** 手动指定 Python 解释器并重启引擎 */
   engineChoosePython(): Promise<EngineStatusView>
+  /** 引擎自愈：重拉官方 musicdl 源码并重启引擎；失败时 reject 原因 */
+  engineRepairVendor(): Promise<EngineStatusView>
 
   listLibrary(): Promise<LibraryTrack[]>
   removeLibrary(id: string): Promise<void>
@@ -97,6 +99,13 @@ export interface AuroraApi {
 
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+
+  /** 检查更新（仅打包后的 Windows 有效，其余环境返回 supported=false） */
+  checkForUpdate(): Promise<UpdateStatusView>
+  /** 下载完成后重启并安装更新 */
+  installUpdate(): void
+  /** 订阅更新状态推送（检查/下载进度/就绪/出错） */
+  onUpdateStatus(cb: (status: UpdateStatusView) => void): () => void
 
   winMinimize(): void
   winMaximize(): void
@@ -144,6 +153,19 @@ export interface TrayState {
   title: string
   artist: string
   playing: boolean
+}
+
+/** 更新状态（主进程 → 设置页） */
+export interface UpdateStatusView {
+  /** 当前环境是否支持自动更新（仅打包后的 Windows） */
+  supported: boolean
+  state: 'idle' | 'checking' | 'available' | 'none' | 'downloading' | 'ready' | 'error'
+  currentVersion: string
+  /** 可更新到 / 已下载的版本号 */
+  version?: string
+  /** 下载进度（0-100） */
+  percent?: number
+  message?: string
 }
 
 declare global {

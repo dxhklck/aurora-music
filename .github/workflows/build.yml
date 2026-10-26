@@ -53,6 +53,15 @@ jobs:
           Invoke-WebRequest https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
           engine\python\python.exe get-pip.py --no-warn-script-location
           engine\python\python.exe -m pip install --disable-pip-version-check -q "musicdl==2.14.2"
+          # 依赖瘦身：以下包在 musicdl 核心链路无硬引用（optionalimport / TYPE_CHECKING / 未 import），
+          # 卸载可减约 140MB 原始体积。单个卸载失败忽略（上游依赖清单变化时容错）。
+          $trim = 'nodejs-wheel', 'av', 'curl-cffi', 'lxml', 'brotli', 'websocket-client', 'puremagic'
+          foreach ($pkg in $trim) {
+            engine\python\python.exe -m pip uninstall -y -q $pkg 2>$null
+          }
+          # 自检：vendored 源码必须能在瘦身后完整导入（与 bridge.py 同一导入方式）
+          engine\python\python.exe -c "import sys; sys.path.insert(0, 'engine/vendor/musicdl'); from musicdl.modules import BuildMusicClient, SongInfo; print('VENDOR-OK')"
+          if ($LASTEXITCODE -ne 0) { throw 'vendored musicdl import check failed' }
 
       - name: Package
         env:
@@ -71,6 +80,9 @@ jobs:
             release/*.zip
             release/*.AppImage
             release/*.deb
+            # electron-updater 元数据与增量校验文件，必须随 Release 分发
+            release/latest*.yml
+            release/*.blockmap
           if-no-files-found: warn
           retention-days: 7
 

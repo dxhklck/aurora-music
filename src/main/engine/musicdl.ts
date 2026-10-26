@@ -1,6 +1,8 @@
 import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { app } from 'electron'
-import { bridgeScript, musicdlDirs } from '../paths'
+import { bridgeScript, musicdlDirs, repairScript, vendoredMusicdlDir } from '../paths'
+import { settings } from '../services/settings'
 import { engine, EngineCallError, type EngineEvent } from './python'
 import type { EngineStatus } from './types'
 
@@ -151,6 +153,79 @@ class MusicdlEngine {
       /* 错误已记录在 status().error */
     }
     return this.status()
+  }
+
+  /**
+   * 引擎自愈：重拉官方 musicdl wheel 覆盖随包 vendor 源码。
+   * 依次尝试引擎当前解释器 → 设置页指定解释器 → 系统解释器；
+   * 只有一行 stdout JSON（{"ok":...}），诊断都在 stderr。
+   */
+  async repairVendor(): Promise<{ ok: boolean; message?: string }> {
+    const script = repairScript()
+    if (!existsSync(script)) return { ok: false, message: `找不到修复脚本：${script}` }
+
+    const candidates = [
+      engine.status().runtime?.command,
+      settings.get().pythonPath,
+      process.platform === 'win32' ? 'py' : 'python3',
+      'python'
+    ].filter((item): item is string => !!item)
+
+    let lastMessage = ''
+    for (const command of candidates) {
+      try {
+        const result = await this.runRepairScript(command, script)
+        if (result.ok) return result
+        lastMessage = result.message ?? '未知错误'
+      } catch (error) {
+        lastMessage = (error as Error).message
+      }
+    }
+    return { ok: false, message: lastMessage || '没有可用的 Python 解释器' }
+  }
+
+  private runRepairScript(command: string, script: string): Promise<{ ok: boolean; message?: string }> {
+    return new Promise((resolve) => {
+      const child = spawn(command, [script, '--target', vendoredMusicdlDir()], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
+      })
+      let stdout = ''
+      let stderr = ''
+      const timer = setTimeout(() => {
+        child.kill()
+        resolve({ ok: false, message: '修复脚本执行超时（180s）' })
+      }, 180_000)
+
+      child.stdout?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => {
+        stdout += chunk
+      })
+      child.stderr?.setEncoding('utf8')
+      child.stderr?.on('data', (chunk: string) => {
+        stderr += chunk
+      })
+      child.on('error', (error) => {
+        clearTimeout(timer)
+        resolve({ ok: false, message: `${command} 启动失败：${error.message}` })
+      })
+      child.on('exit', () => {
+        clearTimeout(timer)
+        const line = stdout.split(/\r?\n/).find((item) => item.trim().startsWith('{'))
+        if (!line) {
+          resolve({ ok: false, message: stderr.trim().slice(-300) || '脚本没有返回结果' })
+          return
+        }
+        try {
+          const parsed = JSON.parse(line) as { ok?: boolean; message?: string }
+          if (parsed.ok) resolve({ ok: true })
+          else resolve({ ok: false, message: parsed.message ?? '脚本报告失败' })
+        } catch {
+          resolve({ ok: false, message: `无法解析脚本输出：${line.slice(0, 120)}` })
+        }
+      })
+    })
   }
 }
 

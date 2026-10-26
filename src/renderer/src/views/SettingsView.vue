@@ -5,7 +5,7 @@ import { useAppStore } from '../stores/app'
 import { useDownloadStore } from '../stores/download'
 import { useLibraryStore } from '../stores/library'
 import { formatBytes } from '@shared/lyric'
-import type { EngineStatusView } from '@shared/api'
+import type { EngineStatusView, UpdateStatusView } from '@shared/api'
 import type { QrLoginPlatform, QrLoginState } from '@shared/types'
 import type { Quality } from '@shared/types'
 
@@ -15,6 +15,7 @@ const library = useLibraryStore()
 
 const engine = ref<EngineStatusView | null>(null)
 const probing = ref(false)
+const repairing = ref(false)
 const showLog = ref(false)
 const dir = ref('')
 
@@ -32,6 +33,53 @@ const qualities: Array<{ value: Quality; label: string; hint: string }> = [
 ]
 
 const engineSources = computed(() => app.providers.filter((item) => item.id.startsWith('mdl-')))
+
+/* ---------- 自动更新 ---------- */
+const update = ref<UpdateStatusView | null>(null)
+let offUpdateStatus: (() => void) | null = null
+const checkingUpdate = ref(false)
+
+const updateText = computed(() => {
+  const s = update.value
+  if (!s) return ''
+  switch (s.state) {
+    case 'checking':
+      return '正在检查更新…'
+    case 'available':
+      return s.version ? `发现新版本 v${s.version}，正在自动下载…` : '发现新版本，正在自动下载…'
+    case 'downloading':
+      return `正在下载更新… ${s.percent ?? 0}%`
+    case 'ready':
+      return s.version ? `v${s.version} 已就绪，重启后安装` : '更新已就绪，重启后安装'
+    case 'error':
+      return s.message ? `检查失败：${s.message}` : '检查更新失败'
+    default:
+      return '已是最新版本'
+  }
+})
+
+async function checkUpdate(): Promise<void> {
+  checkingUpdate.value = true
+  try {
+    update.value = await window.api.checkForUpdate()
+  } finally {
+    checkingUpdate.value = false
+  }
+}
+
+function installUpdateNow(): void {
+  window.api.installUpdate()
+}
+
+onMounted(() => {
+  offUpdateStatus = window.api.onUpdateStatus((status) => {
+    update.value = status
+  })
+  // 静默拿一次当前状态（不主动发起网络检查；检查由主进程启动后半分钟做）
+  update.value = { supported: true, state: 'idle', currentVersion: '' }
+  void window.api.checkForUpdate().then((s) => (update.value = s)).catch(() => undefined)
+})
+onBeforeUnmount(() => offUpdateStatus?.())
 
 async function patch(patchValue: Parameters<typeof app.patchSettings>[0]): Promise<void> {
   await app.patchSettings(patchValue)
@@ -71,6 +119,20 @@ async function choosePython(): Promise<void> {
     else app.toast(engine.value?.error || '这个解释器不可用', 'error')
   } finally {
     probing.value = false
+  }
+}
+
+/** 引擎自愈：上游音源失效时重拉官方 musicdl 源码并重启引擎 */
+async function repairVendor(): Promise<void> {
+  repairing.value = true
+  try {
+    engine.value = await window.api.engineRepairVendor()
+    if (engine.value?.ready) app.toast('musicdl 源码已修复，引擎已就绪', 'success')
+    else app.toast(engine.value?.error || '修复后引擎仍未就绪', 'error')
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : '修复失败，请检查网络', 'error')
+  } finally {
+    repairing.value = false
   }
 }
 
@@ -524,6 +586,9 @@ onBeforeUnmount(() => {
           <button class="btn" :disabled="probing" @click="choosePython">
             <Icon name="folder" :size="13" /> 指定解释器
           </button>
+          <button class="btn" :disabled="probing || repairing" @click="repairVendor">
+            <Icon name="refresh" :size="13" /> {{ repairing ? '修复中…（需联网）' : '修复源码' }}
+          </button>
           <button v-if="engine.log.length" class="btn ghost" @click="showLog = !showLog">
             {{ showLog ? '隐藏日志' : '查看日志' }}
           </button>
@@ -557,6 +622,35 @@ onBeforeUnmount(() => {
 
       <p v-if="engineSources.length" class="hint">
         当前已注册 {{ engineSources.length }} 个引擎音源：{{ engineSources.map((item) => item.name).join(' · ') }}
+      </p>
+    </section>
+
+    <!-- 更新 -->
+    <section class="card block">
+      <div class="block-head">
+        <span class="ico"><Icon name="download" :size="15" /></span>
+        <div>
+          <strong>软件更新</strong>
+          <small v-if="update">
+            当前版本 v{{ update.currentVersion || '…' }}
+            <template v-if="!update.supported"> · 此环境不支持应用内更新，请到 GitHub Releases 下载</template>
+          </small>
+        </div>
+      </div>
+
+      <div class="row">
+        <button class="btn" :disabled="checkingUpdate" @click="checkUpdate">
+          {{ checkingUpdate ? '检查中…' : '检查更新' }}
+        </button>
+        <button v-if="update?.state === 'ready'" class="btn primary" @click="installUpdateNow">
+          重启并安装
+        </button>
+      </div>
+      <p v-if="updateText && update?.supported" class="hint" :class="{ error: update?.state === 'error' }">
+        {{ updateText }}
+      </p>
+      <p v-if="update && !update.supported" class="hint">
+        更新包发布在 GitHub Releases：github.com/dxhklck/aurora-music/releases
       </p>
     </section>
 
@@ -1046,6 +1140,9 @@ onBeforeUnmount(() => {
   font-size: 11px;
   line-height: 1.7;
   color: var(--text-3);
+}
+.hint.error {
+  color: #ff7a7a;
 }
 .about .hint {
   margin-top: 8px;

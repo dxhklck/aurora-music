@@ -4,6 +4,12 @@ directories:
   buildResources: build
   output: release
 
+# 自动更新元数据（latest.yml）按 GitHub Releases 生成，electron-updater 运行时读取
+publish:
+  provider: github
+  owner: dxhklck
+  repo: aurora-music
+
 asar: true
 # 国内网络从 GitHub 拉 Electron 发行包经常超时，走 npmmirror 镜像（同文件，校验和不变）
 electronDownload:

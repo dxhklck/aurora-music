@@ -26,6 +26,16 @@ export function bridgeScript(): string {
   return candidates.find((path) => existsSync(path)) ?? candidates[0]
 }
 
+/** 引擎自愈脚本（与 bridge.py 同目录，随包分发） */
+export function repairScript(): string {
+  return join(bridgeScript(), '..', 'repair_vendor.py')
+}
+
+/** 随包 vendor 的 musicdl 源码目录（自愈写入目标，优先级低于环境变量） */
+export function vendoredMusicdlDir(): string {
+  return join(engineDir(), 'vendor', 'musicdl')
+}
+
 /** musicdl 源码目录候选（按优先级）：环境变量 → 随包内置 → 同级仓库 → vendor */
 export function musicdlDirs(): string[] {
   const list: string[] = []

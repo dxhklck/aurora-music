@@ -33,6 +33,7 @@ const api: AuroraApi = {
   engineStatus: () => ipcRenderer.invoke(IPC.engineStatus),
   engineRestart: () => ipcRenderer.invoke(IPC.engineRestart),
   engineChoosePython: () => ipcRenderer.invoke(IPC.engineChoosePython),
+  engineRepairVendor: () => ipcRenderer.invoke(IPC.engineRepairVendor),
 
   listLibrary: () => ipcRenderer.invoke(IPC.libraryList),
   removeLibrary: (id) => ipcRenderer.invoke(IPC.libraryRemove, id),
@@ -53,6 +54,14 @@ const api: AuroraApi = {
 
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),
+
+  checkForUpdate: () => ipcRenderer.invoke(IPC.updateCheck),
+  installUpdate: () => ipcRenderer.send(IPC.updateInstall),
+  onUpdateStatus: (cb) => {
+    const listener = (_event: unknown, status: any): void => cb(status)
+    ipcRenderer.on(IPC.updateStatus, listener)
+    return () => ipcRenderer.removeListener(IPC.updateStatus, listener)
+  },
 
   winMinimize: () => ipcRenderer.send(IPC.winMinimize),
   winMaximize: () => ipcRenderer.send(IPC.winMaximize),

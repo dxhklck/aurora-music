@@ -33,6 +33,8 @@ export const IPC = {
   engineRestart: 'engine:restart',
   /** 手动指定 Python 解释器（安装版没有 npm 脚本时用） */
   engineChoosePython: 'engine:choose-python',
+  /** 引擎自愈：重拉官方 musicdl 源码覆盖随包 vendor */
+  engineRepairVendor: 'engine:repair-vendor',
 
   // 本地库
   libraryList: 'library:list',
@@ -90,5 +92,10 @@ export const IPC = {
   loginWindowResult: 'login-window:result',
 
   // 通知
-  toast: 'app:toast'
+  toast: 'app:toast',
+
+  // 自动更新（Windows）
+  updateCheck: 'update:check',
+  updateInstall: 'update:install',
+  updateStatus: 'update:status'
 } as const

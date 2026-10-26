@@ -32,8 +32,8 @@ function expand(): void {
       <CoverArt
         :src="song?.coverUrl ?? null"
         :seed="song ? `${song.platform}:${song.id}` : 'aurora'"
-        :size="64"
-        :radius="14"
+        :size="48"
+        :radius="11"
         :song="song"
       />
     </div>
@@ -56,17 +56,17 @@ function expand(): void {
 
     <div class="controls no-drag">
       <button title="上一首" :disabled="!player.queue.length" @click="player.prev()">
-        <Icon name="prev" :size="17" />
+        <Icon name="prev" :size="14" />
       </button>
       <button class="play" :class="{ loading: player.loading || player.waiting }" @click="player.toggle()">
         <span v-if="player.loading || player.waiting" class="ring" />
-        <Icon v-else :name="player.playing ? 'pause' : 'play'" :size="17" />
+        <Icon v-else :name="player.playing ? 'pause' : 'play'" :size="14" />
       </button>
       <button title="下一首" :disabled="!player.queue.length" @click="player.next()">
-        <Icon name="next" :size="17" />
+        <Icon name="next" :size="14" />
       </button>
       <button class="expand" title="展开完整窗口" @click="expand">
-        <Icon name="expand" :size="16" />
+        <Icon name="expand" :size="13" />
       </button>
     </div>
   </div>
@@ -77,8 +77,8 @@ function expand(): void {
   height: 100vh;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 14px 0 12px;
+  gap: 10px;
+  padding: 0 10px 0 8px;
   /* 整个浮窗可拖动；按钮单独 no-drag */
   -webkit-app-region: drag;
   background:
@@ -106,11 +106,11 @@ function expand(): void {
   min-width: 0;
 }
 .meta strong {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
 }
 .meta small {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-3);
 }
 
@@ -122,11 +122,11 @@ function expand(): void {
   -webkit-app-region: no-drag;
 }
 .progress :deep(.bar) {
-  height: 4px;
+  height: 3px;
 }
 .time {
   flex: none;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -140,9 +140,9 @@ function expand(): void {
   -webkit-app-region: no-drag;
 }
 .controls button {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   color: var(--text-2);
@@ -156,8 +156,8 @@ function expand(): void {
   opacity: 0.35;
 }
 .controls .play {
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
@@ -169,7 +169,7 @@ function expand(): void {
 }
 .controls .ring {
   position: absolute;
-  inset: 8px;
+  inset: 7px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.35);
   border-top-color: #fff;
