@@ -67,6 +67,11 @@ jobs:
             Get-Content pip-log.txt -Tail 15 | ForEach-Object { Write-Output "::error::pip: $_" }
             throw 'pip install requirements-bundle 连续 3 次失败'
           }
+          # pywidevine/pymp4 死锁声明 construct==2.8.8（该版本无 wheel），
+          # 与清单里的 construct==2.8.10 解析冲突——跳过元数据检查单装，
+          # 它们的其余依赖已在清单里；本地已验证该组合导入链完整（VENDOR-OK）
+          engine\python\python.exe -m pip install --disable-pip-version-check -q --no-deps --only-binary=:all: "pywidevine==1.9.0" "pymp4==1.4.0" 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'pywidevine/pymp4 安装失败' }
           # 自检：vendored 源码必须能完整导入（与 bridge.py 同一导入方式）
           engine\python\python.exe -c "import sys; sys.path.insert(0, 'engine/vendor/musicdl'); from musicdl.modules import BuildMusicClient, SongInfo; print('VENDOR-OK')" > import-check.txt 2>&1
           if ($LASTEXITCODE -ne 0) {
