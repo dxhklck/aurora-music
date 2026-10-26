@@ -52,28 +52,28 @@ jobs:
           Add-Content $pth "`n# engine deps installed here by pip`nLib/site-packages" -Encoding ascii
           Invoke-WebRequest https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
           engine\python\python.exe get-pip.py --no-warn-script-location
-          # pip 拉大 wheel（nodejs-wheel/av 等）偶发 Connection broken: IncompleteRead，
-          # 失败自动重试，3 次仍失败才让步骤红
+          # 只装经验证必需的 44 个依赖（engine/requirements-bundle.txt，全部为小 wheel），
+          # 绕开 nodejs-wheel/av 等大文件下载——CI 两次 IncompleteRead 均死在大 wheel 上。
+          # 生成方式：精简环境 pip freeze，经 vendored 导入自检（VENDOR-OK）验证充分。
           $installed = $false
           for ($i = 1; $i -le 3; $i++) {
-            # --only-binary :all: 嵌入式 Python 没有 setuptools，遇到 sdist 会 BackendUnavailable，只收 wheel
-            engine\python\python.exe -m pip install --disable-pip-version-check -q --retries 10 --timeout 60 --only-binary=:all: "musicdl==2.14.2"
+            engine\python\python.exe -m pip install --disable-pip-version-check -q --retries 10 --timeout 60 --only-binary=:all: -r engine/requirements-bundle.txt > pip-log.txt 2>&1
             if ($LASTEXITCODE -eq 0) { $installed = $true; break }
-            Write-Output "pip install 第 $i 次失败（网络中断），10-30s 后重试…"
+            Write-Output "pip install 第 $i 次失败，10-30s 后重试…"
+            Get-Content pip-log.txt -Tail 10 | ForEach-Object { Write-Output "::error::pip: $_" }
             Start-Sleep -Seconds (10 * $i)
           }
-          if (-not $installed) { throw 'pip install musicdl 连续 3 次失败' }
-          # 依赖瘦身：以下包在 musicdl 核心链路无硬引用（optionalimport / TYPE_CHECKING / 未 import），
-          # 卸载可减约 130MB 原始体积。注意 puremagic 在 utils/misc.py 顶层硬 import，必须保留。
-          # 单个卸载失败忽略（上游依赖清单变化时容错）。
-          $trim = 'nodejs-wheel', 'av', 'curl-cffi', 'lxml', 'brotli', 'websocket-client'
-          foreach ($pkg in $trim) {
-            # 2>&1 | Out-Null：EAP=Stop 下原生命令的 stderr 走 2>$null 会误判抛错
-            engine\python\python.exe -m pip uninstall -y -q $pkg 2>&1 | Out-Null
+          if (-not $installed) {
+            Get-Content pip-log.txt -Tail 15 | ForEach-Object { Write-Output "::error::pip: $_" }
+            throw 'pip install requirements-bundle 连续 3 次失败'
           }
-          # 自检：vendored 源码必须能在瘦身后完整导入（与 bridge.py 同一导入方式）
-          engine\python\python.exe -c "import sys; sys.path.insert(0, 'engine/vendor/musicdl'); from musicdl.modules import BuildMusicClient, SongInfo; print('VENDOR-OK')"
-          if ($LASTEXITCODE -ne 0) { throw 'vendored musicdl import check failed' }
+          # 自检：vendored 源码必须能完整导入（与 bridge.py 同一导入方式）
+          engine\python\python.exe -c "import sys; sys.path.insert(0, 'engine/vendor/musicdl'); from musicdl.modules import BuildMusicClient, SongInfo; print('VENDOR-OK')" > import-check.txt 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content import-check.txt -Tail 15 | ForEach-Object { Write-Output "::error::import: $_" }
+            throw 'vendored musicdl import check failed'
+          }
+          Get-Content import-check.txt
 
       - name: Package
         env:
