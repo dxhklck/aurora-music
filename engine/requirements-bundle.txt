@@ -9,7 +9,7 @@ cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.0
 colorama==0.4.6
-construct==2.8.8
+construct==2.8.10
 cryptography==46.0.7
 emoji==2.16.0
 fake-useragent==2.2.0
@@ -30,7 +30,6 @@ puremagic==2.2.0
 pycparser==3.12
 pycryptodome==3.23.0
 pycryptodomex==3.24.1
-pymp4==1.4.0
 pywidevine==1.9.0
 requests==2.34.2
 rich==14.3.4
