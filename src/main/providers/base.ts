@@ -6,6 +6,20 @@ import { sleep } from '../utils'
 export const DESKTOP_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
 
+/**
+ * 过滤「假的最终地址」。
+ *
+ * 移动端 CapacitorHttp 接管 window.fetch 后，重定向后的 response.url 会变成
+ * http://localhost/_capacitor_http_xxx（本地缓存/拦截地址），把它当最终地址
+ * 再送进媒体代理，Audio 必然 NotSupportedError（真机实锤：登录后所有走
+ * probe 的网易云歌曲都播不了）。这里只接受真正的外网 http(s) 地址。
+ */
+function sanitizeFinalUrl(candidate: string | undefined, fallback: string): string {
+  if (!candidate || !/^https?:\/\//i.test(candidate)) return fallback
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(candidate)) return fallback
+  return candidate
+}
+
 export interface ProbeResult {
   ok: boolean
   status: number
@@ -162,7 +176,7 @@ export abstract class BaseProvider implements MusicProvider {
       } catch {
         /* ignore */
       }
-      return { ok, status: response.status, contentType, size: length, finalUrl: response.url || url }
+      return { ok, status: response.status, contentType, size: length, finalUrl: sanitizeFinalUrl(response.url, url) }
     } catch {
       return { ok: false, status: 0, contentType: '', size: 0, finalUrl: url }
     } finally {

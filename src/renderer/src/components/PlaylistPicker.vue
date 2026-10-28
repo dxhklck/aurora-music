@@ -150,7 +150,7 @@ header {
   color: var(--text-3);
 }
 .close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--panel-strong);
   color: var(--text);
 }
 
@@ -172,7 +172,7 @@ header {
   transition: background 0.15s;
 }
 .option:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--panel-strong);
   color: var(--text);
 }
 .option:disabled {
@@ -202,7 +202,7 @@ header {
   height: 34px;
   padding: 0 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--panel);
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 12.5px;
@@ -210,6 +210,6 @@ header {
 }
 .create input:focus {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--panel-strong);
 }
 </style>

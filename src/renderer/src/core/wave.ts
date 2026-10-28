@@ -91,3 +91,6 @@ class WaveEngine {
 }
 
 export const wave = new WaveEngine()
+
+// 诊断用：开发者工具 / CDP 里能直接读 wave.freq() 判断 analyser 是否真的出数据
+;(window as unknown as { __wave?: WaveEngine }).__wave = wave

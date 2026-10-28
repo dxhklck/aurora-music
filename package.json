@@ -24,7 +24,9 @@
     "dist": "npm run engine:vendor && electron-vite build && electron-builder"
   },
   "dependencies": {
+    "@types/jsbn": "^1.2.33",
     "electron-updater": "^6.8.11",
+    "jsbn": "^1.1.0",
     "pinia": "3.0.4",
     "qrcode": "^1.5.4",
     "vue": "3.5.44",

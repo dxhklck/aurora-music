@@ -17,6 +17,7 @@ import {
   pollQrLogin,
   startQrLogin
 } from './services/qrlogin'
+import { loginCellphone, sendCaptcha } from './services/cellphone-login'
 import { musicdl } from './engine/musicdl'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
 import { checkForUpdate, installUpdate } from './updater'
@@ -253,6 +254,15 @@ export function registerIpc(): void {
   handle(IPC.qrLoginStart, (platform) => startQrLogin(platform))
   handle(IPC.qrLoginPoll, () => pollQrLogin())
   on(IPC.qrLoginCancel, () => cancelQrLogin())
+
+  // ---------- 手机号登录（网易云） ----------
+  // 成功路径里 service 自己写 settings 并 notifyLoginSuccess，这里的 onLoginSuccess
+  // 钩子负责让音源适配器即时看到新 Cookie 并广播设置变更（与扫码登录共用）
+  handle(
+    IPC.smsCaptchaSend,
+    (args: { phone: string; countrycode?: string }) => sendCaptcha(args.phone, args.countrycode)
+  )
+  handle(IPC.cellphoneLogin, (args) => loginCellphone(args))
 
   // ---------- 浏览器内登录 ----------
   handle(IPC.loginWindowOpen, (platform: 'qq' | 'netease') => openLoginWindow(platform))

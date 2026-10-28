@@ -115,7 +115,7 @@ export function getMainWindow(): BrowserWindow | null {
 /* ---------------- 迷你播放器模式 ---------------- */
 
 const NORMAL_SIZE = { width: 1320, height: 840, minWidth: 1024, minHeight: 660 }
-const MINI_SIZE = { width: 264, height: 64 }
+const MINI_SIZE = { width: 240, height: 56 }
 
 /** 把目标矩形纠正到最近显示器的可视区域内（换显示器/分辨率后防止窗口跑到屏外） */
 function clampRect(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
@@ -151,7 +151,7 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
     // 顺序敏感：先清掉旧上限（0,0 = 不限制），再设新的上下限——
     // 若先设 min 再改 max，min>max 的中间态会让 Windows 忽略 max 更新，展开时窗口会被 320 上限钳死
     win.setMaximumSize(0, 0)
-    win.setMinimumSize(240, 60)
+    win.setMinimumSize(224, 52)
     win.setMaximumSize(MINI_SIZE.width, MINI_SIZE.height)
     win.setAlwaysOnTop(true, 'floating')
     win.setResizable(false)
@@ -163,7 +163,7 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
     }
     // 顺序敏感（Windows 实测）：setResizable(false) 之后 setMaximumSize/setMinimumSize
     // 会被系统忽略，必须先恢复 resizable，再清最大尺寸锁（0,0 = 不限制）、设最小尺寸，
-    // 最后 setBounds——否则窗口永远钳在 264×64
+    // 最后 setBounds——否则窗口永远钳在 240×56
     win.setResizable(true)
     win.setMaximumSize(0, 0)
     win.setMinimumSize(NORMAL_SIZE.minWidth, NORMAL_SIZE.minHeight)

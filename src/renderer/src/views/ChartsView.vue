@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import type { ChartSummary } from '@shared/types'
-import ChartCard from '../components/ChartCard.vue'
+import ChartDotItem from '../components/ChartDotItem.vue'
 import Icon from '../components/Icon.vue'
 import { useAppStore } from '../stores/app'
 
@@ -13,6 +13,9 @@ const provider = computed(() => app.currentProvider)
 const supported = computed(() => provider.value?.capabilities.charts ?? false)
 
 const alternatives = computed(() => app.providers.filter((item) => item.capabilities.charts))
+
+/** 音源切换行：所有支持榜单的音源，点击即切换并重载 */
+const providerChips = alternatives
 
 async function load(): Promise<void> {
   loading.value = true
@@ -44,12 +47,26 @@ watch(() => app.platform, load)
       <span class="tag">{{ charts.length }} 个榜单</span>
     </header>
 
+    <div class="providers">
+      <button
+        v-for="item in providerChips"
+        :key="item.id"
+        class="p-chip"
+        :class="{ on: item.id === app.platform }"
+        :style="item.id === app.platform ? { borderColor: item.color } : undefined"
+        @click="switchTo(item.id)"
+      >
+        <i class="dot" :style="{ background: item.color }" />
+        {{ item.name }}
+      </button>
+    </div>
+
     <div v-if="loading" class="grid">
       <div v-for="i in 4" :key="i" class="skeleton card" style="height: 142px" />
     </div>
 
     <div v-else-if="charts.length" class="grid">
-      <ChartCard v-for="chart in charts" :key="chart.id" :chart="chart" />
+      <ChartDotItem v-for="chart in charts" :key="chart.id" :chart="chart" />
     </div>
 
     <div v-else class="empty-box">
@@ -100,10 +117,50 @@ watch(() => app.platform, load)
   color: var(--text-3);
 }
 
+.providers {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 18px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.providers::-webkit-scrollbar {
+  display: none;
+}
+.p-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--border);
+  transition: all 0.18s var(--ease);
+}
+.p-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.p-chip.on {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.09);
+  font-weight: 600;
+}
+.p-chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
 }
 
 .empty-box {

@@ -310,7 +310,7 @@ function qualityBadge(song: Song): string {
   height: 16px;
   border-radius: 5px;
   border: 1px solid var(--border-strong);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--panel);
   color: #fff;
   cursor: pointer;
   transition: all 0.15s var(--ease);
@@ -341,7 +341,7 @@ function qualityBadge(song: Song): string {
   cursor: default;
 }
 .row:hover {
-  background: rgba(255, 255, 255, 0.055);
+  background: var(--panel);
 }
 .row.playing {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -368,7 +368,7 @@ function qualityBadge(song: Song): string {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--border-strong);
   place-items: center;
 }
 .row:hover .num {
@@ -494,7 +494,7 @@ function qualityBadge(song: Song): string {
   letter-spacing: 0.6px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--panel-strong);
   color: var(--text-2);
 }
 
@@ -517,7 +517,7 @@ function qualityBadge(song: Song): string {
   color: var(--text-2);
 }
 .c-actions button:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--border-strong);
   color: var(--text);
 }
 
@@ -561,6 +561,58 @@ function qualityBadge(song: Song): string {
   }
   50% {
     opacity: 0.25;
+  }
+}
+
+/* ---------------- 移动端（≤640px）：行卡片布局 ----------------
+   隐藏序号/专辑/音源/大小列，歌名区独占 1fr 保证完整可读；
+   操作按钮常显（触屏没有 hover），时长保留。 */
+@media (max-width: 640px) {
+  .head {
+    display: none;
+  }
+
+  .row,
+  .row:has(.c-platform),
+  .row:has(.c-size) {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 8px;
+    padding: 9px 10px;
+  }
+  .table.selectable .row,
+  .table.selectable .row:has(.c-platform),
+  .table.selectable .row:has(.c-size) {
+    grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  }
+
+  .c-index,
+  .c-album,
+  .c-platform,
+  .c-size {
+    display: none;
+  }
+
+  .row:hover .num {
+    display: block;
+  }
+  .row:hover .play-mini {
+    display: none;
+  }
+
+  .c-title {
+    gap: 10px;
+  }
+
+  .c-actions {
+    opacity: 1;
+  }
+  .c-actions button {
+    width: 30px;
+    height: 30px;
+  }
+
+  .bulk {
+    flex-wrap: wrap;
   }
 }
 </style>

@@ -87,7 +87,10 @@ function keyOf(index: number): string {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);
-  background: rgba(18, 18, 26, 0.86);
+  /* 跟随深浅主题：--bg-elev 在浅色下是白色系，深色下是深色面板 */
+  background: var(--bg-elev);
+  backdrop-filter: blur(26px) saturate(1.4);
+  -webkit-backdrop-filter: blur(26px) saturate(1.4);
   overflow: hidden;
 }
 
@@ -122,10 +125,11 @@ function keyOf(index: number): string {
   transition: background 0.16s;
 }
 .item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--panel);
 }
 .item.playing .text strong {
-  color: color-mix(in srgb, var(--accent) 80%, #fff);
+  /* 混 text 而不是纯白：浅色主题下才不会糊成一片浅色 */
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
 }
 
 .idx {
@@ -204,7 +208,7 @@ function keyOf(index: number): string {
   opacity: 1;
 }
 .remove:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--panel-strong);
   color: var(--text);
 }
 

@@ -32,8 +32,8 @@ function expand(): void {
       <CoverArt
         :src="song?.coverUrl ?? null"
         :seed="song ? `${song.platform}:${song.id}` : 'aurora'"
-        :size="32"
-        :radius="8"
+        :size="28"
+        :radius="7"
         :song="song"
       />
     </div>
@@ -56,17 +56,17 @@ function expand(): void {
 
     <div class="controls no-drag">
       <button title="上一首" :disabled="!player.queue.length" @click="player.prev()">
-        <Icon name="prev" :size="11" />
+        <Icon name="prev" :size="10" />
       </button>
       <button class="play" :class="{ loading: player.loading || player.waiting }" @click="player.toggle()">
         <span v-if="player.loading || player.waiting" class="ring" />
-        <Icon v-else :name="player.playing ? 'pause' : 'play'" :size="11" />
+        <Icon v-else :name="player.playing ? 'pause' : 'play'" :size="10" />
       </button>
       <button title="下一首" :disabled="!player.queue.length" @click="player.next()">
-        <Icon name="next" :size="11" />
+        <Icon name="next" :size="10" />
       </button>
       <button class="expand" title="展开完整窗口" @click="expand">
-        <Icon name="expand" :size="10" />
+        <Icon name="expand" :size="9" />
       </button>
     </div>
   </div>
@@ -77,13 +77,13 @@ function expand(): void {
   height: 100vh;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 8px 0 6px;
+  gap: 6px;
+  padding: 0 6px 0 5px;
   /* 整个浮窗可拖动；按钮单独 no-drag */
   -webkit-app-region: drag;
   background:
     radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 55%),
-    linear-gradient(160deg, #12121a, #0a0a10);
+    linear-gradient(160deg, var(--bg-soft), var(--bg));
 }
 
 .cover {
@@ -96,7 +96,7 @@ function expand(): void {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .meta {
@@ -106,18 +106,18 @@ function expand(): void {
   min-width: 0;
 }
 .meta strong {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
 }
 .meta small {
-  font-size: 9px;
+  font-size: 8px;
   color: var(--text-3);
 }
 
 .progress {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   /* 进度条要能点击跳转，同样从拖拽区豁免 */
   -webkit-app-region: no-drag;
 }
@@ -126,7 +126,7 @@ function expand(): void {
 }
 .time {
   flex: none;
-  font-size: 9px;
+  font-size: 8px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -135,14 +135,14 @@ function expand(): void {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   /* 全局 .no-drag 只作用于 .titlebar，这里必须自己声明，否则拖拽区吞掉所有点击 */
   -webkit-app-region: no-drag;
 }
 .controls button {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   display: grid;
   place-items: center;
   color: var(--text-2);
@@ -156,8 +156,8 @@ function expand(): void {
   opacity: 0.35;
 }
 .controls .play {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
@@ -169,7 +169,7 @@ function expand(): void {
 }
 .controls .ring {
   position: absolute;
-  inset: 5px;
+  inset: 4px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.35);
   border-top-color: #fff;

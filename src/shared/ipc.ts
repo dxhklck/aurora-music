@@ -86,6 +86,10 @@ export const IPC = {
   qrLoginPoll: 'qrlogin:poll',
   qrLoginCancel: 'qrlogin:cancel',
 
+  // 手机号登录（网易云）：验证码发送 + 手机号（验证码/密码）登录
+  smsCaptchaSend: 'login:sms-captcha-send',
+  cellphoneLogin: 'login:cellphone',
+
   // 浏览器内登录：开一个应用内窗口加载平台官网，用户自己登录，主进程只取 Cookie
   loginWindowOpen: 'login-window:open',
   loginWindowClose: 'login-window:close',

@@ -87,6 +87,9 @@ const api: AuroraApi = {
   pollQrLogin: () => ipcRenderer.invoke(IPC.qrLoginPoll),
   cancelQrLogin: () => ipcRenderer.send(IPC.qrLoginCancel),
 
+  sendSmsCaptcha: (phone, countrycode) => ipcRenderer.invoke(IPC.smsCaptchaSend, { phone, countrycode }),
+  cellphoneLogin: (args) => ipcRenderer.invoke(IPC.cellphoneLogin, args),
+
   openLoginWindow: (platform) => ipcRenderer.invoke(IPC.loginWindowOpen, platform),
   closeLoginWindow: () => ipcRenderer.send(IPC.loginWindowClose),
   onLoginWindowResult: (cb) => {

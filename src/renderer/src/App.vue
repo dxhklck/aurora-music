@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import TitleBar from './components/TitleBar.vue'
 import SideBar from './components/SideBar.vue'
 import PlayerBar from './components/PlayerBar.vue'
+import BottomNav from './components/BottomNav.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
 import NowPlaying from './components/NowPlaying.vue'
 import QueueDrawer from './components/QueueDrawer.vue'
@@ -60,6 +61,13 @@ watch(isMini, (mini) => {
     player.showNowPlaying = false
     player.showQueue = false
   }
+})
+
+// 主题两档：dark / light，随设置变更同步到 <html data-theme>
+// （旧配置可能残留 'system'，兜底回深色）
+const resolvedTheme = computed(() => (app.settings?.themeMode === 'light' ? 'light' : 'dark'))
+watch(resolvedTheme, (theme) => {
+  document.documentElement.dataset.theme = theme
 })
 
 /** 托盘只关心歌名与播放状态；250ms 定时器里顺带比较，有变化才发 IPC */
@@ -151,6 +159,7 @@ onBeforeUnmount(() => {
         </router-view>
       </main>
       <PlayerBar />
+      <BottomNav />
     </template>
     <MiniPlayer v-else />
 
@@ -192,6 +201,26 @@ onBeforeUnmount(() => {
 }
 .playerbar {
   grid-area: 3 / 1 / 4 / 3;
+}
+.bottomnav {
+  grid-area: 3 / 1 / 4 / 3;
+}
+
+/* 移动端：标题栏/侧栏退场，内容 + 播放条 + 底部标签栏单列三行 */
+@media (max-width: 640px) {
+  .titlebar,
+  .sidebar {
+    display: none;
+  }
+  .page {
+    grid-area: 1 / 1 / 2 / 2;
+  }
+  .playerbar {
+    grid-area: 2 / 1 / 3 / 2;
+  }
+  .bottomnav {
+    grid-area: 3 / 1 / 4 / 2;
+  }
 }
 
 .source-notice {

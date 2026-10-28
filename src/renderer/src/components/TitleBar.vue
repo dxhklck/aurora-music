@@ -1,15 +1,29 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from './Icon.vue'
 import { useSearchStore } from '../stores/search'
 import { useAppStore } from '../stores/app'
+import type { ThemeMode } from '@shared/types'
 
 const router = useRouter()
 const search = useSearchStore()
 const app = useAppStore()
 const query = ref('')
 const maximized = ref(false)
+
+/** 主题两档循环切换：深色 → 浅色 */
+const THEME_ORDER: ThemeMode[] = ['dark', 'light']
+const THEME_META: Record<ThemeMode, { label: string; icon: string }> = {
+  dark: { label: '深色主题', icon: 'moon' },
+  light: { label: '浅色主题', icon: 'sun' }
+}
+const themeMode = computed<ThemeMode>(() => app.settings?.themeMode ?? 'dark')
+
+function cycleTheme(): void {
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(themeMode.value) + 1) % THEME_ORDER.length]
+  void app.patchSettings({ themeMode: next })
+}
 
 onMounted(async () => {
   maximized.value = await window.api.isMaximized()
@@ -44,8 +58,8 @@ function closeWindow(): void {
 }
 
 async function toggleDesktopLyric(): Promise<void> {
-  const opened = await window.api.toggleLyricWindow()
-  app.toast(opened ? '桌面歌词已开启（迷你单行，可切大字模式）' : '桌面歌词已关闭', 'info')
+  // 静默开关：不弹任何提示（歌词窗口自身的开启/关闭就是反馈）
+  await window.api.toggleLyricWindow()
 }
 </script>
 
@@ -74,6 +88,14 @@ async function toggleDesktopLyric(): Promise<void> {
     </div>
 
     <div class="spacer" />
+
+    <button
+      class="icon-btn no-drag"
+      :title="`主题：${THEME_META[themeMode].label}（点击切换）`"
+      @click="cycleTheme"
+    >
+      <Icon :name="THEME_META[themeMode].icon" :size="17" />
+    </button>
 
     <button class="icon-btn no-drag" title="桌面歌词" @click="toggleDesktopLyric">
       <Icon name="monitor" :size="18" />
@@ -173,7 +195,7 @@ async function toggleDesktopLyric(): Promise<void> {
   width: min(420px, 38vw);
   height: 32px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -183,7 +205,7 @@ async function toggleDesktopLyric(): Promise<void> {
   transition: all 0.2s var(--ease);
 }
 .search:focus-within {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--panel-strong);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--text-2);

@@ -2,7 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
-import ChartCard from '../components/ChartCard.vue'
+import ChartDotItem from '../components/ChartDotItem.vue'
+import VinylDisc from '../components/VinylDisc.vue'
 import SongTable from '../components/SongTable.vue'
 import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
@@ -185,12 +186,8 @@ watch(() => app.platform, loadCharts)
       </div>
 
       <div class="hero-visual">
-        <div class="orb orb-1" />
-        <div class="orb orb-2" />
-        <div class="vinyl-mini">
-          <div class="ring" />
-          <span>AURORA</span>
-        </div>
+        <!-- 黑胶：播放时才旋转，唱臂默认停在盘外（size=0 自适应容器） -->
+        <VinylDisc :size="0" />
       </div>
     </section>
 
@@ -207,7 +204,7 @@ watch(() => app.platform, loadCharts)
         <span class="tag">{{ provider?.name }}</span>
       </h2>
       <div class="chart-grid">
-        <ChartCard v-for="chart in charts" :key="chart.id" :chart="chart" />
+        <ChartDotItem v-for="chart in charts" :key="chart.id" :chart="chart" />
       </div>
     </template>
 
@@ -218,25 +215,6 @@ watch(() => app.platform, loadCharts)
       </h2>
       <SongTable :songs="recent" :show-album="false" empty-title="还没有播放记录" />
     </template>
-
-    <h2 class="section-title">能力一览</h2>
-    <div class="feature-grid">
-      <article class="card feature">
-        <span class="ficon"><Icon name="equalizer" :size="18" /></span>
-        <strong>多音源统一适配</strong>
-        <p>网易云 / QQ / 酷我 / 本地文件都实现同一个 MusicProvider 接口，运行时热切换。</p>
-      </article>
-      <article class="card feature">
-        <span class="ficon"><Icon name="download" :size="18" /></span>
-        <strong>可控下载队列</strong>
-        <p>并发 2、失败重试、断点续传、进度实时回传，完成后自动写入歌词与元数据。</p>
-      </article>
-      <article class="card feature">
-        <span class="ficon"><Icon name="lyrics" :size="18" /></span>
-        <strong>逐行歌词同步</strong>
-        <p>LRC 解析支持一行多时间戳、偏移与译文合并，rAF 平滑滚动，支持桌面歌词。</p>
-      </article>
-    </div>
 
     <div class="notice" v-if="provider?.note">
       <Icon name="clock" :size="14" />
@@ -264,7 +242,7 @@ watch(() => app.platform, loadCharts)
     rgba(255, 255, 255, 0.02) 60%
   );
   border: 1px solid var(--border);
-  min-height: 266px;
+  min-height: 300px;
 }
 
 .hero-glow {
@@ -345,75 +323,13 @@ watch(() => app.platform, loadCharts)
 
 .hero-visual {
   position: relative;
-  width: 260px;
-  height: 200px;
+  /* 明显放大：唱片尺寸由组件按容器短边自适应（0.9 比例） */
+  width: clamp(270px, 24vw, 380px);
+  height: clamp(210px, 19vw, 310px);
   display: grid;
   place-items: center;
   flex-shrink: 0;
-}
-
-.orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(16px);
-}
-.orb-1 {
-  width: 120px;
-  height: 120px;
-  left: 4px;
-  top: 22px;
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-  animation: floaty 7s ease-in-out infinite;
-}
-.orb-2 {
-  width: 86px;
-  height: 86px;
-  right: 14px;
-  bottom: 18px;
-  background: color-mix(in srgb, var(--accent-2) 50%, transparent);
-  animation: floaty 9s ease-in-out infinite reverse;
-}
-
-@keyframes floaty {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-14px);
-  }
-}
-
-.vinyl-mini {
-  position: relative;
-  width: 168px;
-  height: 168px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 40%, #1d1d27, #0a0a10 70%);
-  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.09);
-  display: grid;
-  place-items: center;
-  animation: turn 20s linear infinite;
-}
-.vinyl-mini .ring {
-  position: absolute;
-  inset: 12px;
-  border-radius: 50%;
-  background: repeating-radial-gradient(
-    circle at 50% 50%,
-    rgba(255, 255, 255, 0.05) 0 1px,
-    transparent 1px 5px
-  );
-}
-.vinyl-mini span {
-  font-size: 9px;
-  letter-spacing: 4px;
-  color: rgba(255, 255, 255, 0.25);
-}
-@keyframes turn {
-  to {
-    transform: rotate(360deg);
-  }
+  overflow: visible;
 }
 
 .chips {
@@ -443,8 +359,9 @@ watch(() => app.platform, loadCharts)
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
+  /* auto-fit + 最小列宽：榜单名一律单行完整显示，窄屏自动减少列数而不是挤压换行 */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px 12px;
 }
 
 .text-btn {
@@ -455,37 +372,6 @@ watch(() => app.platform, loadCharts)
 }
 .text-btn:hover {
   color: var(--text);
-}
-
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-}
-.feature {
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.ficon {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  color: color-mix(in srgb, var(--accent) 90%, #fff);
-  margin-bottom: 4px;
-}
-.feature strong {
-  font-size: 13.5px;
-}
-.feature p {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--text-3);
-  line-height: 1.7;
 }
 
 .notice {
@@ -506,6 +392,56 @@ watch(() => app.platform, loadCharts)
   }
   .hero h1 {
     font-size: 38px;
+  }
+}
+
+/* 手机规格：hero 收紧、按钮加大到 44px 触控、搜索胶囊可横滑 */
+@media (max-width: 640px) {
+  .hero {
+    padding: 24px 20px;
+    min-height: 0;
+    border-radius: 20px;
+  }
+  .eyebrow {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+  .hero h1 {
+    font-size: 30px;
+    margin: 10px 0 8px;
+  }
+  .hero p {
+    margin-bottom: 16px;
+    font-size: 12.5px;
+  }
+  .hero-actions .btn {
+    height: 44px;
+    flex: 1;
+    font-size: 14px;
+  }
+  .pills {
+    margin-top: 14px;
+    gap: 6px;
+  }
+  .chips {
+    margin-top: 14px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-right: -14px;
+    padding-right: 14px;
+  }
+  .chips::-webkit-scrollbar {
+    display: none;
+  }
+  .chip {
+    height: 38px;
+    padding: 0 15px;
+    font-size: 12.5px;
+    flex-shrink: 0;
+  }
+  .chart-grid {
+    gap: 4px 10px;
   }
 }
 </style>

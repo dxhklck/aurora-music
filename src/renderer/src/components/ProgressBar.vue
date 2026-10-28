@@ -76,7 +76,7 @@ function onLeave(): void {
   position: relative;
   width: 100%;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--panel-strong);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -93,7 +93,7 @@ function onLeave(): void {
   top: 0;
   bottom: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--border-strong);
 }
 
 .fill {

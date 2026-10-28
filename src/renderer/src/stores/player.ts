@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type { Lyric, PlayMode, Song } from '@shared/types'
 import { findLyricIndex } from '@shared/lyric'
 import { audio } from '../core/audio'
+import { bindNativeMediaControl, syncNativeMedia } from '../core/native-media'
 import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
@@ -54,6 +55,8 @@ export const usePlayerStore = defineStore('player', () => {
 
   let engineBound = false
   let volumeTimer: number | null = null
+  /** 原生媒体面板位置同步节流 */
+  let lastNativeSync = 0
   /** 连续播放失败计数：用于自动跳过损坏/无版权曲目，避免无限连跳 */
   let failureStreak = 0
   /** 停滞自愈进度：0 未发生 / 1 已同源重取 / 2 已跨源（同一首歌最多两段，防循环） */
@@ -90,12 +93,32 @@ export const usePlayerStore = defineStore('player', () => {
   function bindEngine(): void {
     if (engineBound) return
     engineBound = true
+    // C3：系统媒体控制（通知按钮/线控/蓝牙/锁屏拖动）→ 播放器动作（桌面 no-op）
+    bindNativeMediaControl({
+      toggle: () => void toggle(),
+      next: () => void next(),
+      prev: () => void prev(),
+      // 线控/蓝牙给的是明确意图，按当前状态收敛成幂等动作，
+      // 避免 toggle 语义在状态不同步时"按暂停变播放"
+      play: () => {
+        if (!playing.value) void toggle()
+      },
+      pause: () => {
+        if (playing.value) audio.pause()
+      },
+      seek: (ms) => seekTo(ms)
+    })
     audio.on('time', (value: number) => {
       time.value = value
       // 断点快照：5 秒一记，只在带标签的队列（首页榜单）下生效
       if (queueTag.value && Date.now() - lastResumeSave > 5000) {
         lastResumeSave = Date.now()
         saveResume()
+      }
+      // 原生通知栏进度条同步：5 秒一推，太频密会刷爆 bridge
+      if (Date.now() - lastNativeSync > 5000) {
+        lastNativeSync = Date.now()
+        syncPlaybackState(playing.value)
       }
     })
     audio.on('duration', (value: number) => {
@@ -350,6 +373,9 @@ export const usePlayerStore = defineStore('player', () => {
   function seekTo(ms: number): void {
     audio.seek(ms)
     time.value = ms
+    // 拖动后立即推一次位置，锁屏进度条跟手
+    lastNativeSync = Date.now()
+    syncPlaybackState(playing.value)
   }
 
   function setVolume(value: number): void {
@@ -417,6 +443,9 @@ export const usePlayerStore = defineStore('player', () => {
       navigator.mediaSession.setActionHandler('pause', () => void toggle())
       navigator.mediaSession.setActionHandler('nexttrack', () => void next())
       navigator.mediaSession.setActionHandler('previoustrack', () => void prev())
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime != null) seekTo(details.seekTime * 1000)
+      })
       syncPlaybackState(playing.value)
     } catch {
       /* 部分环境不支持 */
@@ -425,11 +454,24 @@ export const usePlayerStore = defineStore('player', () => {
 
   /** 把播放/暂停状态同步到系统媒体面板（不支持的浏览器是 no-op） */
   function syncPlaybackState(isPlaying: boolean): void {
-    if (!('mediaSession' in navigator)) return
-    try {
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
-    } catch {
-      /* ignore */
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
+      } catch {
+        /* ignore */
+      }
+    }
+    // C3：Android 原生前台服务通知（WebView 里 Web MediaSession 不可靠）
+    const song = displaySong.value
+    if (song) {
+      syncNativeMedia({
+        title: song.name,
+        artist: song.artists.join(' / '),
+        album: song.album ?? '',
+        cover: song.coverUrl ?? null,
+        playing: isPlaying,
+        positionMs: Math.round(time.value)
+      })
     }
   }
 

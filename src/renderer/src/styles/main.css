@@ -18,8 +18,72 @@
   --titlebar: 48px;
   --sidebar: 240px;
   --player: 92px;
+  --bottomnav: calc(60px + env(safe-area-inset-bottom, 0px));
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* 播放条/悬浮条底色（深浅主题各自给定） */
+  --bar-bg: rgba(16, 16, 24, 0.68);
+  /* 输入框底色 */
+  --input-bg: rgba(255, 255, 255, 0.055);
+  /* 桌面歌词配色（独立窗口，DesktopLyric.vue 消费） */
+  --ly-panel: linear-gradient(180deg, rgba(24, 24, 32, 0.86), rgba(10, 10, 14, 0.9));
+  --ly-panel-border: rgba(255, 255, 255, 0.1);
+  --ly-panel-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  --ly-fg: #ffffff;
+  --ly-fg-2: rgba(255, 255, 255, 0.78);
+  --ly-fg-3: rgba(255, 255, 255, 0.32);
+  --ly-ctrl-fg: rgba(255, 255, 255, 0.62);
+  --ly-ctrl-bg: rgba(255, 255, 255, 0.06);
+  --ly-ctrl-border: rgba(255, 255, 255, 0.14);
+  --ly-ctrl-hover-fg: #ffffff;
+  --ly-ctrl-hover-bg: rgba(255, 255, 255, 0.16);
+  --ly-tool-bg: rgba(0, 0, 0, 0.35);
+  --ly-tool-border: rgba(255, 255, 255, 0.12);
+  --ly-tool-hover-bg: rgba(0, 0, 0, 0.55);
+  --ly-line-1: #ffffff;
+  --ly-line-2: rgba(255, 255, 255, 0.72);
+  --ly-wbase: rgba(255, 255, 255, 0.28);
+  --ly-on: #ffd479;
+  --ly-glow: rgba(0, 0, 0, 0.65);
+  --ly-glow-soft: rgba(0, 0, 0, 0.5);
+}
+
+/* 浅色主题：只翻转中性色；强调色由当前音源的渐变色提供（App.vue shellStyle） */
+html[data-theme='light'] {
+  --bg: #f2f3f8;
+  --bg-soft: #e9ebf2;
+  --bg-elev: rgba(255, 255, 255, 0.86);
+  --panel: rgba(20, 24, 40, 0.05);
+  --panel-strong: rgba(20, 24, 40, 0.1);
+  --border: rgba(20, 24, 40, 0.12);
+  --border-strong: rgba(20, 24, 40, 0.22);
+  --text: #1c1f2a;
+  --text-2: rgba(28, 31, 42, 0.68);
+  --text-3: rgba(28, 31, 42, 0.42);
+  --shadow: 0 20px 48px rgba(30, 40, 70, 0.18);
+  --bar-bg: rgba(255, 255, 255, 0.82);
+  --input-bg: rgba(20, 24, 40, 0.06);
+  /* 桌面歌词浅色：面板转白、文字转深；歌词浮在壁纸上，用白色柔光兜底可读性 */
+  --ly-panel: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(243, 245, 250, 0.94));
+  --ly-panel-border: rgba(20, 24, 40, 0.12);
+  --ly-panel-shadow: 0 8px 26px rgba(30, 40, 70, 0.2);
+  --ly-fg: #1c1f2a;
+  --ly-fg-2: rgba(28, 31, 42, 0.72);
+  --ly-fg-3: rgba(28, 31, 42, 0.4);
+  --ly-ctrl-fg: rgba(28, 31, 42, 0.62);
+  --ly-ctrl-bg: rgba(20, 24, 40, 0.06);
+  --ly-ctrl-border: rgba(20, 24, 40, 0.14);
+  --ly-ctrl-hover-fg: #1c1f2a;
+  --ly-ctrl-hover-bg: rgba(20, 24, 40, 0.14);
+  --ly-tool-bg: rgba(255, 255, 255, 0.88);
+  --ly-tool-border: rgba(20, 24, 40, 0.14);
+  --ly-tool-hover-bg: rgba(255, 255, 255, 0.99);
+  --ly-line-1: #1c1f2a;
+  --ly-line-2: rgba(28, 31, 42, 0.72);
+  --ly-wbase: rgba(28, 31, 42, 0.25);
+  --ly-on: #b4791f;
+  --ly-glow: rgba(255, 255, 255, 0.85);
+  --ly-glow-soft: rgba(255, 255, 255, 0.7);
 }
 
 * {
@@ -41,6 +105,7 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* macOS：给原生红绿灯留出空间，隐藏自绘窗口按钮 */
@@ -109,6 +174,23 @@ a {
 /* 迷你播放器：放弃网格，独占整窗 */
 .shell.mini {
   display: block;
+}
+
+/* 移动端（Capacitor WebView / 窄窗口）：单列骨架，标题栏与侧栏退场，
+   底部标签栏 + 紧凑播放条（网格区域在 App.vue 的同名断点里重排） */
+@media (max-width: 640px) {
+  :root {
+    --titlebar: 0px;
+    --sidebar: 0px;
+    --player: 66px;
+  }
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) var(--player) var(--bottomnav);
+  }
+  .page {
+    padding: 12px 14px 20px;
+  }
 }
 
 .shell::before {

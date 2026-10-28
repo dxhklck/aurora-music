@@ -4,7 +4,8 @@ import { computed } from 'vue'
 const props = withDefaults(defineProps<{ name: string; size?: number }>(), { size: 20 })
 
 interface IconDef {
-  paths: string[]
+  /** 字符串 = 按图标级 fill/stroke 渲染；对象可单路径覆盖 fill（用于半填充图形） */
+  paths: Array<string | { d: string; fill?: boolean }>
   fill?: boolean
   circles?: Array<{ cx: number; cy: number; r: number }>
 }
@@ -54,6 +55,14 @@ const ICONS: Record<string, IconDef> = {
   trash: { paths: ['M5 7h14', 'M9 7V5h6v2', 'M7 7l1 12h8l1-12'], fill: false },
   refresh: { paths: ['M19 12a7 7 0 1 1-2.1-5', 'M19 4v5h-5'], fill: false },
   monitor: { paths: ['M4 5h16v11H4z', 'M9 20h6M12 16v4'], fill: false },
+  sun: {
+    paths: [
+      'M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z',
+      'M12 3v2M12 19v2M3 12h2M19 12h2M5.4 5.4l1.5 1.5M17.1 17.1l1.5 1.5M18.6 5.4l-1.5 1.5M6.9 17.1l-1.5 1.5'
+    ],
+    fill: false
+  },
+  moon: { paths: ['M20.2 13.6A8.2 8.2 0 1 1 10.4 3.8a6.6 6.6 0 0 0 9.8 9.8Z'], fill: false },
   plus: { paths: ['M12 5v14M5 12h14'], fill: false },
   mic: { paths: ['M12 4a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3Z', 'M6 11a6 6 0 0 0 12 0', 'M12 17v3'], fill: false },
   play_circle: { paths: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M10 8.5 16 12l-6 3.5z'], fill: false },
@@ -78,6 +87,11 @@ const def = computed<IconDef>(() => ICONS[props.name] ?? { paths: [] })
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path v-for="(path, i) in def.paths" :key="i" :d="path" />
+    <path
+      v-for="(path, i) in def.paths"
+      :key="i"
+      :d="typeof path === 'string' ? path : path.d"
+      :fill="typeof path === 'string' ? undefined : path.fill ? 'currentColor' : 'none'"
+    />
   </svg>
 </template>

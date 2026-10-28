@@ -6,7 +6,12 @@ import { useDownloadStore } from '../stores/download'
 import { useLibraryStore } from '../stores/library'
 import { formatBytes } from '@shared/lyric'
 import type { EngineStatusView, UpdateStatusView } from '@shared/api'
-import type { QrLoginPlatform, QrLoginState } from '@shared/types'
+import { type QrLoginPlatform, type QrLoginState } from '@shared/types'
+import type { NeteaseAccountInfo } from '@shared/types'
+import { isNativeMobile } from '../core/platform'
+
+/** 原生容器：扫码/网页弹窗登录依赖桌面能力，隐藏对应按钮 */
+const isNative = isNativeMobile()
 import type { Quality } from '@shared/types'
 
 const app = useAppStore()
@@ -152,9 +157,105 @@ async function saveCookie(platform: 'qq' | 'netease'): Promise<void> {
 async function clearCookie(platform: 'qq' | 'netease'): Promise<void> {
   if (platform === 'qq') qqDraft.value = ''
   else neteaseDraft.value = ''
-  await patch(platform === 'qq' ? { qqCookie: '' } : { neteaseCookie: '' })
+  await patch(
+    platform === 'qq' ? { qqCookie: '' } : { neteaseCookie: '', neteaseAccount: null }
+  )
   app.toast('已退出登录态', 'info')
 }
+
+/* ---------------- 手机号登录（网易云，移动端主登录方式） ---------------- */
+
+const neteaseAccount = computed<NeteaseAccountInfo | null>(() => settings.value?.neteaseAccount ?? null)
+
+const phoneVisible = ref(false)
+const phoneMode = ref<'captcha' | 'password'>('captcha')
+const phoneValue = ref('')
+const phoneCode = ref('')
+const phonePassword = ref('')
+const phoneBusy = ref(false)
+const phoneError = ref('')
+const captchaCountdown = ref(0)
+let captchaTimer = 0
+
+const phoneValid = computed(() => /^1\d{10}$/.test(phoneValue.value.trim()))
+const canSendCaptcha = computed(
+  () => phoneValid.value && captchaCountdown.value === 0 && !phoneBusy.value
+)
+const canSubmit = computed(
+  () =>
+    phoneValid.value &&
+    !phoneBusy.value &&
+    (phoneMode.value === 'password'
+      ? phonePassword.value.length >= 6
+      : /^\d{4,6}$/.test(phoneCode.value.trim()))
+)
+
+function openPhoneLogin(): void {
+  phoneError.value = ''
+  phoneCode.value = ''
+  phonePassword.value = ''
+  phoneVisible.value = true
+}
+
+function closePhoneLogin(): void {
+  phoneVisible.value = false
+  if (captchaTimer) window.clearInterval(captchaTimer)
+  captchaTimer = 0
+  captchaCountdown.value = 0
+}
+
+async function sendCaptcha(): Promise<void> {
+  if (!canSendCaptcha.value) return
+  phoneBusy.value = true
+  phoneError.value = ''
+  try {
+    const result = await window.api.sendSmsCaptcha(phoneValue.value.trim())
+    if (result.ok) {
+      app.toast(result.message, 'success')
+      captchaCountdown.value = 60
+      captchaTimer = window.setInterval(() => {
+        captchaCountdown.value = Math.max(0, captchaCountdown.value - 1)
+        if (captchaCountdown.value === 0 && captchaTimer) {
+          window.clearInterval(captchaTimer)
+          captchaTimer = 0
+        }
+      }, 1000)
+    } else {
+      phoneError.value = result.message
+    }
+  } catch (error) {
+    phoneError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    phoneBusy.value = false
+  }
+}
+
+async function submitPhoneLogin(): Promise<void> {
+  if (!canSubmit.value) return
+  phoneBusy.value = true
+  phoneError.value = ''
+  try {
+    const result = await window.api.cellphoneLogin({
+      phone: phoneValue.value.trim(),
+      captcha: phoneMode.value === 'captcha' ? phoneCode.value.trim() : undefined,
+      password: phoneMode.value === 'password' ? phonePassword.value : undefined
+    })
+    if (result.ok && result.account) {
+      closePhoneLogin()
+      app.toast(`${result.account.nickname || '网易云'}登录成功，立即生效`, 'success')
+    } else {
+      phoneError.value = result.message ?? '登录失败，请稍后重试'
+    }
+  } catch (error) {
+    phoneError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    phoneBusy.value = false
+  }
+}
+
+onBeforeUnmount(() => {
+  if (captchaTimer) window.clearInterval(captchaTimer)
+})
 
 /* ---------------- 扫码登录 ---------------- */
 
@@ -233,8 +334,15 @@ function closeQrLogin(): void {
 /* ---------------- 浏览器内登录 ---------------- */
 
 async function openBrowserLogin(platform: QrLoginPlatform): Promise<void> {
-  await window.api.openLoginWindow(platform)
-  app.toast('已打开登录窗口，在里面像平时一样登录即可', 'info')
+  try {
+    await window.api.openLoginWindow(platform)
+    // 移动端（android）：webLogin 返回即登录完成（Cookie 已抓取落库）；
+    // 桌面端只是打开了登录窗口，登录结果走 onLoginWindowResult 事件
+    if (window.api.platform === 'android') app.toast('登录成功，立即生效', 'success')
+    else app.toast('已打开登录窗口，在里面像平时一样登录即可', 'info')
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : '登录未完成', 'info')
+  }
 }
 
 /** 设计者 B 站主页直达：window.open 会被主进程转交系统浏览器（setWindowOpenHandler） */
@@ -278,7 +386,7 @@ onBeforeUnmount(() => {
         <h1>设置</h1>
         <p>音质、下载策略与 musicdl 引擎，改动即时生效并落盘</p>
       </div>
-      <span class="tag">v{{ '1.0.0' }}</span>
+      <span class="tag">v{{ update?.currentVersion || '…' }}</span>
     </header>
 
     <!-- 窗口行为 -->
@@ -417,81 +525,118 @@ onBeforeUnmount(() => {
         <div class="account-head">
           <strong>QQ 音乐</strong>
           <span class="state" :class="settings?.qqCookie ? 'ok' : 'bad'">
-            {{ settings?.qqCookie ? '已配置' : '未配置' }}
+            {{ settings?.qqCookie ? '已登录' : '未登录' }}
           </span>
         </div>
-        <textarea
-          v-model="qqDraft"
-          class="cookie"
-          rows="3"
-          spellcheck="false"
-          placeholder="整段 Cookie，例如：uin=o0123456789; qm_keyst=…; qqmusic_key=…"
-        ></textarea>
         <div class="account-actions">
-          <button class="btn" @click="openQrLogin('qq')">
+          <!-- 移动端无桌面扫码/网页登录弹窗，QQ 走应用内 WebView -->
+          <button v-if="!isNative" class="btn" @click="openQrLogin('qq')">
             <Icon name="qrcode" :size="14" /> 扫码登录
           </button>
           <button class="btn" @click="openBrowserLogin('qq')">
             <Icon name="monitor" :size="14" /> 浏览器登录
           </button>
-          <button class="btn ghost" :disabled="!qqDraft.trim()" @click="saveCookie('qq')">保存</button>
-          <button class="btn ghost" :disabled="!settings?.qqCookie" @click="clearCookie('qq')">清除</button>
-          <button class="btn ghost" @click="qqTip = !qqTip">
-            {{ qqTip ? '收起' : '怎么拿 Cookie？' }}
-          </button>
         </div>
-        <div v-if="qqTip" class="tip">
-          <ol>
-            <li>浏览器打开 <code>y.qq.com</code>，登录你的账号（VIP 权益随之生效）</li>
-            <li>按 <kbd>F12</kbd> 打开开发者工具，切到「网络 / Network」面板</li>
-            <li>刷新页面，点任意一条发往 <code>y.qq.com</code> 的请求</li>
-            <li>在「请求头 / Request Headers」里找到 <code>Cookie</code>，整段复制粘贴到上面</li>
-          </ol>
-          <p class="tiny">Cookie 会过期，失效后重新拿一次即可；点「清除」随时退出登录态。</p>
-        </div>
+        <details class="adv">
+          <summary>高级 · 粘贴 Cookie</summary>
+          <textarea
+            v-model="qqDraft"
+            class="cookie"
+            rows="3"
+            spellcheck="false"
+            placeholder="整段 Cookie，例如：uin=o0123456789; qm_keyst=…; qqmusic_key=…"
+          ></textarea>
+          <div class="account-actions">
+            <button class="btn ghost" :disabled="!qqDraft.trim()" @click="saveCookie('qq')">保存</button>
+            <button class="btn ghost" :disabled="!settings?.qqCookie" @click="clearCookie('qq')">清除</button>
+            <button class="btn ghost" @click="qqTip = !qqTip">
+              {{ qqTip ? '收起' : '怎么拿 Cookie？' }}
+            </button>
+          </div>
+          <div v-if="qqTip" class="tip">
+            <ol>
+              <li>浏览器打开 <code>y.qq.com</code>，登录你的账号（VIP 权益随之生效）</li>
+              <li>按 <kbd>F12</kbd> 打开开发者工具，切到「网络 / Network」面板</li>
+              <li>刷新页面，点任意一条发往 <code>y.qq.com</code> 的请求</li>
+              <li>在「请求头 / Request Headers」里找到 <code>Cookie</code>，整段复制粘贴到上面</li>
+            </ol>
+            <p class="tiny">Cookie 会过期，失效后重新拿一次即可；点「清除」随时退出登录态。</p>
+          </div>
+        </details>
       </div>
 
       <div class="account">
         <div class="account-head">
           <strong>网易云音乐</strong>
-          <span class="state" :class="settings?.neteaseCookie ? 'ok' : 'bad'">
-            {{ settings?.neteaseCookie ? '已配置' : '未配置' }}
+          <span class="state" :class="neteaseAccount ? 'ok' : 'bad'">
+            {{ neteaseAccount ? '已登录' : '未登录' }}
           </span>
         </div>
-        <textarea
-          v-model="neteaseDraft"
-          class="cookie"
-          rows="3"
-          spellcheck="false"
-          placeholder="整段 Cookie，例如：MUSIC_U=…; __remember_me=true"
-        ></textarea>
-        <div class="account-actions">
-          <button class="btn" @click="openQrLogin('netease')">
-            <Icon name="qrcode" :size="14" /> 扫码登录
-          </button>
-          <button class="btn" @click="openBrowserLogin('netease')">
-            <Icon name="monitor" :size="14" /> 浏览器登录
-          </button>
-          <button class="btn ghost" :disabled="!neteaseDraft.trim()" @click="saveCookie('netease')">保存</button>
-          <button class="btn ghost" :disabled="!settings?.neteaseCookie" @click="clearCookie('netease')">清除</button>
-          <button class="btn ghost" @click="neteaseTip = !neteaseTip">
-            {{ neteaseTip ? '收起' : '怎么拿 Cookie？' }}
-          </button>
+
+        <!-- 账号卡片：登录后展示 -->
+        <div v-if="neteaseAccount" class="profile-card">
+          <img
+            v-if="neteaseAccount.avatarUrl"
+            :src="neteaseAccount.avatarUrl"
+            class="avatar"
+            referrerpolicy="no-referrer"
+            alt=""
+          />
+          <span v-else class="avatar letter">{{ (neteaseAccount.nickname || '网').slice(0, 1) }}</span>
+          <div class="profile-meta">
+            <strong class="truncate">{{ neteaseAccount.nickname || `用户 ${neteaseAccount.userId}` }}</strong>
+            <small>{{ neteaseAccount.vipType > 0 ? 'VIP 会员 · 登录态生效中' : '登录态生效中 · VIP 曲目按平台规则解锁' }}</small>
+          </div>
+          <button class="btn ghost" @click="clearCookie('netease')">退出登录</button>
         </div>
-        <div v-if="neteaseTip" class="tip">
-          <ol>
-            <li>浏览器打开 <code>music.163.com</code>，登录你的账号</li>
-            <li>按 <kbd>F12</kbd> 打开开发者工具，切到「网络 / Network」面板</li>
-            <li>刷新页面，点任意一条请求（如 <code>music.163.com/weapi/…</code>）</li>
-            <li>复制请求头里的 <code>Cookie</code> 整段粘贴到上面</li>
-          </ol>
-          <p class="tiny">用于解锁无损 / Hi-Res 音质与 VIP 曲目；同样只保存在本机。</p>
-        </div>
+
+        <!-- 未登录：登录入口 -->
+        <template v-else>
+          <div class="account-actions">
+            <button class="btn primary" @click="openPhoneLogin">
+              <Icon name="lock" :size="14" /> 手机号登录
+            </button>
+            <!-- 移动端：扫码/网页登录依赖桌面能力，只保留手机号 + Cookie -->
+            <button v-if="!isNative" class="btn" @click="openQrLogin('netease')">
+              <Icon name="qrcode" :size="14" /> 扫码
+            </button>
+            <!-- 移动端：应用内 WebView 打开网易云官网，抓 MUSIC_U 登录态 -->
+            <button class="btn" @click="openBrowserLogin('netease')">
+              <Icon name="monitor" :size="14" /> 浏览器登录
+            </button>
+          </div>
+          <details class="adv">
+            <summary>高级 · 粘贴 Cookie</summary>
+            <textarea
+              v-model="neteaseDraft"
+              class="cookie"
+              rows="3"
+              spellcheck="false"
+              placeholder="整段 Cookie，例如：MUSIC_U=…; __remember_me=true"
+            ></textarea>
+            <div class="account-actions">
+              <button class="btn ghost" :disabled="!neteaseDraft.trim()" @click="saveCookie('netease')">保存</button>
+              <button class="btn ghost" :disabled="!settings?.neteaseCookie" @click="clearCookie('netease')">清除</button>
+              <button class="btn ghost" @click="neteaseTip = !neteaseTip">
+                {{ neteaseTip ? '收起' : '怎么拿 Cookie？' }}
+              </button>
+            </div>
+            <div v-if="neteaseTip" class="tip">
+              <ol>
+                <li>浏览器打开 <code>music.163.com</code>，登录你的账号</li>
+                <li>按 <kbd>F12</kbd> 打开开发者工具，切到「网络 / Network」面板</li>
+                <li>刷新页面，点任意一条请求（如 <code>music.163.com/weapi/…</code>）</li>
+                <li>复制请求头里的 <code>Cookie</code> 整段粘贴到上面</li>
+              </ol>
+              <p class="tiny">用于解锁无损 / Hi-Res 音质与 VIP 曲目；同样只保存在本机。</p>
+            </div>
+          </details>
+        </template>
       </div>
 
       <p class="hint">
-        不内置任何账号。扫码登录与粘贴 Cookie 等价——都是把你自己账号的登录态交给本机使用，
-        仅用于以你自己的权限访问各平台公开接口，随时可以清除。
+        不内置任何账号。手机号登录、扫码与粘贴 Cookie 等价——都是把你自己的登录态交给本机使用，
+        仅用于以你自己的权限访问各平台公开接口，随时可以退出。
       </p>
       <p class="hint">
         其余平台暂无登录入口：酷我搜索与取址走免 token 接口，匿名即可完整使用；
@@ -537,6 +682,69 @@ onBeforeUnmount(() => {
         <footer class="qr-foot">
           <button class="btn ghost" @click="closeQrLogin">取消</button>
         </footer>
+      </div>
+    </div>
+
+    <!-- 手机号登录弹层（网易云） -->
+    <div v-if="phoneVisible" class="qr-mask" @click.self="closePhoneLogin">
+      <div class="qr-card phone-card">
+        <header class="qr-head">
+          <strong>网易云音乐 · 手机号登录</strong>
+          <button class="icon-btn" aria-label="关闭" @click="closePhoneLogin">
+            <Icon name="close" :size="13" />
+          </button>
+        </header>
+        <div class="phone-body">
+          <div class="seg mode">
+            <button :class="{ on: phoneMode === 'captcha' }" @click="phoneMode = 'captcha'">
+              验证码登录
+            </button>
+            <button :class="{ on: phoneMode === 'password' }" @click="phoneMode = 'password'">
+              密码登录
+            </button>
+          </div>
+          <input
+            v-model="phoneValue"
+            class="phone-input"
+            type="tel"
+            inputmode="numeric"
+            autocomplete="tel"
+            maxlength="11"
+            placeholder="手机号"
+            @keydown.enter="submitPhoneLogin"
+          />
+          <div v-if="phoneMode === 'captcha'" class="code-row">
+            <input
+              v-model="phoneCode"
+              class="phone-input grow"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="6"
+              placeholder="验证码"
+              @keydown.enter="submitPhoneLogin"
+            />
+            <button class="btn send" :disabled="!canSendCaptcha" @click="sendCaptcha">
+              {{ captchaCountdown > 0 ? `${captchaCountdown}s 后重发` : '发送验证码' }}
+            </button>
+          </div>
+          <input
+            v-else
+            v-model="phonePassword"
+            class="phone-input"
+            type="password"
+            autocomplete="current-password"
+            placeholder="登录密码"
+            @keydown.enter="submitPhoneLogin"
+          />
+          <p v-if="phoneError" class="phone-error">{{ phoneError }}</p>
+          <button class="btn primary submit" :disabled="!canSubmit" @click="submitPhoneLogin">
+            {{ phoneBusy ? '登录中…' : '登录' }}
+          </button>
+          <p class="tiny">
+            验证码 / 密码只发往网易云官方接口，换取你本人的登录态；凭据只存本机，随时可退出。
+          </p>
+        </div>
       </div>
     </div>
 
@@ -625,36 +833,7 @@ onBeforeUnmount(() => {
       </p>
     </section>
 
-    <!-- 更新 -->
-    <section class="card block">
-      <div class="block-head">
-        <span class="ico"><Icon name="download" :size="15" /></span>
-        <div>
-          <strong>软件更新</strong>
-          <small v-if="update">
-            当前版本 v{{ update.currentVersion || '…' }}
-            <template v-if="!update.supported"> · 此环境不支持应用内更新，请到 GitHub Releases 下载</template>
-          </small>
-        </div>
-      </div>
-
-      <div class="row">
-        <button class="btn" :disabled="checkingUpdate" @click="checkUpdate">
-          {{ checkingUpdate ? '检查中…' : '检查更新' }}
-        </button>
-        <button v-if="update?.state === 'ready'" class="btn primary" @click="installUpdateNow">
-          重启并安装
-        </button>
-      </div>
-      <p v-if="updateText && update?.supported" class="hint" :class="{ error: update?.state === 'error' }">
-        {{ updateText }}
-      </p>
-      <p v-if="update && !update.supported" class="hint">
-        更新包发布在 GitHub Releases：github.com/dxhklck/aurora-music/releases
-      </p>
-    </section>
-
-    <!-- 关于 -->
+    <!-- 关于（含软件更新） -->
     <section class="card block about">
       <div class="block-head">
         <span class="ico"><Icon name="heart" :size="15" /></span>
@@ -670,10 +849,25 @@ onBeforeUnmount(() => {
           <strong>设计与开发 · 信息科技练老师</strong>
           <p>B 站知识分享 UP 主 · 零基础教学与效率工具教程</p>
         </div>
-        <button class="btn" @click="openBilibili">
-          <Icon name="play_circle" :size="14" /> 去 B 站找我
-        </button>
+        <div class="author-actions">
+          <button class="btn" @click="openBilibili">
+            <Icon name="play_circle" :size="14" /> 去 B 站找我
+          </button>
+          <button class="btn" :disabled="checkingUpdate" @click="checkUpdate">
+            <Icon name="download" :size="14" /> {{ checkingUpdate ? '检查中…' : '检查更新' }}
+          </button>
+          <button v-if="update?.state === 'ready'" class="btn primary" @click="installUpdateNow">
+            重启并安装
+          </button>
+        </div>
       </div>
+
+      <p v-if="update && !update.supported" class="hint update-hint">
+        此环境不支持应用内更新，请到 GitHub Releases 下载：github.com/dxhklck/aurora-music/releases
+      </p>
+      <p v-else-if="updateText" class="hint update-hint" :class="{ error: update?.state === 'error' }">
+        {{ updateText }}
+      </p>
 
       <p class="hint">
         本项目仅用于学习与技术研究：只访问各平台公开可访问的端点，不内置账号。
@@ -914,6 +1108,159 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+/* Cookie / 说明折叠区：把桌面式操作收进"高级"，移动端主界面保持干净 */
+.adv {
+  margin-top: 10px;
+}
+.adv summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-3);
+  padding: 6px 0;
+  user-select: none;
+}
+.adv summary:hover {
+  color: var(--text-2);
+}
+.adv[open] summary {
+  color: var(--text-2);
+}
+.adv .cookie {
+  margin-top: 4px;
+}
+
+/* 账号卡片：登录态展示（头像 / 昵称 / VIP / 退出） */
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.035);
+}
+.avatar {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--panel-strong);
+}
+.avatar.letter {
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #ec4141, #8b1a1a);
+}
+.profile-meta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.profile-meta strong {
+  font-size: 13px;
+}
+.profile-meta small {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* 手机号登录面板 */
+.phone-card {
+  width: min(92vw, 380px);
+}
+.phone-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+.phone-body .seg.mode button {
+  flex: 1;
+  height: 36px;
+}
+.phone-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-size: 15px;
+  transition: border-color 0.15s var(--ease);
+}
+.phone-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.phone-input::placeholder {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+.code-row {
+  display: flex;
+  gap: 8px;
+}
+.phone-input.grow {
+  flex: 1;
+  min-width: 0;
+}
+.code-row .send {
+  flex: none;
+  height: 46px;
+  padding: 0 14px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.phone-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff7b81;
+}
+.phone-body .submit {
+  height: 46px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.phone-body .tiny {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/* 移动端触控适配：面板变底部卡片、按钮加大 */
+@media (max-width: 640px) {
+  .qr-mask {
+    align-items: flex-end;
+  }
+  .phone-card,
+  .qr-card {
+    width: 100%;
+    max-width: none;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
+  }
+  .account-actions {
+    flex-wrap: wrap;
+  }
+  .account-actions .btn {
+    height: 40px;
+    padding: 0 14px;
+  }
+  .profile-card .btn {
+    height: 36px;
+  }
+}
+
 /* 扫码登录弹层 */
 .qr-mask {
   position: fixed;
@@ -1141,11 +1488,15 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   color: var(--text-3);
 }
+
 .hint.error {
   color: #ff7a7a;
 }
 .about .hint {
   margin-top: 8px;
+}
+.about .update-hint {
+  margin-top: 10px;
 }
 
 /* 设计者署名 */
@@ -1156,7 +1507,7 @@ onBeforeUnmount(() => {
   margin-top: 12px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--panel);
   border: 1px solid var(--border);
 }
 .avatar {
@@ -1188,5 +1539,22 @@ onBeforeUnmount(() => {
 }
 .author .btn {
   flex: none;
+  white-space: nowrap;
+}
+.author-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+/* 窄屏：按钮组换行，避免挤压作者信息 */
+@media (max-width: 720px) {
+  .author {
+    flex-wrap: wrap;
+  }
+  .author-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>

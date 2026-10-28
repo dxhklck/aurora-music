@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   desktopLyricMode: 'mini',
   nowPlayingStyle: 'vinyl',
   playerTheme: 'aurora',
+  themeMode: 'dark',
   downloadConcurrency: 2,
   downloadRetries: 3,
   writeTags: true,
@@ -25,6 +26,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   pythonPath: '',
   qqCookie: '',
   neteaseCookie: '',
+  neteaseAccount: null,
   miniMode: false,
   windowBounds: {}
 }

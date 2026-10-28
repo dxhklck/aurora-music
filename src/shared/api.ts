@@ -1,6 +1,8 @@
 /** 渲染进程专用：由主进程注入的 API 类型（与 preload 暴露的对象一一对应） */
 import type {
   AppSettings,
+  CellphoneLoginArgs,
+  CellphoneLoginResult,
   ChartSummary,
   DownloadTask,
   LibraryTrack,
@@ -139,6 +141,11 @@ export interface AuroraApi {
   pollQrLogin(): Promise<QrLoginState>
   /** 取消登录（关闭弹层） */
   cancelQrLogin(): void
+
+  /** 手机号登录：发送短信验证码 */
+  sendSmsCaptcha(phone: string, countrycode?: string): Promise<{ ok: boolean; message: string }>
+  /** 手机号登录：验证码或密码二选一，成功后 Cookie 与账号信息落库并广播 */
+  cellphoneLogin(args: CellphoneLoginArgs): Promise<CellphoneLoginResult>
 
   /** 浏览器内登录：打开官网登录窗口，登录成功后主进程自动取 Cookie 落库 */
   openLoginWindow(platform: QrLoginPlatform): Promise<{ opened: boolean }>

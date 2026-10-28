@@ -208,10 +208,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   color: var(--text);
   background: linear-gradient(
     100deg,
-    color-mix(in srgb, var(--accent) 26%, transparent),
-    rgba(255, 255, 255, 0.02)
+    color-mix(in srgb, var(--accent) 45%, transparent),
+    color-mix(in srgb, var(--accent) 12%, transparent)
   );
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .nav-item.active::before {

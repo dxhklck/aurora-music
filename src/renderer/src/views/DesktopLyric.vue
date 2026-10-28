@@ -4,6 +4,14 @@ import type { LyricLine } from '@shared/types'
 import Icon from '../components/Icon.vue'
 import { findLyricIndex } from '@shared/lyric'
 
+/**
+ * 桌面歌词是独立窗口（绕开 App.vue 单独 mount），主题不会自动跟随。
+ * 主进程的 broadcastSettings 会广播到所有窗口，这里订阅并同步 data-theme。
+ */
+function applyTheme(settings: { themeMode?: string } | null | undefined): void {
+  document.documentElement.dataset.theme = settings?.themeMode === 'light' ? 'light' : 'dark'
+}
+
 const lines = ref<LyricLine[]>([])
 const offset = ref(0)
 const playing = ref(false)
@@ -114,6 +122,10 @@ function smaller(): void {
 onMounted(async () => {
   const off = window.api.onLyricWindowState(onState)
   onBeforeUnmount(off)
+  // 设置变更（含主题切换）实时同步；启动时先取一次当前设置，避免开窗瞬间闪深色
+  const offSettings = window.api.onSettingsChanged((next) => applyTheme(next))
+  onBeforeUnmount(offSettings)
+  applyTheme(await window.api.getSettings())
   mode.value = await window.api.getLyricMode()
   raf = requestAnimationFrame(tick)
   document.body.classList.add('lyric-body')
@@ -244,6 +256,11 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 </template>
 
 <style scoped>
+/* ---------------- 配色 ----------------
+   桌面歌词窗口独立挂载，深浅两套调色板定义在全局 main.css
+   （:root 为深色默认，html[data-theme='light'] 覆盖），
+   此处只消费 --ly-* 变量，避免 scoped :global 组合选择器被编译丢失 */
+
 /* ---------------- 迷你条 ---------------- */
 .mini {
   height: 100vh;
@@ -263,9 +280,9 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   gap: 10px;
   padding: 0 12px;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(24, 24, 32, 0.86), rgba(10, 10, 14, 0.9));
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  background: var(--ly-panel);
+  border: 1px solid var(--ly-panel-border);
+  box-shadow: var(--ly-panel-shadow);
   backdrop-filter: blur(14px);
   overflow: hidden;
 }
@@ -278,19 +295,20 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--ly-fg);
+  background: var(--ly-ctrl-bg);
+  border: 1px solid var(--ly-ctrl-border);
   transition: background 0.15s, transform 0.15s;
   -webkit-app-region: no-drag;
 }
 .play:hover {
   background: var(--accent, #7c8cff);
+  color: #fff;
   transform: scale(1.04);
 }
 .play.static {
-  color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--ly-fg-3);
+  background: var(--ly-ctrl-bg);
 }
 
 .mini-line {
@@ -301,11 +319,11 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   font-weight: 700;
   letter-spacing: 0.4px;
   line-height: 1.2;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--ly-fg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 8px var(--ly-glow);
 }
 
 .mini-tools {
@@ -327,18 +345,18 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.62);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--ly-ctrl-fg);
+  background: var(--ly-ctrl-bg);
   border: 1px solid transparent;
   transition: all 0.15s;
 }
 .mini-tools button:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.16);
+  color: var(--ly-ctrl-hover-fg);
+  background: var(--ly-ctrl-hover-bg);
 }
 .mini-tools button.on {
-  color: #ffd479;
-  border-color: rgba(255, 212, 121, 0.35);
+  color: var(--ly-on);
+  border-color: color-mix(in srgb, var(--ly-on) 35%, transparent);
 }
 
 .mini-lock {
@@ -346,7 +364,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   display: inline-flex;
   align-items: center;
   padding-right: 2px;
-  color: rgba(255, 212, 121, 0.55);
+  color: color-mix(in srgb, var(--ly-on) 55%, transparent);
 }
 
 /* ---------------- 大字模式 ---------------- */
@@ -357,7 +375,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   justify-content: center;
   align-items: center;
   padding: 10px 26px;
-  color: #fff;
+  color: var(--ly-fg);
   background: transparent;
   border-radius: 18px;
   position: relative;
@@ -382,7 +400,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 }
 
 .grip {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--ly-fg-3);
   font-size: 12px;
   letter-spacing: 2px;
 }
@@ -406,19 +424,19 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   justify-content: center;
   border-radius: 7px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.72);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--ly-ctrl-fg);
+  background: var(--ly-tool-bg);
+  border: 1px solid var(--ly-tool-border);
   backdrop-filter: blur(8px);
   transition: all 0.15s;
 }
 .tools button:hover {
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  background: var(--ly-tool-hover-bg);
+  color: var(--ly-ctrl-hover-fg);
 }
 .tools button.on {
-  color: #ffd479;
-  border-color: rgba(255, 212, 121, 0.4);
+  color: var(--ly-on);
+  border-color: color-mix(in srgb, var(--ly-on) 40%, transparent);
 }
 
 .content {
@@ -436,12 +454,12 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   font-weight: 800;
   letter-spacing: 1px;
   line-height: 1.25;
-  background: linear-gradient(180deg, #fff 30%, rgba(255, 255, 255, 0.72));
+  background: linear-gradient(180deg, var(--ly-line-1) 30%, var(--ly-line-2));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.65);
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6));
+  text-shadow: 0 4px 24px var(--ly-glow);
+  filter: drop-shadow(0 2px 6px var(--ly-glow-soft));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -471,18 +489,18 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   font: inherit;
   letter-spacing: inherit;
   line-height: inherit;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6));
+  filter: drop-shadow(0 2px 6px var(--ly-glow-soft));
 }
 .w-base {
-  color: rgba(255, 255, 255, 0.28);
-  -webkit-text-fill-color: rgba(255, 255, 255, 0.28);
+  color: var(--ly-wbase);
+  -webkit-text-fill-color: var(--ly-wbase);
 }
 .w-fill {
   position: absolute;
   inset: 0;
-  color: #fff;
-  -webkit-text-fill-color: #fff;
-  text-shadow: 0 0 22px rgba(255, 255, 255, 0.45), 0 4px 20px rgba(0, 0, 0, 0.5);
+  color: var(--ly-line-1);
+  -webkit-text-fill-color: var(--ly-line-1);
+  text-shadow: 0 2px 10px var(--ly-glow-soft);
   clip-path: inset(0 100% 0 0);
 }
 .line.kara .w-fill,
@@ -498,15 +516,15 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 .trans {
   margin: 2px 0 0;
   font-size: calc(16px * var(--scale));
-  color: rgba(255, 255, 255, 0.78);
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+  color: var(--ly-fg-2);
+  text-shadow: 0 2px 10px var(--ly-glow);
 }
 
 .ghost {
   margin: 0;
   font-size: calc(15px * var(--scale));
-  color: rgba(255, 255, 255, 0.32);
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  color: var(--ly-fg-3);
+  text-shadow: 0 2px 8px var(--ly-glow);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -523,7 +541,8 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 .placeholder {
   margin: 0;
   font-size: 20px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--ly-fg-3);
+  text-shadow: 0 2px 10px var(--ly-glow);
 }
 
 .footer {
@@ -532,7 +551,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   display: flex;
   gap: 6px;
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--ly-fg-3);
   opacity: 0;
   transition: opacity 0.25s;
 }

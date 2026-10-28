@@ -208,6 +208,8 @@ export interface AppSettings {
   nowPlayingStyle: 'vinyl' | 'lyrics' | 'cover'
   /** 播放页炫彩皮肤：aurora 默认 / neon 流光 / ocean 碧海 / sunset 熔金 / galaxy 星河 */
   playerTheme: 'aurora' | 'neon' | 'ocean' | 'sunset' | 'galaxy'
+  /** 界面主题：dark 深色 / light 浅色（播放页始终深色沉浸式） */
+  themeMode: ThemeMode
   /** 同时下载的任务数（1-4） */
   downloadConcurrency: number
   /** 单个任务的最大尝试次数（1-5） */
@@ -224,19 +226,23 @@ export interface AppSettings {
   qqCookie: string
   /** 网易云音乐登录 Cookie（解锁无损音质与 VIP 曲目） */
   neteaseCookie: string
+  /** 网易云登录账号信息（手机号登录成功后写入；粘贴 Cookie 时为 null） */
+  neteaseAccount: NeteaseAccountInfo | null
   /** 迷你播放器模式：主窗口收缩为置顶小浮窗（封面 + 控制 + 细进度条） */
   miniMode: boolean
   /** 两种窗口形态各自的位置尺寸，切换时互写回存 */
   windowBounds: { normal?: WinRect; mini?: WinRect }
 }
 
+/** 界面主题两档 */
+export type ThemeMode = 'dark' | 'light'
+
 /** 窗口矩形（屏幕坐标） */
 export interface WinRect {
   x: number
   y: number
   width: number
-  height: number
-}
+  height: number}
 
 
 export interface ResolvedTrack {
@@ -281,4 +287,31 @@ export interface QrLoginState {
   message: string
   /** 过期时刻（ms，Date.now） */
   expiresAt: number
+}
+
+/* ---------------- 手机号登录（网易云） ---------------- */
+
+/** 登录成功后的账号摘要（设置页账号卡片展示用） */
+export interface NeteaseAccountInfo {
+  userId: number
+  nickname: string
+  avatarUrl: string
+  /** 0 = 普通账号，>0 = VIP（不同档位） */
+  vipType: number
+}
+
+export interface CellphoneLoginArgs {
+  phone: string
+  /** 国际区号，默认 86 */
+  countrycode?: string
+  /** 验证码登录（与 password 二选一） */
+  captcha?: string
+  /** 密码登录（明文传输到本进程后 md5，与 captcha 二选一） */
+  password?: string
+}
+
+export interface CellphoneLoginResult {
+  ok: boolean
+  account?: NeteaseAccountInfo
+  message?: string
 }

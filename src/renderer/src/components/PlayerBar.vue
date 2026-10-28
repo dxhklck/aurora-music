@@ -7,8 +7,12 @@ import { usePlayerStore } from '../stores/player'
 import { useDownloadStore } from '../stores/download'
 import { usePlaylistStore } from '../stores/playlists'
 import { formatDuration } from '@shared/lyric'
+import { isNativeMobile } from '../core/platform'
 
 const player = usePlayerStore()
+
+/** Capacitor 原生环境（Android/iOS）：音量走系统实体键，不显示软件音量控件 */
+const isNative = isNativeMobile()
 const download = useDownloadStore()
 const playlists = usePlaylistStore()
 
@@ -136,18 +140,21 @@ function setVolume(event: Event): void {
 
       <div class="right">
         <span v-if="player.streamLabel" class="quality">{{ player.streamLabel }}</span>
-        <button class="icon-btn" :title="player.muted ? '取消静音' : '静音'" @click="player.toggleMute()">
-          <Icon :name="player.muted || player.volume === 0 ? 'volume-mute' : 'volume-high'" :size="18" />
-        </button>
-        <input
-          class="volume"
-          type="range"
-          min="0"
-          max="100"
-          :value="Math.round(player.volume * 100)"
-          :style="{ '--vol': Math.round(player.volume * 100) + '%' }"
-          @input="setVolume"
-        />
+        <!-- 移动端（Capacitor 原生环境）音量交给系统实体键，控件只占底部栏空间 -->
+        <template v-if="!isNative">
+          <button class="icon-btn" :title="player.muted ? '取消静音' : '静音'" @click="player.toggleMute()">
+            <Icon :name="player.muted || player.volume === 0 ? 'volume-mute' : 'volume-high'" :size="18" />
+          </button>
+          <input
+            class="volume"
+            type="range"
+            min="0"
+            max="100"
+            :value="Math.round(player.volume * 100)"
+            :style="{ '--vol': Math.round(player.volume * 100) + '%' }"
+            @input="setVolume"
+          />
+        </template>
         <button
           class="icon-btn"
           :class="{ active: player.showNowPlaying }"
@@ -175,7 +182,7 @@ function setVolume(event: Event): void {
   gap: 12px;
   padding: 0 16px;
   box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.35);
-  background: rgba(16, 16, 24, 0.68);
+  background: var(--bar-bg);
 }
 
 .now {
@@ -239,13 +246,14 @@ function setVolume(event: Event): void {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(140deg, #fff, #d8d9e6);
-  color: #12121a;
+  /* 强调色渐变（与 MiniPlayer 播放键一致）：色板切换时这是最直观的变化点 */
+  background: linear-gradient(140deg, var(--accent), var(--accent-2));
+  color: #fff;
   display: grid;
   place-items: center;
   margin: 0 4px;
   transition: transform 0.15s var(--ease), box-shadow 0.2s;
-  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.16);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .play-btn:hover {
   transform: scale(1.06);
@@ -325,5 +333,56 @@ function setVolume(event: Event): void {
 }
 .volume:hover::-webkit-slider-thumb {
   opacity: 1;
+}
+
+/* 移动端：单行紧凑条——封面 + 歌名 + 上一首/播放/下一首 + 队列。
+   完整控制（进度/音质/音量/收藏等）都在点击封面展开的歌词舞台里 */
+@media (max-width: 640px) {
+  .playerbar {
+    padding: 0 8px 6px;
+  }
+  .pb {
+    height: calc(var(--player) - 8px);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 0 10px;
+    border-radius: 14px;
+  }
+  /* 点整行任意处展开歌词舞台（封面按钮原本就带这个行为） */
+  .now .icon-btn {
+    display: none;
+  }
+  .now {
+    gap: 10px;
+    cursor: pointer;
+  }
+  .center {
+    flex-direction: row;
+    gap: 0;
+  }
+  .timeline {
+    display: none;
+  }
+  .controls {
+    gap: 2px;
+  }
+  /* 播放模式按钮退场（模式切换在歌词舞台里） */
+  .controls .icon-btn:first-child {
+    display: none;
+  }
+  .controls .icon-btn {
+    width: 38px;
+    height: 38px;
+  }
+  .play-btn {
+    width: 42px;
+    height: 42px;
+  }
+  .meta strong {
+    font-size: 13px;
+  }
+  .meta p {
+    font-size: 11px;
+  }
 }
 </style>

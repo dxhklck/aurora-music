@@ -7,6 +7,10 @@ import ProgressBar from './ProgressBar.vue'
 import { usePlayerStore } from '../stores/player'
 import { useAppStore } from '../stores/app'
 import { audio } from '../core/audio'
+import { isNativeMobile } from '../core/platform'
+
+/** 原生容器（Android/iOS）：隐藏桌面专属入口 */
+const isNative = isNativeMobile()
 import { wave } from '../core/wave'
 import AudioWave from './AudioWave.vue'
 import { formatDuration } from '@shared/lyric'
@@ -85,14 +89,24 @@ function onKey(event: KeyboardEvent): void {
 }
 
 async function openDesktopLyric(): Promise<void> {
-  const opened = await window.api.toggleLyricWindow()
-  app.toast(opened ? '桌面歌词已开启' : '桌面歌词已关闭', 'info')
+  // 静默开关：不弹提示
+  await window.api.toggleLyricWindow()
 }
 
 let offResume: (() => void) | null = null
 
+/** 竖屏紧凑布局：原生容器或窄视口（桌面窗口拖窄同样适用） */
+const compact = ref(false)
+/** 紧凑布局下封面 / 歌词二选一（点封面区切换） */
+const mobilePane = ref<'cover' | 'lyric'>('lyric')
+function syncCompact(): void {
+  compact.value = isNative || window.innerWidth <= 640
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onKey)
+  syncCompact()
+  window.addEventListener('resize', syncCompact)
   // 音波可视化：舞台是挂接点（幂等），AudioContext 被系统挂起时靠播放事件唤醒
   wave.attach(audio.mediaEl)
   offResume = audio.on('playing', (isPlaying) => {
@@ -101,6 +115,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('resize', syncCompact)
   offResume?.()
   offResume = null
 })
@@ -133,7 +148,8 @@ onBeforeUnmount(() => {
         <button class="icon-btn" title="播放器样式" @click.stop="stylePanel = !stylePanel">
           <Icon name="equalizer" :size="18" />
         </button>
-        <button class="icon-btn" title="桌面歌词" @click="openDesktopLyric">
+        <!-- 桌面歌词依赖 Electron 多窗口，移动端无此能力 -->
+        <button v-if="!isNative" class="icon-btn" title="桌面歌词" @click="openDesktopLyric">
           <Icon name="monitor" :size="18" />
         </button>
       </div>
@@ -166,9 +182,49 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div class="stage-body" @click="stylePanel = false">
+    <div class="stage-body" :class="{ compact }" @click="stylePanel = false">
+      <!-- 竖屏手机：封面 / 歌词二选一（轻点切换），信息居中，控制坞固定底部 -->
+      <template v-if="compact">
+        <div class="m-hero" @click="mobilePane = mobilePane === 'cover' ? 'lyric' : 'cover'">
+          <transition name="m-pane" mode="out-in">
+            <div v-if="mobilePane === 'cover'" key="cover" class="m-cover">
+              <div
+                class="m-glow"
+                :style="backdrop ? { backgroundImage: `url(${backdrop})` } : {}"
+                aria-hidden="true"
+              />
+              <CoverArt
+                :src="song?.coverUrl ?? null"
+                :seed="seed"
+                :size="330"
+                :radius="26"
+                :song="song"
+              />
+              <span class="m-hint">轻点查看歌词</span>
+            </div>
+            <div v-else key="lyric" class="m-lyric">
+              <LyricPane :lyric="player.lyric" :loading="player.lyricLoading" @seek="player.seekTo" />
+              <span class="m-hint">轻点回到封面</span>
+            </div>
+          </transition>
+        </div>
+
+        <div class="m-meta">
+          <h1 class="truncate">{{ song?.name ?? '未在播放' }}</h1>
+          <p class="truncate">
+            {{ song ? song.artists.join(' / ') : 'Aurora Music' }}
+            <span v-if="song?.album" class="album">· {{ song.album }}</span>
+          </p>
+          <div class="chips">
+            <span v-if="song" class="chip">{{ song.platform.toUpperCase() }}</span>
+            <span v-if="player.streamLabel" class="chip">{{ player.streamLabel }}</span>
+            <span v-if="player.notice" class="chip warn">{{ player.notice }}</span>
+          </div>
+        </div>
+      </template>
+
       <!-- 歌词大屏：全屏大字歌词 -->
-      <template v-if="style === 'lyrics'">
+      <template v-else-if="style === 'lyrics'">
         <div class="track-info slim">
           <h1 class="truncate">{{ song?.name ?? '未在播放' }}</h1>
           <p class="truncate">
@@ -948,6 +1004,149 @@ onBeforeUnmount(() => {
   }
   .stage-dock {
     padding: 4px 30px 24px;
+  }
+}
+
+/* ---------------- 竖屏手机布局（原生容器 / 窄视口） ----------------
+   手机上横排双栏（唱片 + 侧边歌词）没法看：改成「封面/歌词二选一」
+   的大画面 + 居中信息 + 底部控制坞，触摸目标放大到 50/66px。 */
+.stage-body.compact {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 2px 20px 4px;
+  overflow: hidden;
+}
+
+.m-hero {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.m-cover,
+.m-lyric {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.m-glow {
+  position: absolute;
+  width: min(76vw, 320px);
+  height: min(76vw, 320px);
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(40px) saturate(1.5);
+  opacity: 0.38;
+  animation: m-breathe 6s ease-in-out infinite;
+}
+
+@keyframes m-breathe {
+  0%,
+  100% {
+    transform: scale(1.04);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.48;
+  }
+}
+
+.m-hint {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  opacity: 0.75;
+}
+
+.m-lyric {
+  padding: 2px 0 20px;
+}
+.m-lyric :deep(.lyric) {
+  height: 100%;
+}
+
+.m-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: center;
+  padding: 0 8px;
+}
+.m-meta h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.m-meta p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.m-meta .chips {
+  margin-top: 4px;
+}
+
+.m-pane-enter-active,
+.m-pane-leave-active {
+  transition:
+    opacity 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+.m-pane-enter-from {
+  opacity: 0;
+  transform: scale(0.97);
+}
+.m-pane-leave-to {
+  opacity: 0;
+  transform: scale(1.02);
+}
+
+@media (max-width: 640px) {
+  .stage-head {
+    height: 52px;
+    padding: 0 16px;
+  }
+  .stage-dock {
+    padding: 2px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+    gap: 12px;
+  }
+  .stage-progress {
+    width: 100%;
+  }
+  .times {
+    font-size: 11px;
+  }
+  .stage-controls {
+    gap: 16px;
+  }
+  .stage-controls .round {
+    width: 50px;
+    height: 50px;
+  }
+  .stage-controls .round.primary {
+    width: 66px;
+    height: 66px;
+  }
+  .stage-wave {
+    opacity: 0.45;
   }
 }
 </style>
