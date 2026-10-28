@@ -16,3 +16,13 @@ engine/.venv.broken-*
 
 # 工作区本地数据
 .workbuddy/
+
+# 移动端（Capacitor）工程与产物：体积大，暂不入库
+mobile/
+build/android/
+docs/android_migration_plan.md
+scripts/make_android_icons.py
+
+# Python 字节码
+__pycache__/
+*.pyc
