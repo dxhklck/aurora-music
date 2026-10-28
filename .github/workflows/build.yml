@@ -118,8 +118,15 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Upload installers to draft release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           generate_release_notes: true
+          # 先建草稿：资产传完再转正，避免「版本已可见但安装包还下不到」的瞬时 404
+          draft: true
+
+      - name: Publish release once all assets are attached
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false --latest
