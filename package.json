@@ -15,6 +15,7 @@
     "preview": "electron-vite preview",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
     "demo:audio": "node scripts/make-demo-audio.mjs",
+    "shots": "node scripts/shots.mjs",
     "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
     "selftest": "npm run build && node scripts/run-selftest.mjs",
     "test": "npm run test:unit",

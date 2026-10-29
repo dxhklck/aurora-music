@@ -13,9 +13,9 @@ release
 .workbuddy/
 
 # 移动端（Capacitor）工程与产物：体积大，暂不入库
+# 方案文档已归档到 docs/archive/android_migration_plan.md（入库存档）
 mobile/
 build/android/
-docs/android_migration_plan.md
 
 # TS 引擎验证脚本的临时产物
 scripts/engine-ts/.build/

@@ -1,6 +1,7 @@
 # Aurora Music 架构设计
 
 > 本文说明技术决策、分层边界、关键流程，以及从 `musicdl` 借鉴并改造的设计。
+> 对应版本：1.3.3 · 最后核对：2026-10-29 · 文档索引见 [README.md](./README.md)
 
 ## 1. 设计目标
 
@@ -91,13 +92,29 @@ lossless → exhigh → standard → 外链(128k)
 
 ### 4.4 跨平台换源
 
-`CatalogService.resolveTrack(song, autoSwitch)`：
+`CatalogService.resolveTrack(song, autoSwitch, forceSwitch)` 有三条入口：
 
-1. 原平台 `resolveStream`；
-2. 失败且允许换源 → 用**歌名**到其它支持播放的平台搜索（限 8 条）；
-3. 打分：歌名完全一致 +60、包含 +35、歌手匹配 +30、时长接近 +10、时长差 >30s −15；
-4. `score >= 70` 才接受，然后取地址；
-5. 返回 `{song: 替代曲目, stream, switchedFrom, notice}`，UI 顶部提示「已自动切换音源」。
+| 入口 | 触发 | 行为 |
+| --- | --- | --- |
+| 正常取址 | 播放/下载 | 先查取址缓存（5.1），再走原平台 `resolveStream` |
+| 原源失败 | `resolveStream` 抛错 | `autoSwitch` 为真时调 `findAlternative` |
+| 强制换源 | 音频流停滞 | **不读缓存**、跳过原平台，直接换源（重取大概率还是同一个 CDN） |
+
+`findAlternative` 的候选排序与放弃策略：
+
+1. 候选 = 其它支持播放的平台（`providers.streamCandidates`），按 **实测性价比**降序：
+   `成功率 ÷ 中位耗时`（`services/source-score.ts`，每源 20 条滑动窗口）。
+   两源分数差 `|Δ| ≤ 0.05` 时回落到「原生优先、引擎在后」，避免抖动把顺序变成随机；
+2. **熔断**：`network` / `parse` 类硬失败会让该平台进入退避（30 s 起、翻倍、封顶 5 min），
+   期间直接跳过。`blocked`（没版权）、`empty`、`unsupported` **不熔断**——那是「这首歌不行」，
+   不是「这个源坏了」。超时算软失败：记分但不熔断，慢不等于坏；
+3. 预算：总耗时 12 s；候选搜索超时 原生 8 s / 引擎 12 s；引擎源最多试 2 个
+   （单次引擎搜索可能几十秒，无节制遍历 15 个源会让「换源」变成「卡死」）；
+4. 打分（`pickBest`）：歌名完全一致 +60、包含 +35、歌手匹配 +30、时长接近 +10、时长差 >30 s −15，
+   **`score ≥ 70` 才接受**；
+5. 命中后取地址并写入缓存；返回 `{song, stream, switchedFrom, notice}`，UI 顶部提示「已自动切换音源」。
+
+> 顺序依赖是刻意的：**先验熔断、再算预算**。否则一个刚超时的源会在每首歌上都再等满 8 秒。
 
 ---
 
@@ -107,6 +124,17 @@ lossless → exhigh → standard → 外链(128k)
 
 `TtlCache`：TTL + 容量上限 + **in-flight 合并**。同一关键词被连续点击时只打一次上游。  
 搜索 3 分钟、榜单 10 分钟、歌词 30 分钟（未命中也缓存 5 分钟，避免反复追问 LRCLIB）。
+
+**取址缓存**单独一份（`catalog.ts` 的 `streamCache`，最多 80 条）。取一次播放地址要三趟往返
+（取 URL → probe 实测 → 嗅探封装），而「上一首 / 列表循环 / 拖动后重播」都会对同一首歌重复取址。
+
+| 项 | 取值 | 理由 |
+| --- | --- | --- |
+| 有效期 | `min(expiresAt − 60s, 现在 + 3min)` | 各 provider 早就算了 `expiresAt`，但 CDN 可能提前吊销签名；窗口越短越安全 |
+| 键 | `platform:id:quality` | 换音质必须重新取址 |
+| 作废 | `invalidateStream(song)` | **下载重试前必须调**，否则三次重试用同一个死链，必然全失败 |
+
+`forceSwitch`（流停滞）不读缓存；命中缓存时返回同一个对象（调用方只读，不复制）。
 
 ### 5.2 歌词管线
 
@@ -186,7 +214,7 @@ Aurora 自己实现了网易云/QQ/酷我（需要榜单与逐字歌词），剩
 ```
 
 **为什么不再用子进程**：早期版本通过 stdio NDJSON 桥接 Python 的 musicdl
-（完整记录见 [`engine-ts-migration.md`](./engine-ts-migration.md)）。那座桥有三项固定成本：
+（完整记录见 [`archive/engine-ts-migration.md`](./archive/engine-ts-migration.md)）。那座桥有三项固定成本：
 解释器冷启动 1.0s（外加 `import musicdl` 0.9s）、每条结果两次 JSON 编解码与跨进程拷贝、
 为拿到「逐首」粒度而加的 120ms 观察线程。进程内实现把三项一并去掉，
 最坏路径从 19~34s 降到 4~9s，首批结果从 3.0s 提前到 0.7s。
@@ -280,8 +308,39 @@ muse://local/?p=<encoded file path>                    → 本地文件
 
 - `transparent + frame:false + alwaysOnTop('screen-saver') + skipTaskbar`；
 - 默认按设置决定是否 `setIgnoreMouseEvents`（锁定=穿透）；
-- 主窗口 250ms 推送状态，子窗口用 `sentAt` 做 rAF 本地插值 → 60fps 平滑，不依赖 IPC 频率；
+- **按需推送**：主进程在歌词窗创建/销毁时给主窗口发 `{open}` / `{closed}`，主窗口据此开关 250 ms 推送。
+  窗口没开还每 250 ms 序列化整份歌词跨进程是纯白跑；
+- 子窗口用 `sentAt` 做 rAF 本地插值 → 60fps 平滑，不依赖 IPC 频率；
 - 双击窗口/点击关闭按钮之外的区域可拖动（`-webkit-app-region: drag`）。
+
+### 6.4 发布链路与自动更新
+
+```
+git tag v1.3.x ──▶ CI（三平台矩阵）
+                   ├ typecheck → 单测 → 引擎测试 → build
+                   ├ electron-builder 出 exe / dmg / AppImage
+                   └ 以 prerelease 上传 → 资产齐了再 PATCH 转正
+                                     │
+                     latest.yml + 安装包 ──▶ GitHub Release
+                                     │
+应用 ── 启动 30 s 后静默检查 ──▶ 渠道探测（直连 → 镜像列表，选定后本会话固定）
+     ── 有新版 → 自动下载 → 广播状态 → 设置页「重启并安装」
+```
+
+三个踩过的坑，都写进了代码注释：
+
+1. **产物名不能含空格**。`productName` 是 `Aurora Music`，早期 `artifactName` 引用它，
+   空格在「本地文件名 → latest.yml → GitHub 资产名 → 更新器拼 URL」这条链上被各环节规范化成
+   不同字符（GitHub 存成点号、更新器按连字符拼），必然 404。现固定为
+   `Aurora-Music-<version>-<arch>.<ext>`。
+2. **草稿 release 在 API 里几乎不可见**：`/releases/tags/<tag>` 对草稿恒返回 404，
+   所以「先建草稿、传完再转正」这条路走不通。改为先发 `prerelease`（真实 release，可查可改），
+   资产齐了再 `PATCH prerelease=false`。
+3. **开着「关闭到托盘」时 `quitAndInstall()` 会被自己的 close 处理器拦成「隐藏窗口」**，
+   安装器只能干等进程结束。安装前先调 `markQuitting()` 放行退出。
+
+范围刻意做小：仅 Windows 开启自动更新（NSIS 支持；macOS 未签名装不了更新包），
+失败静默；下载失败会附 `manualUrl`，设置页给「手动下载新版」入口。
 
 ---
 
@@ -395,15 +454,17 @@ MusicdlProvider.search → musicdl.searchStream / resolve / lyric / tag
 
 ## 10. 扩展点
 
-| 想做的事            | 改哪里                                                               |
-| --------------- | ----------------------------------------------------------------- |
-| 新增音源            | 实现 `MusicProvider` → `providers/index.ts` 注册一行；或直接在 `MUSICDL_SOURCES` 加一条复用引擎 |
-| 新增榜单            | 在对应 Provider 的 `charts()` / `chartDetail()` 里加定义                  |
-| 支持逐字歌词（YRC）   | 已完成：`parseYrc` + `LyricPane`/`DesktopLyric` 的 CSS calc+clamp clip-path 渐变 |
-| 播放均衡器/可视化       | `core/audio.ts` 接 `AudioContext`，UI 新增 `Visualizer.vue`           |
-| 下载并发/重试策略可配置    | 已完成：`settings.downloadConcurrency` / `downloadRetries`            |
-| 封面补全（酷我无封面）     | 已完成：`CoverService` 跨平台搜封面 + 24h 缓存 + 去后缀主干匹配                 |
-| 打包分发            | `electron-builder.yml`（已提供，`extraResources` 包含演示音频）               |
+| 想做的事 | 改哪里 |
+| --- | --- |
+| 新增音源 | 实现 `MusicProvider` → `providers/index.ts` 注册一行；或直接在 `MUSICDL_SOURCES` 加一条复用引擎 |
+| 新增榜单 | 在对应 Provider 的 `charts()` / `chartDetail()` 里加定义 |
+| 新增 IPC 能力 | 四处必须同步：`shared/ipc.ts` 常量 → `main/ipc.ts` 的 `handle()` → `preload/index.ts` 暴露 → `shared/api.ts` 声明。漏一处不会报错，只会在运行期 `undefined` |
+| 均衡器 / 可视化 | 已完成：`core/wave.ts` 在 source 与 gain 之间串 5 个 `BiquadFilter`；可视化是 `AudioWave.vue` 读 analyser |
+| 下载并发 / 重试策略 | 已完成：`settings.downloadConcurrency` / `downloadRetries` |
+| 封面补全（酷我无封面） | 已完成：`CoverService` 跨平台搜封面 + 24h 缓存 + 去后缀主干匹配 |
+| 新增音效（混响、压缩） | 接在 `wave.ts` 的 EQ 链尾部，注意 `analyser` 必须仍直连 source |
+| 重拍文档截图 | `npm run shots`（`scripts/shots.mjs`，用真实界面驱动，见 [README.md](README.md)） |
+| 打包分发 | `electron-builder.yml`（`extraResources` 只带 `resources/demo` 与图标） |
 
 ---
 
@@ -412,7 +473,7 @@ MusicdlProvider.search → musicdl.searchStream / resolve / lyric / tag
 1. 各平台接口为非官方公开端点，**可能随时变更**；失败时会明确报错并支持换源，但无法保证长期可用。
 2. QQ 音乐未登录时绝大多数曲目没有播放权限（`purl` 为空），实际播放依赖换源。
 3. 酷我搜索不返回封面、歌词接口需鉴权，因此封面用渐变占位、歌词走 LRCLIB。
-4. 已实现逐字歌词（网易云 YRC）；未实现音效均衡器（已在扩展点列出）。
+4. 逐字歌词（网易云 YRC、QQ QRC）与五段均衡器均已实现；EQ 的关闭方式是「增益归零」而非拆链。
 5. **引擎音源不依赖任何外部运行时**：15 个源全部在进程内用 TypeScript 实现，安装包不含 Python。
    代价是签名算法维护在自己手上，平台改版时要改 `engine/ts/sources`，
    没有「重新拉一次上游 wheel 就能修」的便利。
@@ -420,5 +481,7 @@ MusicdlProvider.search → musicdl.searchStream / resolve / lyric / tag
    已通过分页并行 + 逐首推送 + 缓存 + 并发去重压到可接受范围——首条 0.7~1.5s 可见，
    但整批完成仍需等这么久。要进一步提速需要改造搜索与解析的耦合。
 7. 部分引擎音源的歌词为空或只有纯文本，取决于平台是否返回。
-8. 本文 5.5 的行为描述以迁移后的 TS 实现为准；与旧 Python 版的逐源对拍基线见
-   [`engine-ts-parity-report.md`](./engine-ts-parity-report.md)（历史记录，不再更新）。
+8. 巡检实测（2026-10-29）：`wikimedia` 请求失败、`soundcloud` 超过 25s 未返回，其余 13 个源正常；
+   这类时效性结论只写在巡检结果（`userData/source-health.json`）与 README 里。
+9. 本文 5.5 的行为描述以迁移后的 TS 实现为准；与旧 Python 版的逐源对拍基线见
+   [`archive/engine-ts-parity-report.md`](./archive/engine-ts-parity-report.md)（历史记录，不再更新）。

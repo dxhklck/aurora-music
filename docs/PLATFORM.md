@@ -1,5 +1,7 @@
 # 跨平台支持说明
 
+> 对应版本：1.3.3 · 最后核对：2026-10-29 · 文档索引见 [README.md](./README.md)
+
 ## 一、结论
 
 | 平台 | 是否支持 | 原因 |
@@ -52,7 +54,11 @@ Electron 的运行时只有 Windows / macOS / Linux。Android 上没有 `Browser
 
 ### 如果确实要做 Android，三条现实路径
 
-1. **Capacitor + 原生插件（推荐，复用度最高）**
+> 前提说明：这条路的探索停在方案阶段——仓库里曾有的 Capacitor 依赖
+> （`@capacitor/core`、`@capacitor/filesystem`）与桥接代码已经移除，真要重启需要重新评估。
+> 完整方案见 [archive/android_migration_plan.md](archive/android_migration_plan.md)。
+
+1. **Capacitor + 原生插件（复用度最高）**
    - 直接复用 `renderer/`（Vue 组件、Pinia store、歌词时钟、渐变封面）；
    - 写 3 个插件：`http`（原生请求，绕过 CORS/Referer）、`player`（ExoPlayer + 媒体通知）、`files`（SAF 下载目录）；
    - 把 `providers/*.ts` 从主进程搬到 Web 层，用插件发请求；`DownloadManager` 改成调用原生下载；
@@ -74,7 +80,9 @@ Electron 的运行时只有 Windows / macOS / Linux。Android 上没有 `Browser
 1. **Wayland**：`transparent` + `always-on-top` + 鼠标穿透由合成器决定。GNOME/KDE 新版本基本可用，
    部分环境（如某些 Sway/Hyprland 配置）会出现歌词窗无法置顶。可用 `--ozone-platform=x11` 启动回退到 X11。
 2. **无 GPU 的环境**（容器 / 远程桌面）：需要 `--disable-gpu` 或 `--use-angle=swiftshader`。
-3. **系统托盘**：本项目未实现托盘，Linux 上关闭窗口即退出（与 Windows 行为一致）。
+3. **系统托盘**：三平台都实现了托盘，但 Linux 上能否显示取决于桌面环境
+   （GNOME 需要 AppIndicator 扩展，部分精简发行版默认没有）。托盘创建失败时 `trayReady` 为假，
+   「关闭到托盘」自动失效、点关闭即退出——这是刻意的降级，不是 bug。
 4. **打包**：AppImage 需要 `libfuse2`；deb 在 Debian/Ubuntu 系可直接安装。
 
 ---
