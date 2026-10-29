@@ -32,6 +32,11 @@ export const useSearchStore = defineStore('search', () => {
    */
   let activeStream = ''
   let unsubscribe: (() => void) | null = null
+  /**
+   * 搜索请求序号。连续回车 / 切音源会并发发出多个搜索，先发的可能后回来，
+   * 直接落地就会「关键词是 B、列表是 A」。每次 run 领号，回来时号变了就丢弃。
+   */
+  let runToken = 0
 
   function ensureSubscription(): void {
     if (unsubscribe) return
@@ -81,6 +86,7 @@ export const useSearchStore = defineStore('search', () => {
     results.value = []
     streaming.value = false
     ensureSubscription()
+    const token = (runToken += 1)
     activeStream = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     try {
       const result = await window.api.search({
@@ -90,6 +96,7 @@ export const useSearchStore = defineStore('search', () => {
         limit: app.settings?.searchLimit ?? 30,
         streamId: activeStream
       })
+      if (token !== runToken) return
       // 增量推送已经铺好了同样的歌，就别再整体替换——顺序跳变比顺序不完美更刺眼
       const incoming = result.items
       const current = results.value
@@ -102,17 +109,21 @@ export const useSearchStore = defineStore('search', () => {
       cost.value = result.cost ?? 0
       remember(q)
     } catch (err) {
+      if (token !== runToken) return
       error.value = friendlyError(err)
       results.value = []
     } finally {
-      activeStream = ''
-      loading.value = false
+      if (token === runToken) {
+        activeStream = ''
+        loading.value = false
+      }
     }
   }
 
   async function loadMore(): Promise<void> {
     if (!hasMore.value || loadingMore.value) return
     const app = useAppStore()
+    const token = runToken
     loadingMore.value = true
     try {
       const next = page.value + 1
@@ -122,8 +133,18 @@ export const useSearchStore = defineStore('search', () => {
         page: next,
         limit: app.settings?.searchLimit ?? 30
       })
+      // 翻页期间又搜了别的词/换了音源：这一页不属于当前结果集，丢弃
+      if (token !== runToken) return
       page.value = next
-      results.value = [...results.value, ...result.items]
+      // 补一页时按 platform:id 去重：平台翻页偶有重叠，直接拼接会出现重复行
+      const seen = new Set(results.value.map(keyOf))
+      const fresh = result.items.filter((song) => {
+        const key = keyOf(song)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      results.value = [...results.value, ...fresh]
       hasMore.value = result.hasMore
     } catch {
       /* 忽略分页错误 */
@@ -133,6 +154,7 @@ export const useSearchStore = defineStore('search', () => {
   }
 
   function reset(): void {
+    runToken += 1
     activeStream = ''
     results.value = []
     total.value = 0

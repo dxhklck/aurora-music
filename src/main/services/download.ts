@@ -212,7 +212,11 @@ class DownloadManager extends EventEmitter {
   private async run(task: InternalTask): Promise<void> {
     const maxAttempts = Math.max(1, Math.min(settings.get().downloadRetries ?? 3, 5))
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      if (task.status === 'canceled') return
+      // 退避等待期间被取消：这里也要清掉 .part，否则磁盘上会留下一个永远没人接管的半截文件
+      if (task.status === 'canceled') {
+        await safeUnlink(task.partPath ?? '')
+        return
+      }
       task.attempt = attempt
       task.status = 'downloading'
       task.error = undefined

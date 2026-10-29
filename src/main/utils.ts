@@ -76,12 +76,25 @@ const NAMED_ENTITIES: Record<string, string> = {
   nbsp: ' '
 }
 
+/**
+ * 码点转字符。上游偶尔给出越界值（`&#x110000;`），`String.fromCodePoint` 会抛 RangeError，
+ * 而这个函数跑在解析搜索结果的主路径上——一个脏实体就能把整次搜索打挂，所以兜住。
+ */
+function fromCodePointSafe(code: number): string {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return ''
+  try {
+    return String.fromCodePoint(code)
+  } catch {
+    return ''
+  }
+}
+
 /** 平台接口大量使用 HTML 实体（酷我 &nbsp;、QQ &#58;），统一还原 */
 export function decodeHtml(input: string): string {
   if (!input) return ''
   return input
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => fromCodePointSafe(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => fromCodePointSafe(Number(dec)))
     .replace(/&([a-z]+);/gi, (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match)
 }
 

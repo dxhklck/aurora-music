@@ -314,6 +314,9 @@ export function registerIpc(): void {
 
 function broadcastSettings(next: AppSettings): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(IPC.settingsChanged, next)
+    // getAllWindows 拿到的窗口可能在遍历途中正在销毁（关窗瞬间触发设置写入）
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(IPC.settingsChanged, next)
+    }
   }
 }

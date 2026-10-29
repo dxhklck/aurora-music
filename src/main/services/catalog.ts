@@ -15,6 +15,15 @@ import { settings } from './settings'
 const searchCache = new TtlCache<SearchPage>(3 * 60_000, 120)
 const chartCache = new TtlCache<SearchPage>(10 * 60_000, 60)
 
+/**
+ * 增量结果订阅者（按搜索 key 分组）。
+ *
+ * 缓存层会把同一 key 的并发请求合并成一次上游调用，但「谁在等」是多个调用方——
+ * 直接把第一个调用方的 onPartial 塞进 factory，第二个调用方就收不到任何增量，
+ * 页面会一直空着直到整批完成。这里按 key 维护订阅者集合，由 factory 统一广播。
+ */
+const partialListeners = new Map<string, Set<(items: Song[]) => void>>()
+
 export interface SearchInput {
   platform: string
   keyword: string
@@ -52,19 +61,44 @@ class CatalogService {
     const size = Math.min(Math.max(limit ?? settings.get().searchLimit, 1), 50)
     const key = `search:${platform}:${trimmed}:${page}:${size}`
     const started = Date.now()
-    const result = await searchCache.wrap(
-      key,
-      async () => {
-        const provider = providers.get(platform)
-        if (!provider.info.capabilities.search) {
-          throw new ProviderError('unsupported', `${provider.info.name} 不支持搜索`, platform)
+    if (onPartial) {
+      const listeners = partialListeners.get(key) ?? new Set()
+      listeners.add(onPartial)
+      partialListeners.set(key, listeners)
+    }
+    try {
+      const result = await searchCache.wrap(
+        key,
+        async () => {
+          const provider = providers.get(platform)
+          if (!provider.info.capabilities.search) {
+            throw new ProviderError('unsupported', `${provider.info.name} 不支持搜索`, platform)
+          }
+          return provider.search({
+            keyword: trimmed,
+            page,
+            limit: size,
+            onPartial: (items) => {
+              // 用 key 现查订阅者：factory 可能是上一个调用方创建的，不能闭包捕获某个回调
+              const listeners = partialListeners.get(key)
+              if (!listeners) return
+              for (const listener of listeners) listener(items)
+            }
+          })
+        },
+        // 引擎音源一次搜索要 5-10 秒，缓存短了等于每次都在等
+        platform.startsWith('mdl-') ? 10 * 60_000 : undefined
+      )
+      return { ...result, cost: Date.now() - started }
+    } finally {
+      if (onPartial) {
+        const listeners = partialListeners.get(key)
+        if (listeners) {
+          listeners.delete(onPartial)
+          if (!listeners.size) partialListeners.delete(key)
         }
-        return provider.search({ keyword: trimmed, page, limit: size, onPartial })
-      },
-      // 引擎音源一次搜索要 5-10 秒，缓存短了等于每次都在等
-      platform.startsWith('mdl-') ? 10 * 60_000 : undefined
-    )
-    return { ...result, cost: Date.now() - started }
+      }
+    }
   }
 
   async charts(platform: string): Promise<ChartSummary[]> {

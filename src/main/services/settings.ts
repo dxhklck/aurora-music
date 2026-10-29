@@ -34,6 +34,11 @@ const DEFAULT_SETTINGS: AppSettings = {
 class SettingsService {
   private filePath = ''
   private cache: AppSettings = { ...DEFAULT_SETTINGS }
+  /**
+   * 落盘串行队列。两次并发 set（例如「改迷你模式」与「窗口位置回写」几乎同时发生）
+   * 会抢同一个 .tmp 文件：先完成的 rename 把后一个的 tmp 移走，后者 rename 直接 ENOENT。
+   */
+  private writing: Promise<void> = Promise.resolve()
 
   async init(userDataDir: string, defaultDownloadDir: string): Promise<AppSettings> {
     this.filePath = join(userDataDir, 'settings.json')
@@ -57,11 +62,20 @@ class SettingsService {
   async set(patch: Partial<AppSettings>): Promise<AppSettings> {
     this.cache = { ...this.cache, ...patch }
     if (this.filePath) {
-      const tmp = `${this.filePath}.tmp`
-      await writeFile(tmp, JSON.stringify(this.cache, null, 2), 'utf8')
-      await rename(tmp, this.filePath)
+      // 快照必须在排队前取：串行执行时用的应是「调用那一刻」的完整状态
+      const snapshot = JSON.stringify(this.cache, null, 2)
+      const run = this.writing.then(() => this.writeSnapshot(snapshot))
+      // 队列本身要吃掉失败，否则一次写盘错误会让后续所有 set 全部连带 reject
+      this.writing = run.catch(() => undefined)
+      await run
     }
     return this.get()
+  }
+
+  private async writeSnapshot(payload: string): Promise<void> {
+    const tmp = `${this.filePath}.tmp`
+    await writeFile(tmp, payload, 'utf8')
+    await rename(tmp, this.filePath)
   }
 }
 

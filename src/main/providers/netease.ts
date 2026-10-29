@@ -278,11 +278,17 @@ export class NeteaseProvider extends BaseProvider {
         headers: { ...this.baseHeaders(), Range: 'bytes=0-3', Referer: this.referer },
         signal: AbortSignal.timeout(8_000)
       })
-      const magic = Buffer.from(await response.arrayBuffer()).toString('latin1')
-      try {
-        await response.body?.cancel()
-      } catch {
-        /* ignore */
+      // 只读 4 字节后立刻断开。用 arrayBuffer() 的话，CDN 一旦忽略 Range
+      // 就会把整首无损（30MB+）拖下来才返回——播放一首歌白付一次全量带宽。
+      const reader = response.body?.getReader()
+      let magic = ''
+      if (reader) {
+        try {
+          const { value } = await reader.read()
+          if (value) magic = Buffer.from(value.subarray(0, 4)).toString('latin1')
+        } finally {
+          await reader.cancel().catch(() => undefined)
+        }
       }
       if (magic.startsWith('fLaC')) return 'flac'
       if (magic.startsWith('ID3') || magic.charCodeAt(0) === 0xff) return 'mp3'
