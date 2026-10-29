@@ -11,6 +11,7 @@ import { providers } from '../providers'
 import { ProviderError } from '../providers/types'
 import { TtlCache } from './cache'
 import { settings } from './settings'
+import { SourceScoreboard } from './source-score'
 
 const searchCache = new TtlCache<SearchPage>(3 * 60_000, 120)
 const chartCache = new TtlCache<SearchPage>(10 * 60_000, 60)
@@ -51,6 +52,12 @@ const breaker = new Map<string, { fails: number; until: number }>()
 const BREAKER_BASE = 30_000
 const BREAKER_MAX = 5 * 60_000
 
+/**
+ * 换源顺序的实测依据：每个源记「耗时 + 成没成」，换源时按性价比排序。
+ * 没有它就只能按固定的「原生优先、引擎在后」猜。
+ */
+const scoreboard = new SourceScoreboard()
+
 export interface SearchInput {
   platform: string
   keyword: string
@@ -66,13 +73,15 @@ function normalize(text: string): string {
     .replace(/[\s\-_（）()【】[\]·,，.。'’!！?？]/g, '')
 }
 
-/** 给「换源」这种可放弃的尝试加个硬超时，超时返回 null 而不是一直挂着 */
+/**
+ * 给「换源」这种可放弃的尝试加个硬超时：超时返回 null（软失败，不熔断），
+ * 但请求本身报错要往外抛——那是硬失败，调用方据此熔断这个源。
+ */
 function withTimeout<T>(task: Promise<T>, ms: number): Promise<T | null> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const timer = setTimeout(() => resolve(null), ms)
     task
-      .then((value) => resolve(value))
-      .catch(() => resolve(null))
+      .then((value) => resolve(value), (error) => reject(error))
       .finally(() => clearTimeout(timer))
   })
 }
@@ -166,10 +175,16 @@ class CatalogService {
       }
       throw new ProviderError('network', '停滞重试失败：其它音源也没有找到可播放的版本')
     }
+    const started = Date.now()
     try {
       const stream = await provider.resolveStream(song, quality)
+      scoreboard.record(provider.info.id, Date.now() - started, true)
       return this.rememberStream(cacheKey, { song, stream })
     } catch (error) {
+      // 只有传输/解析类失败才拉低分数；没版权（blocked）是「这首歌」的问题，不是源的
+      if (error instanceof ProviderError && (error.code === 'network' || error.code === 'parse')) {
+        scoreboard.record(provider.info.id, Date.now() - started, false)
+      }
       if (!autoSwitch) throw this.normalizeError(error, provider.info.name)
       const alternative = await this.findAlternative(song, quality)
       if (!alternative) throw this.normalizeError(error, provider.info.name)
@@ -252,31 +267,47 @@ class CatalogService {
     // 引擎单次搜索可能几十秒，无节制地遍历 15 个源会让「换源」变成「卡死」。
     const candidates = providers
       .streamCandidates(song.platform)
-      .sort((a, b) => Number(a.info.id.startsWith('mdl-')) - Number(b.info.id.startsWith('mdl-')))
+      .filter((candidate) => candidate.info.capabilities.search)
+      .sort((a, b) => {
+        // 先按实测性价比（成功率 ÷ 中位耗时）；分数接近时回到「原生优先、引擎在后」。
+        // 加死区是为了避免两个源分数抖动时来回换顺序，把结果变成随机。
+        const diff = scoreboard.score(b.info.id) - scoreboard.score(a.info.id)
+        if (Math.abs(diff) > 0.05) return diff
+        return Number(a.info.id.startsWith('mdl-')) - Number(b.info.id.startsWith('mdl-'))
+      })
     const deadline = Date.now() + 12_000
     let engineTried = 0
 
     for (const candidate of candidates) {
-      if (!candidate.info.capabilities.search) continue
       const isEngine = candidate.info.id.startsWith('mdl-')
       if (isEngine && engineTried >= 2) continue
       // 刚失败过的平台直接跳过：换源最怕的不是找不到，而是在一个死源上等满超时
       if (this.isTripped(candidate.info.id)) continue
       if (Date.now() > deadline) break
       if (isEngine) engineTried += 1
+      const started = Date.now()
       try {
         const page = await withTimeout(
           candidate.search({ keyword, page: 1, limit: isEngine ? 5 : 8 }),
           isEngine ? 12_000 : 8_000
         )
-        // 超时（null）不算平台坏了：只说明这次慢，下次还给它机会
-        if (!page) continue
+        // 超时：记进评分（它确实拖慢了换源），但不熔断——可能只是这次慢
+        if (!page) {
+          scoreboard.record(candidate.info.id, Date.now() - started, false)
+          continue
+        }
         const match = this.pickBest(song, page.items)
-        if (!match) continue
+        // 搜到了但没匹配上，算「没命中」：这正是命中率要反映的东西
+        if (!match) {
+          scoreboard.record(candidate.info.id, Date.now() - started, false)
+          continue
+        }
         const stream = await candidate.resolveStream(match, quality)
+        scoreboard.record(candidate.info.id, Date.now() - started, true)
         breaker.delete(candidate.info.id)
         return { song: match, stream }
       } catch (error) {
+        scoreboard.record(candidate.info.id, Date.now() - started, false)
         // 只有传输/解析层面的失败才熔断。blocked（没版权）、empty、unsupported 都是
         // 「这首歌不行」，熔断它们等于因为一首 VIP 歌把整个平台拉黑
         if (error instanceof ProviderError && (error.code === 'network' || error.code === 'parse')) {
