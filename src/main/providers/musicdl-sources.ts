@@ -1,7 +1,7 @@
 /**
  * musicdl 引擎音源清单（纯数据，无任何 Node 依赖）。
  *
- * 拆出独立文件的动机：Android 桥（renderer/bridge/mobile.ts）要复用这份
+ * 拆出独立文件的动机：音源清单是纯数据，多端复用时无需引入整个 Provider 实现
  * 清单注册引擎音源，而 musicdl.ts 引着 subprocess 引擎运行时
  * （node:child_process / electron）——那些进不了 WebView。
  * 桌面版与移动端共用同一份事实来源，改这里即可。
@@ -26,7 +26,7 @@ export const MUSICDL_SOURCES: SourceSpec[] = [
     short: '酷狗',
     color: '#2aa3ff',
     gradient: ['#4fc3ff', '#0b4a7a'],
-    description: '概念版曲库，320k 直链',
+    description: '概念版曲库，320k 直链；飙升 / TOP500 / 蜂鸟 / 短视频热歌四榜',
     note: '部分歌曲需要客户端签名，失败时自动换源'
   },
   {
@@ -35,7 +35,7 @@ export const MUSICDL_SOURCES: SourceSpec[] = [
     short: '咪咕',
     color: '#ff6a00',
     gradient: ['#ff9a3d', '#7a2f00'],
-    description: '正版曲库，无损资源较多'
+    description: '正版曲库，无损资源较多；尖叫榜 / 特色榜九榜',
   },
   {
     key: 'qianqian',

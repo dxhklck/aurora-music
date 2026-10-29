@@ -5,12 +5,11 @@ import Icon from '../components/Icon.vue'
 import { findLyricIndex } from '@shared/lyric'
 
 /**
- * 桌面歌词是独立窗口（绕开 App.vue 单独 mount），主题不会自动跟随。
- * 主进程的 broadcastSettings 会广播到所有窗口，这里订阅并同步 data-theme。
+ * 桌面歌词是独立窗口（绕开 App.vue 单独 mount）。
+ * 配色恒定深色（--ly-* 深色调色板），不跟应用主题：它是浮在桌面壁纸上的
+ * 组件，且半透明面板给拖拽区提供绘制像素（透明窗口的 drag 区只认有像素的位置）。
+ * 强调色仍随音源实时联动（主窗口 250ms 状态推送）。
  */
-function applyTheme(settings: { themeMode?: string } | null | undefined): void {
-  document.documentElement.dataset.theme = settings?.themeMode === 'light' ? 'light' : 'dark'
-}
 
 const lines = ref<LyricLine[]>([])
 const offset = ref(0)
@@ -22,8 +21,6 @@ const index = ref(-1)
 const closed = ref(false)
 const fontScale = ref(1)
 const karaoke = ref(false)
-/** mini = 单行迷你条（播放按钮 + 一行歌词）；full = 大字三行 */
-const mode = ref<'mini' | 'full'>('mini')
 const lineEl = ref<HTMLElement | null>(null)
 
 let baseTime = 0
@@ -36,22 +33,17 @@ const prev = computed<LyricLine | null>(() =>
 )
 const next = computed<LyricLine | null>(() => lines.value[index.value + 1] ?? null)
 
-/** 迷你条没有歌词时显示什么：有歌就报歌名，否则等待播放 */
-const idleText = computed(() => {
-  if (title.value) return `${title.value}${artist.value ? ' · ' + artist.value : ''}`
-  return '等待播放…'
-})
-
 function onState(payload: any): void {
   if (!payload || typeof payload !== 'object') return
+  // 强调色随 250ms 推送实时联动（独立窗口拿不到主窗口的 shellStyle）
+  if (payload.accent) {
+    const root = document.documentElement.style
+    root.setProperty('--accent', payload.accent)
+    if (payload.accent2) root.setProperty('--accent-2', payload.accent2)
+  }
   if (payload.closed) {
     closed.value = true
     return
-  }
-  // 形态由主进程广播（窗口尺寸也由它改，布局必须跟它保持一致）
-  if (payload.mode === 'mini' || payload.mode === 'full') {
-    mode.value = payload.mode
-    if (payload.lines === undefined) return
   }
   if (typeof payload.locked === 'boolean' && payload.lines === undefined) {
     locked.value = payload.locked
@@ -88,27 +80,89 @@ function tick(): void {
 
 function toggleLock(): void {
   locked.value = !locked.value
+  hoverActive = false
   window.api.setLyricWindowLock(locked.value)
-}
-
-async function toggleMode(): Promise<void> {
-  mode.value = await window.api.setLyricMode(mode.value === 'mini' ? 'full' : 'mini')
-}
-
-function togglePlay(): void {
-  window.api.sendLyricCommand('toggle')
-}
-
-function prevTrack(): void {
-  window.api.sendLyricCommand('prev')
-}
-
-function nextTrack(): void {
-  window.api.sendLyricCommand('next')
 }
 
 function close(): void {
   window.api.closeLyricWindow()
+}
+
+/* ---------------- 手动拖拽 ----------------
+   透明无边框窗口上 -webkit-app-region: drag 在 Windows 不可靠，
+   改为上报光标位移、主进程移动窗口（见 windows.ts lyricDragStart）。 */
+let dragging = false
+let dragStartX = 0
+let dragStartY = 0
+
+function onDragStart(e: MouseEvent): void {
+  if (e.button !== 0) return
+  if (locked.value) return
+  // 按钮和右键菜单上按下不触发拖拽
+  if ((e.target as HTMLElement | null)?.closest('button, .ctx-menu')) return
+  dragging = true
+  dragStartX = e.screenX
+  dragStartY = e.screenY
+  window.api.dragLyricWindow()
+}
+
+function onDragMove(e: MouseEvent): void {
+  if (!dragging) return
+  window.api.moveLyricWindow(e.screenX - dragStartX, e.screenY - dragStartY)
+}
+
+function onDragEnd(): void {
+  if (!dragging) return
+  dragging = false
+  window.api.endLyricWindowDrag()
+}
+
+/* ---------------- 锁定态悬停 ----------------
+   锁定 = 鼠标穿透（不挡桌面操作），穿透窗口收不到 enter/leave，只收主进程
+   forward 转发的 mousemove。收到 mousemove = 鼠标在歌词上 → 通知主进程临时
+   恢复交互（可点解锁/关闭）；mouseleave → 恢复穿透。 */
+let hoverActive = false
+
+function onWinMouseMove(): void {
+  if (!locked.value || hoverActive) return
+  hoverActive = true
+  window.api.setLyricWindowHover(true)
+}
+
+function onWinMouseLeave(): void {
+  if (!locked.value || !hoverActive) return
+  hoverActive = false
+  window.api.setLyricWindowHover(false)
+}
+
+/* ---------------- 右键菜单：锁定 / 关闭 ---------------- */
+const ctx = ref<{ x: number; y: number } | null>(null)
+
+function openCtx(x: number, y: number): void {
+  // 简单收进视口：菜单约 150×90
+  ctx.value = {
+    x: Math.max(4, Math.min(x, window.innerWidth - 154)),
+    y: Math.max(4, Math.min(y, window.innerHeight - 100))
+  }
+}
+
+function closeCtx(): void {
+  ctx.value = null
+}
+
+function onDomContextMenu(e: MouseEvent): void {
+  e.preventDefault()
+  openCtx(e.clientX, e.clientY)
+}
+
+function ctxToggleLock(): void {
+  closeCtx()
+  toggleLock()
+}
+
+function ctxCloseLyric(): void {
+  closeCtx()
+  close()
 }
 
 function bigger(): void {
@@ -122,11 +176,18 @@ function smaller(): void {
 onMounted(async () => {
   const off = window.api.onLyricWindowState(onState)
   onBeforeUnmount(off)
-  // 设置变更（含主题切换）实时同步；启动时先取一次当前设置，避免开窗瞬间闪深色
-  const offSettings = window.api.onSettingsChanged((next) => applyTheme(next))
-  onBeforeUnmount(offSettings)
-  applyTheme(await window.api.getSettings())
-  mode.value = await window.api.getLyricMode()
+  // 右键菜单：主进程 context-menu 转发（拖拽区上 DOM 右键可能收不到）
+  const offCtx = window.api.onLyricContextMenu((pos) => openCtx(pos.x, pos.y))
+  onBeforeUnmount(offCtx)
+  const onWinClick = (): void => closeCtx()
+  window.addEventListener('click', onWinClick)
+  onBeforeUnmount(() => window.removeEventListener('click', onWinClick))
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', onDragEnd)
+  onBeforeUnmount(() => {
+    window.removeEventListener('mousemove', onDragMove)
+    window.removeEventListener('mouseup', onDragEnd)
+  })
   raf = requestAnimationFrame(tick)
   document.body.classList.add('lyric-body')
 })
@@ -135,93 +196,36 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 </script>
 
 <template>
-  <!-- 迷你条：一行搞定「播放状态 + 歌词」，鼠标移上去才露出控制按钮 -->
-  <div v-if="mode === 'mini'" class="mini">
-    <div class="pill" :class="{ locked }">
-      <button
-        v-if="!locked"
-        class="play"
-        :title="playing ? '暂停' : '播放'"
-        @click="togglePlay"
-      >
-        <Icon :name="playing ? 'pause' : 'play'" :size="14" />
-      </button>
-      <span v-else class="play static" :title="locked ? '已锁定（鼠标穿透）' : ''">
-        <Icon :name="playing ? 'pause' : 'play'" :size="14" />
-      </span>
-
-      <p
-        ref="lineEl"
-        class="mini-line"
-        :class="{ kara: karaoke && !!current?.words }"
-        :title="title ? `${title}${artist ? ' · ' + artist : ''}` : ''"
-      >
-        <template v-if="!current">{{ idleText }}</template>
-        <template v-else-if="karaoke && current.words">
-          <span
-            v-for="(w, wi) in current.words"
-            :key="wi"
-            class="w"
-            :style="{ '--s': w.time - current.time, '--d': Math.max(60, w.duration) }"
-          >
-            <span class="w-fill">{{ w.text }}</span>
-            <span class="w-base">{{ w.text }}</span>
-          </span>
-        </template>
-        <template v-else>{{ current.text || '♪' }}</template>
-      </p>
-
-      <div v-if="!locked" class="mini-tools">
-        <button title="上一首" @click="prevTrack">
-          <Icon name="prev" :size="12" />
-        </button>
-        <button title="下一首" @click="nextTrack">
-          <Icon name="next" :size="12" />
-        </button>
-        <button title="大字模式" @click="toggleMode">
-          <Icon name="maximize" :size="12" />
-        </button>
-        <button
-          class="lock-btn"
-          :class="{ on: locked }"
-          :title="locked ? '解锁（可拖动/点击）' : '锁定（鼠标穿透）'"
-          @click="toggleLock"
-        >
-          <Icon :name="locked ? 'lock' : 'unlock'" :size="12" />
-        </button>
-        <button title="关闭桌面歌词" @click="close">
-          <Icon name="close" :size="12" />
-        </button>
-      </div>
-
-      <!-- 锁定时鼠标穿透，按钮点不到：只留一个锁标记说明原因，解锁走托盘菜单 -->
-      <span v-else class="mini-lock" title="已锁定（鼠标穿透）· 右键托盘图标可解锁">
-        <Icon name="lock" :size="11" />
-      </span>
-    </div>
-  </div>
-
-  <!-- 大字模式：上一行 / 当前行 / 下一行 + 译文 -->
-  <div v-else class="lyric-window" :class="{ locked }" :style="{ '--scale': fontScale }">
+  <!-- 大字歌词：上一行 / 当前行 / 下一行 + 译文 -->
+  <div
+    class="lyric-window"
+    :class="{ locked }"
+    :style="{ '--scale': fontScale }"
+    @contextmenu="onDomContextMenu"
+    @mousedown="onDragStart"
+    @mousemove="onWinMouseMove"
+    @mouseleave="onWinMouseLeave"
+  >
     <div class="toolbar">
       <span class="grip">⋮⋮</span>
       <div class="tools">
         <button title="缩小" @click="smaller">A−</button>
         <button title="放大" @click="bigger">A+</button>
-        <button title="迷你模式" @click="toggleMode">
-          <Icon name="minimize" :size="12" />
-        </button>
         <button
           class="lock-btn"
           :class="{ on: locked }"
-          :title="locked ? '解锁（可拖动）' : '锁定（鼠标穿透）'"
+          :title="locked ? '解锁（点击后可拖动）' : '锁定（不挡桌面操作，鼠标悬停歌词即可解锁）'"
           @click="toggleLock"
         >
           <Icon :name="locked ? 'lock' : 'unlock'" :size="13" />
         </button>
-        <button title="关闭桌面歌词" @click="close">✕</button>
       </div>
     </div>
+
+    <!-- 常驻关闭按钮：不随工具栏悬停显隐，随时可退 -->
+    <button class="close-float" title="关闭桌面歌词" @click="close">
+      <Icon name="close" :size="13" />
+    </button>
 
     <div class="content">
       <p v-if="!current" class="placeholder">
@@ -253,6 +257,18 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
       <em v-if="artist">· {{ artist }}</em>
     </div>
   </div>
+
+  <!-- 右键菜单：锁定/解锁、关闭（点击任意处收起） -->
+  <div v-if="ctx" class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }">
+    <button @click.stop="ctxToggleLock">
+      <Icon :name="locked ? 'unlock' : 'lock'" :size="12" />
+      {{ locked ? '解锁桌面歌词' : '锁定桌面歌词' }}
+    </button>
+    <button class="danger" @click.stop="ctxCloseLyric">
+      <Icon name="close" :size="12" />
+      关闭桌面歌词
+    </button>
+  </div>
 </template>
 
 <style scoped>
@@ -261,139 +277,65 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
    （:root 为深色默认，html[data-theme='light'] 覆盖），
    此处只消费 --ly-* 变量，避免 scoped :global 组合选择器被编译丢失 */
 
-/* ---------------- 迷你条 ---------------- */
-.mini {
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  padding: 5px 6px;
-  box-sizing: border-box;
-  -webkit-app-region: drag;
-}
-
-.pill {
-  flex: 1;
-  height: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: var(--ly-panel);
-  border: 1px solid var(--ly-panel-border);
-  box-shadow: var(--ly-panel-shadow);
-  backdrop-filter: blur(14px);
-  overflow: hidden;
-}
-
-.play {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  color: var(--ly-fg);
-  background: var(--ly-ctrl-bg);
-  border: 1px solid var(--ly-ctrl-border);
-  transition: background 0.15s, transform 0.15s;
-  -webkit-app-region: no-drag;
-}
-.play:hover {
-  background: var(--accent, #7c8cff);
-  color: #fff;
-  transform: scale(1.04);
-}
-.play.static {
-  color: var(--ly-fg-3);
-  background: var(--ly-ctrl-bg);
-}
-
-.mini-line {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  line-height: 1.2;
-  color: var(--ly-fg);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: 0 1px 8px var(--ly-glow);
-}
-
-.mini-tools {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  opacity: 0;
-  transition: opacity 0.2s;
-  -webkit-app-region: no-drag;
-}
-.mini:hover .mini-tools {
-  opacity: 1;
-}
-.mini-tools button {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  color: var(--ly-ctrl-fg);
-  background: var(--ly-ctrl-bg);
-  border: 1px solid transparent;
-  transition: all 0.15s;
-}
-.mini-tools button:hover {
-  color: var(--ly-ctrl-hover-fg);
-  background: var(--ly-ctrl-hover-bg);
-}
-.mini-tools button.on {
-  color: var(--ly-on);
-  border-color: color-mix(in srgb, var(--ly-on) 35%, transparent);
-}
-
-.mini-lock {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  padding-right: 2px;
-  color: color-mix(in srgb, var(--ly-on) 55%, transparent);
-}
-
-/* ---------------- 大字模式 ---------------- */
+/* ---------------- 大字歌词 ---------------- */
 .lyric-window {
   height: 100vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  padding: 10px 26px;
+  /* 紧凑：内边距收窄，框体贴合歌词 */
+  padding: 6px 18px;
   color: var(--ly-fg);
+  /* 闲置时完全裸字：面板只在悬停时浮出（见下方 ::before）。
+     拖拽走手动 IPC（透明窗口上 -webkit-app-region 不可靠），故不再声明 drag 区。
+     边框保留透明占位，避免悬停时因 border 出现导致内容位移 1px。 */
   background: transparent;
-  border-radius: 18px;
+  border: 1px solid transparent;
+  border-radius: 14px;
   position: relative;
-  -webkit-app-region: drag;
+  cursor: move;
+  user-select: none;
   overflow: hidden;
+  /* 投影留在元素自身上：父级 overflow:hidden 会裁掉伪元素的投影，自己的不会 */
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  transition: box-shadow 0.18s ease;
+}
+.lyric-window:hover {
+  box-shadow: var(--ly-panel-shadow);
+}
+
+/**
+ * 面板本体：独立一层做透明度过渡。
+ * 直接过渡 `background` 不可行（linear-gradient 无法插值），所以把面板画在伪元素上，
+ * 只动 opacity —— 60fps 的合成层动画，不会触发布局或重绘文字。
+ * 层级注意：不能用 z-index: -1。透明窗口里负层级会被合成器裁掉（实测完全不可见），
+ * 这里用 0：伪元素是第一个子盒，文字层的 filter/normal flow 都在它之后绘制，不会盖住字。
+ */
+.lyric-window::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ly-panel);
+  border: 1px solid var(--ly-panel-border);
+  opacity: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.lyric-window:hover::before {
+  opacity: 1;
 }
 
 .toolbar {
   position: absolute;
   top: 6px;
-  left: 10px;
-  right: 10px;
+  left: 8px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   opacity: 0;
   transition: opacity 0.25s;
-  -webkit-app-region: no-drag;
 }
 .lyric-window:hover .toolbar {
   opacity: 1;
@@ -403,6 +345,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   color: var(--ly-fg-3);
   font-size: 12px;
   letter-spacing: 2px;
+  margin-right: 6px;
 }
 
 .tools {
@@ -424,6 +367,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   justify-content: center;
   border-radius: 7px;
   font-size: 11px;
+  cursor: pointer;
   color: var(--ly-ctrl-fg);
   background: var(--ly-tool-bg);
   border: 1px solid var(--ly-tool-border);
@@ -435,8 +379,40 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   color: var(--ly-ctrl-hover-fg);
 }
 .tools button.on {
-  color: var(--ly-on);
-  border-color: color-mix(in srgb, var(--ly-on) 40%, transparent);
+  /* 锁定激活态：主题强调色，随音源/主题联动 */
+  color: color-mix(in srgb, var(--accent, #7c6cff) 78%, white);
+  border-color: color-mix(in srgb, var(--accent, #7c6cff) 42%, transparent);
+}
+
+/* 常驻关闭：右上角小按钮，半透明不抢戏 */
+.close-float {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--ly-fg-2);
+  background: var(--ly-tool-bg);
+  border: 1px solid var(--ly-tool-border);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  /* 与面板同一节奏：闲置时不显示任何「窗口感」的控件，悬停连面板一起浮出 */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, background 0.15s, color 0.15s;
+}
+.lyric-window:hover .close-float {
+  opacity: 0.75;
+  pointer-events: auto;
+}
+.close-float:hover {
+  opacity: 1;
+  background: var(--ly-tool-hover-bg);
+  color: var(--ly-ctrl-hover-fg);
 }
 
 .content {
@@ -444,21 +420,33 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
 }
 
 .line {
   margin: 0;
-  font-size: calc(46px * var(--scale));
+  font-size: calc(32px * var(--scale));
   font-weight: 800;
   letter-spacing: 1px;
   line-height: 1.25;
-  background: linear-gradient(180deg, var(--ly-line-1) 30%, var(--ly-line-2));
+  /* 行尾渐入主题强调色：白字为主保证可读，尾部颜色与主题呼应 */
+  background: linear-gradient(
+    180deg,
+    var(--ly-line-1) 30%,
+    color-mix(in srgb, var(--accent, #7c6cff) 52%, var(--ly-line-2))
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   text-shadow: 0 4px 24px var(--ly-glow);
+  /* 描边只能用 -webkit-text-stroke：
+     这行是 background-clip:text 的渐变字，填充色其实是「背景」，
+     text-shadow 会画在背景之上——四个 1px 偏移的阴影副本等于把整个字形盖成实心块
+     （实测字直接变黑板）；连环 drop-shadow 又会把光晕反复叠加，同样糊死。
+     stroke 只画 1px 边缘、且可继承到逐字的 w-base / w-fill 子层，字心仍然是渐变。 */
+  -webkit-text-stroke: 0.8px var(--ly-outline);
+  paint-order: stroke fill;
   filter: drop-shadow(0 2px 6px var(--ly-glow-soft));
   white-space: nowrap;
   overflow: hidden;
@@ -467,8 +455,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 }
 
 /* 逐字：关掉整行渐变，改由字层 clip-path 驱动 */
-.line.kara,
-.mini-line.kara {
+.line.kara {
   background: none;
   -webkit-background-clip: initial;
   background-clip: initial;
@@ -497,14 +484,17 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 }
 .w-fill {
   position: absolute;
-  inset: 0;
-  color: var(--ly-line-1);
-  -webkit-text-fill-color: var(--ly-line-1);
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  /* 已唱部分带主题强调色：跟随音源/主题实时变化 */
+  color: color-mix(in srgb, var(--accent, #7c6cff) 42%, var(--ly-line-1));
+  -webkit-text-fill-color: color-mix(in srgb, var(--accent, #7c6cff) 42%, var(--ly-line-1));
   text-shadow: 0 2px 10px var(--ly-glow-soft);
   clip-path: inset(0 100% 0 0);
 }
-.line.kara .w-fill,
-.mini-line.kara .w-fill {
+.line.kara .w-fill {
   clip-path: inset(
     0
     calc((1 - clamp(0, (var(--e, 0) - var(--s)) / var(--d), 1)) * 100%)
@@ -515,21 +505,31 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 
 .trans {
   margin: 2px 0 0;
-  font-size: calc(16px * var(--scale));
+  font-size: calc(13px * var(--scale));
   color: var(--ly-fg-2);
-  text-shadow: 0 2px 10px var(--ly-glow);
+  text-shadow:
+    0.8px 0 0 var(--ly-outline-soft),
+    -0.8px 0 0 var(--ly-outline-soft),
+    0 0.8px 0 var(--ly-outline-soft),
+    0 -0.8px 0 var(--ly-outline-soft),
+    0 2px 10px var(--ly-glow);
 }
 
 .ghost {
   margin: 0;
-  font-size: calc(15px * var(--scale));
+  font-size: calc(12px * var(--scale));
   color: var(--ly-fg-3);
-  text-shadow: 0 2px 8px var(--ly-glow);
+  text-shadow:
+    0.8px 0 0 var(--ly-outline-soft),
+    -0.8px 0 0 var(--ly-outline-soft),
+    0 0.8px 0 var(--ly-outline-soft),
+    0 -0.8px 0 var(--ly-outline-soft),
+    0 2px 8px var(--ly-glow);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 92%;
-  height: 20px;
+  height: 15px;
 }
 .ghost.prev {
   margin-bottom: 2px;
@@ -540,14 +540,14 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 
 .placeholder {
   margin: 0;
-  font-size: 20px;
+  font-size: 15px;
   color: var(--ly-fg-3);
   text-shadow: 0 2px 10px var(--ly-glow);
 }
 
 .footer {
   position: absolute;
-  bottom: 6px;
+  bottom: 4px;
   display: flex;
   gap: 6px;
   font-size: 10px;
@@ -564,5 +564,38 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
 
 .locked {
   cursor: default;
+}
+
+/* ---------------- 右键菜单 ---------------- */
+.ctx-menu {
+  position: fixed;
+  z-index: 99;
+  min-width: 146px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: var(--ly-panel);
+  border: 1px solid color-mix(in srgb, var(--accent, #7c6cff) 32%, var(--ly-panel-border));
+  box-shadow: var(--ly-panel-shadow);
+  backdrop-filter: blur(14px);
+}
+.ctx-menu button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--ly-fg-2);
+  transition: background 0.15s, color 0.15s;
+}
+.ctx-menu button:hover {
+  background: var(--ly-ctrl-hover-bg);
+  color: var(--ly-ctrl-hover-fg);
+}
+.ctx-menu button.danger:hover {
+  color: var(--danger, #ff5c7c);
 }
 </style>

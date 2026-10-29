@@ -53,7 +53,10 @@ const seed = computed(() => `${props.chart.platform}:${props.chart.id}`)
 
 .play {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.42);

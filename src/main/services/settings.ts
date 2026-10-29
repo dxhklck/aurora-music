@@ -23,7 +23,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   writeTags: true,
   engineEnabled: true,
   closeToTray: true,
-  pythonPath: '',
   qqCookie: '',
   neteaseCookie: '',
   neteaseAccount: null,

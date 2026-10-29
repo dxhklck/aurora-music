@@ -65,8 +65,8 @@ export function bootstrapProviders(demoDir: string): void {
 /**
  * 注册 musicdl 引擎承载的音源。
  *
- * 这里不阻塞启动去探测 Python：注册是纯内存操作，真正的可用性由第一次调用暴露，
- * 设置页会显示引擎状态。引擎没装时这些音源会给出「引擎未就绪」的明确提示，
+ * 这里不阻塞启动去探测引擎：注册是纯内存操作，真正的可用性由第一次调用暴露，
+ * 设置页会显示引擎状态。出问题时这些音源会给出明确提示，
  * 而不是静默消失让用户以为搜索坏了。
  */
 export function registerEngineProviders(): string[] {

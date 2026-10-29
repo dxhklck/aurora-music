@@ -1,0 +1,672 @@
+{
+  "legalize": [
+    {
+      "input": null,
+      "out": "NULL"
+    },
+    {
+      "input": "",
+      "out": "NULL"
+    },
+    {
+      "input": "NULL",
+      "out": "NULL"
+    },
+    {
+      "input": "None",
+      "out": "None"
+    },
+    {
+      "input": "世界/Earth",
+      "out": "世界Earth"
+    },
+    {
+      "input": "a\\/b",
+      "out": "ab"
+    },
+    {
+      "input": "a\\\"b",
+      "out": "ab"
+    },
+    {
+      "input": "&amp;lt;tag&amp;gt;",
+      "out": "NULL"
+    },
+    {
+      "input": "&nbsp;",
+      "out": "NULL"
+    },
+    {
+      "input": "<b>粗体</b><script>alert(1)</script>",
+      "out": "粗体"
+    },
+    {
+      "input": "～￡ 猴﹏子　￡ ～",
+      "out": "～￡ 猴﹏子￡ ～"
+    },
+    {
+      "input": "🎵歌🎵",
+      "out": "歌"
+    },
+    {
+      "input": "a\u0001b\u0002c",
+      "out": "abc"
+    },
+    {
+      "input": "a​b‌c",
+      "out": "abc"
+    },
+    {
+      "input": "  a   b  ",
+      "out": "a b"
+    },
+    {
+      "input": "周杰伦/Jay Chou",
+      "out": "周杰伦Jay Chou"
+    },
+    {
+      "input": "ＡＢＣ１２３",
+      "out": "ＡＢＣ１２３"
+    },
+    {
+      "input": "a\u0000b",
+      "out": "a b"
+    },
+    {
+      "input": "café",
+      "out": "café"
+    },
+    {
+      "input": "é",
+      "out": "é"
+    },
+    {
+      "input": "&#65;&#x42;",
+      "out": "AB"
+    },
+    {
+      "input": "CON",
+      "out": "CON_"
+    },
+    {
+      "input": "aux.txt",
+      "out": "aux_.txt"
+    },
+    {
+      "input": "...leading",
+      "out": "...leading"
+    },
+    {
+      "input": "trailing...",
+      "out": "trailing"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": "line1\nline2\ttab",
+      "out": "line1line2tab"
+    },
+    {
+      "input": "「引号」『书名』",
+      "out": "「引号」『书名』"
+    },
+    {
+      "input": "　全角空格开头",
+      "out": "全角空格开头"
+    },
+    {
+      "input": "music name",
+      "out": "musicname"
+    }
+  ],
+  "clean": [
+    {
+      "input": null,
+      "out": ""
+    },
+    {
+      "input": "",
+      "out": ""
+    },
+    {
+      "input": "  ",
+      "out": ""
+    },
+    {
+      "input": "NULL",
+      "out": ""
+    },
+    {
+      "input": " null ",
+      "out": ""
+    },
+    {
+      "input": "None",
+      "out": ""
+    },
+    {
+      "input": "N/A",
+      "out": ""
+    },
+    {
+      "input": "nil",
+      "out": ""
+    },
+    {
+      "input": "undefined",
+      "out": ""
+    },
+    {
+      "input": "abc",
+      "out": "abc"
+    },
+    {
+      "input": 123,
+      "out": "123"
+    },
+    {
+      "input": 0,
+      "out": "0"
+    },
+    {
+      "input": false,
+      "out": "False"
+    },
+    {
+      "input": "0",
+      "out": "0"
+    }
+  ],
+  "asInt": [
+    {
+      "input": null,
+      "out": 0
+    },
+    {
+      "input": "",
+      "out": 0
+    },
+    {
+      "input": "12",
+      "out": 12
+    },
+    {
+      "input": "12.9",
+      "out": 12
+    },
+    {
+      "input": 12.9,
+      "out": 12
+    },
+    {
+      "input": "12abc",
+      "out": 0
+    },
+    {
+      "input": "03:45",
+      "out": 0
+    },
+    {
+      "input": " 42 ",
+      "out": 42
+    },
+    {
+      "input": true,
+      "out": 1
+    },
+    {
+      "input": false,
+      "out": 0
+    },
+    {
+      "input": "1e3",
+      "out": 1000
+    },
+    {
+      "input": "-7",
+      "out": -7
+    },
+    {
+      "input": "0x10",
+      "out": 0
+    },
+    {
+      "input": [],
+      "out": 0
+    },
+    {
+      "input": {},
+      "out": 0
+    }
+  ],
+  "norm": [
+    {
+      "input": "周杰伦 Jay",
+      "out": "周杰伦jay"
+    },
+    {
+      "input": "ＡＢＣ１２３",
+      "out": "ａｂｃ１２３"
+    },
+    {
+      "input": "a-b_c",
+      "out": "abc"
+    },
+    {
+      "input": "Привет",
+      "out": "привет"
+    },
+    {
+      "input": "こんにちは",
+      "out": "こんにちは"
+    },
+    {
+      "input": "हिन्दी",
+      "out": "हनद"
+    },
+    {
+      "input": "Café",
+      "out": "café"
+    },
+    {
+      "input": "",
+      "out": ""
+    },
+    {
+      "input": "NULL",
+      "out": "null"
+    }
+  ],
+  "seconds2hms": [
+    {
+      "input": 0,
+      "out": "-:-:-"
+    },
+    {
+      "input": 1,
+      "out": "00:00:01"
+    },
+    {
+      "input": 59,
+      "out": "00:00:59"
+    },
+    {
+      "input": 60,
+      "out": "00:01:00"
+    },
+    {
+      "input": 3599,
+      "out": "00:59:59"
+    },
+    {
+      "input": 3600,
+      "out": "01:00:00"
+    },
+    {
+      "input": 86399,
+      "out": "23:59:59"
+    },
+    {
+      "input": "223.9",
+      "out": "00:03:43"
+    },
+    {
+      "input": null,
+      "out": "-:-:-"
+    }
+  ],
+  "byte2mb": [
+    {
+      "input": 0,
+      "out": "NULL"
+    },
+    {
+      "input": 1024,
+      "out": "NULL"
+    },
+    {
+      "input": 1048576,
+      "out": "1.0 MB"
+    },
+    {
+      "input": 32000000,
+      "out": "30.52 MB"
+    },
+    {
+      "input": null,
+      "out": "NULL"
+    },
+    {
+      "input": "1234",
+      "out": "NULL"
+    }
+  ],
+  "cleanlrc": [
+    {
+      "input": "[00:01.00]第一行\n[00:02.00]\n\n[00:03.00]第三行",
+      "out": "[00:01.00]第一行\n[00:03.00]第三行"
+    },
+    {
+      "input": "[ti:标题]\r\n[ar:歌手]\r\n[00:10.00]正文\r\n",
+      "out": "[ti:标题]\n[ar:歌手]\n[00:10.00]正文"
+    },
+    {
+      "input": "﻿[00:00.00]\n​\n \n[00:05.50]a\n[00:06.00]b",
+      "out": "[00:05.50]a\n[00:06.00]b"
+    },
+    {
+      "input": "",
+      "out": ""
+    },
+    {
+      "input": "NULL",
+      "out": "NULL"
+    },
+    {
+      "input": "[1:02:03.5]长歌",
+      "out": "[1:02:03.5]长歌"
+    }
+  ],
+  "durationFromLrc": [
+    {
+      "input": "[00:01.00]a\n[01:02.50]b",
+      "out": 62.5
+    },
+    {
+      "input": "[1:02:03.5]c",
+      "out": 3723.5
+    },
+    {
+      "input": "[00:00.00]",
+      "out": 0
+    },
+    {
+      "input": "",
+      "out": 0
+    },
+    {
+      "input": "NULL",
+      "out": 0
+    },
+    {
+      "input": "no time tags",
+      "out": 0
+    }
+  ],
+  "stableId": [
+    {
+      "input": {
+        "identifier": "abc",
+        "song_name": "稻香",
+        "singers": "周杰伦",
+        "album": "魔杰座"
+      },
+      "out": "test:abc"
+    },
+    {
+      "input": {
+        "identifier": 12345,
+        "song_name": "晴天",
+        "singers": "周杰伦",
+        "album": "叶惠美"
+      },
+      "out": "test:12345"
+    },
+    {
+      "input": {
+        "identifier": null,
+        "song_name": "稻香",
+        "singers": "周杰伦",
+        "album": "魔杰座"
+      },
+      "out": "test:6935a0033898b74f"
+    },
+    {
+      "input": {
+        "identifier": "",
+        "song_name": "",
+        "singers": "",
+        "album": ""
+      },
+      "out": "test:7d010443693eec25"
+    },
+    {
+      "input": {
+        "identifier": "  ",
+        "song_name": "A",
+        "singers": "B",
+        "album": "C"
+      },
+      "out": "test:3ff3f27598a1a925"
+    }
+  ],
+  "songPayload": [
+    {
+      "input": {
+        "identifier": "600902000006889010",
+        "song_name": "稻香",
+        "singers": "周杰伦",
+        "album": "魔杰座",
+        "ext": ".flac",
+        "duration_s": 223.9,
+        "file_size_bytes": 32000000,
+        "bitrate": 1024000,
+        "codec": "flac",
+        "cover_url": "http://example.com/a.jpg",
+        "download_url": "http://example.com/a.flac",
+        "protocol": "HLS",
+        "lyric": "[00:01.00]x"
+      },
+      "out": {
+        "id": "600902000006889010",
+        "name": "稻香",
+        "singers": "周杰伦",
+        "album": "魔杰座",
+        "ext": "flac",
+        "durationMs": 223000,
+        "sizeBytes": 32000000,
+        "bitrate": 1024000,
+        "codec": "flac",
+        "coverUrl": "http://example.com/a.jpg",
+        "hasUrl": true,
+        "protocol": "HLS"
+      }
+    },
+    {
+      "input": {
+        "identifier": null,
+        "song_name": "NULL",
+        "singers": null,
+        "album": "",
+        "ext": null,
+        "duration_s": null,
+        "file_size_bytes": null,
+        "bitrate": null,
+        "codec": null,
+        "cover_url": null,
+        "download_url": null,
+        "protocol": null,
+        "lyric": null
+      },
+      "out": {
+        "id": "4b11c0000b79de2c",
+        "name": "",
+        "singers": "",
+        "album": "",
+        "ext": "mp3",
+        "durationMs": 0,
+        "sizeBytes": 0,
+        "bitrate": 0,
+        "codec": "",
+        "coverUrl": "",
+        "hasUrl": false,
+        "protocol": "HTTP"
+      }
+    },
+    {
+      "input": {
+        "identifier": 7,
+        "song_name": "  Spaces  ",
+        "singers": "A/B",
+        "album": "世界/Earth",
+        "ext": "mp3",
+        "duration_s": 0,
+        "file_size_bytes": "1234",
+        "bitrate": "320000",
+        "codec": "",
+        "cover_url": "NULL",
+        "download_url": "",
+        "protocol": "http",
+        "lyric": "NULL"
+      },
+      "out": {
+        "id": "7",
+        "name": "Spaces",
+        "singers": "A/B",
+        "album": "世界/Earth",
+        "ext": "mp3",
+        "durationMs": 0,
+        "sizeBytes": 1234,
+        "bitrate": 320000,
+        "codec": "",
+        "coverUrl": "",
+        "hasUrl": false,
+        "protocol": "HTTP"
+      }
+    }
+  ],
+  "pickBest": [
+    {
+      "target": {
+        "name": "稻香",
+        "artists": "周杰伦",
+        "durationMs": 223000
+      },
+      "items": [
+        {
+          "song_name": "稻香",
+          "singers": "周杰伦",
+          "duration_s": 223
+        },
+        {
+          "song_name": "稻香",
+          "singers": "其他",
+          "duration_s": 223
+        },
+        {
+          "song_name": "稻香 (翻唱)",
+          "singers": "周杰伦",
+          "duration_s": 223
+        }
+      ],
+      "bestIndex": 0
+    },
+    {
+      "target": {
+        "name": "Love",
+        "artists": "",
+        "durationMs": 0
+      },
+      "items": [
+        {
+          "song_name": "Love Story",
+          "singers": "Taylor Swift",
+          "duration_s": 235
+        },
+        {
+          "song_name": "LOVE",
+          "singers": "Someone",
+          "duration_s": 200
+        }
+      ],
+      "bestIndex": 1
+    },
+    {
+      "target": {
+        "name": "晴天",
+        "artists": "周杰伦",
+        "durationMs": 269000
+      },
+      "items": [
+        {
+          "song_name": "晴天",
+          "singers": "周杰伦",
+          "duration_s": 269
+        },
+        {
+          "song_name": "晴天",
+          "singers": "周杰伦",
+          "duration_s": 300
+        }
+      ],
+      "bestIndex": 0
+    },
+    {
+      "target": {
+        "name": "晴天",
+        "artists": "周杰伦",
+        "durationMs": 269000
+      },
+      "items": [
+        {
+          "song_name": "晴天",
+          "singers": "周杰伦",
+          "duration_s": 269
+        },
+        {
+          "song_name": "晴天",
+          "singers": "周杰伦",
+          "duration_s": 269
+        }
+      ],
+      "bestIndex": 0
+    },
+    {
+      "target": {
+        "name": "不存在的歌",
+        "artists": "无名",
+        "durationMs": 0
+      },
+      "items": [
+        {
+          "song_name": "另一首",
+          "singers": "别人",
+          "duration_s": 100
+        }
+      ],
+      "bestIndex": -1
+    },
+    {
+      "target": {
+        "name": "",
+        "artists": "",
+        "durationMs": 0
+      },
+      "items": [
+        {
+          "song_name": "任意",
+          "singers": "任意",
+          "duration_s": 100
+        }
+      ],
+      "bestIndex": -1
+    },
+    {
+      "target": {
+        "name": "हिन्दी",
+        "artists": "गायक",
+        "durationMs": 0
+      },
+      "items": [
+        {
+          "song_name": "हिन्दी",
+          "singers": "गायक",
+          "duration_s": 100
+        }
+      ],
+      "bestIndex": 0
+    }
+  ]
+}

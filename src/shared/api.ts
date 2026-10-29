@@ -7,6 +7,7 @@ import type {
   DownloadTask,
   LibraryTrack,
   Lyric,
+  MiniVolumeState,
   Playlist,
   QrLoginPlatform,
   QrLoginState,
@@ -21,11 +22,6 @@ export interface EngineStatusView {
   ready: boolean
   runtime: { command: string; label: string; version?: string; sources?: number } | null
   error: string
-  log: string[]
-  bridgeFound: boolean
-  musicdlFound: boolean
-  /** 安装版与开发版的补救办法不一样，文案要分开 */
-  packaged: boolean
 }
 
 export interface SearchArgs {
@@ -76,10 +72,6 @@ export interface AuroraApi {
 
   engineStatus(): Promise<EngineStatusView>
   engineRestart(): Promise<EngineStatusView>
-  /** 手动指定 Python 解释器并重启引擎 */
-  engineChoosePython(): Promise<EngineStatusView>
-  /** 引擎自愈：重拉官方 musicdl 源码并重启引擎；失败时 reject 原因 */
-  engineRepairVendor(): Promise<EngineStatusView>
 
   listLibrary(): Promise<LibraryTrack[]>
   removeLibrary(id: string): Promise<void>
@@ -113,10 +105,35 @@ export interface AuroraApi {
   winMaximize(): void
   winClose(): void
   isMaximized(): Promise<boolean>
+  /**
+   * 迷你窗口的临时附加区：`extra` 是附加高度（0 表示收起），
+   * `direction` 是期望生长方向（歌词/队列向下，空间不足时自动翻转）。
+   */
+  setMiniExtra(extra: number, direction: 'up' | 'down'): void
+  /** 打开/关闭音量气泡（独立透明窗口），返回最终是否可见 */
+  toggleMiniVolume(state: MiniVolumeState): Promise<boolean>
+  /** 音量气泡启动时读取当前音量 */
+  getMiniVolume(): Promise<MiniVolumeState>
+  /** 气泡拖动滑块 → 交给主窗口执行 setVolume */
+  setMiniVolume(volume: number): void
+  /** 主窗口音量/主题/强调色变化 → 同步气泡 */
+  pushMiniVolume(state: MiniVolumeState): void
+  /** 主窗口订阅气泡拖动（设置音量） */
+  onMiniVolumeChanged(cb: (state: MiniVolumeState) => void): () => void
+  /** 气泡订阅主窗口的音量变化 */
+  onMiniVolumeState(cb: (state: MiniVolumeState) => void): () => void
+  /** 气泡主动关闭（Esc） */
+  closeMiniVolume(): void
 
   toggleLyricWindow(): Promise<boolean>
   closeLyricWindow(): void
   setLyricWindowLock(locked: boolean): void
+  /** 锁定态悬停：穿透窗口靠转发 mousemove 感知鼠标，悬停时临时恢复交互 */
+  setLyricWindowHover(hover: boolean): void
+  /** 手动拖拽：mousedown 记录窗口/光标起点，move 报位移，up 结束（透明窗口 drag 区不可靠） */
+  dragLyricWindow(): void
+  moveLyricWindow(dx: number, dy: number): void
+  endLyricWindowDrag(): void
   pushLyricState(state: unknown): void
   /** 读取当前桌面歌词形态 */
   getLyricMode(): Promise<'mini' | 'full'>
@@ -133,6 +150,8 @@ export interface AuroraApi {
   onDownloadProgress(cb: (tasks: DownloadTask[]) => void): () => void
   onSettingsChanged(cb: (settings: AppSettings) => void): () => void
   onLyricWindowState(cb: (state: unknown) => void): () => void
+  /** 订阅歌词窗口右键菜单（主进程 context-menu 事件转发，坐标为 CSS 像素） */
+  onLyricContextMenu(cb: (pos: { x: number; y: number }) => void): () => void
   onToast(cb: (payload: { type: 'info' | 'error' | 'success'; message: string }) => void): () => void
 
   /** 扫码登录：创建会话并返回二维码（dataURL） */

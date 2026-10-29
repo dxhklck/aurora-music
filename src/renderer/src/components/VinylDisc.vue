@@ -102,7 +102,10 @@ onBeforeUnmount(() => {
 .vd.auto {
   /* 绝对定位铺满父容器：避免 height:100% 与内容互相撑高，导致尺寸自激放大 */
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
 }
 
 /* 定位容器：唱片与唱臂共用，不参与旋转 */
@@ -132,7 +135,10 @@ onBeforeUnmount(() => {
 
 .vd-grooves {
   position: absolute;
-  inset: 4%;
+  top: 4%;
+  right: 4%;
+  bottom: 4%;
+  left: 4%;
   border-radius: 50%;
   background: repeating-radial-gradient(
     circle at 50% 50%,
@@ -146,7 +152,10 @@ onBeforeUnmount(() => {
 /* 中心专辑封面 */
 .vd-art {
   position: absolute;
-  inset: 28%;
+  top: 28%;
+  right: 28%;
+  bottom: 28%;
+  left: 28%;
   border-radius: 50%;
   overflow: hidden;
   display: grid;
@@ -176,7 +185,7 @@ onBeforeUnmount(() => {
   left: 50%;
   top: 50%;
   width: 4%;
-  aspect-ratio: 1;
+  height: 4%;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   background: #0a0a10;
@@ -186,7 +195,10 @@ onBeforeUnmount(() => {
 /* 斜向高光，让盘面有漆面质感 */
 .vd-sheen {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   border-radius: 50%;
   background: linear-gradient(
     128deg,
@@ -290,10 +302,8 @@ onBeforeUnmount(() => {
   }
 }
 
+/* 减弱动态效果时只关唱臂的过渡；旋转是播放状态指示，不跟随系统设置停摆 */
 @media (prefers-reduced-motion: reduce) {
-  .vd-disc.spinning {
-    animation-play-state: paused;
-  }
   .vd-arm {
     transition: none;
   }

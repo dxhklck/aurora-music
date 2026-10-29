@@ -8,10 +8,6 @@ import { formatBytes } from '@shared/lyric'
 import type { EngineStatusView, UpdateStatusView } from '@shared/api'
 import { type QrLoginPlatform, type QrLoginState } from '@shared/types'
 import type { NeteaseAccountInfo } from '@shared/types'
-import { isNativeMobile } from '../core/platform'
-
-/** 原生容器：扫码/网页弹窗登录依赖桌面能力，隐藏对应按钮 */
-const isNative = isNativeMobile()
 import type { Quality } from '@shared/types'
 
 const app = useAppStore()
@@ -20,8 +16,6 @@ const library = useLibraryStore()
 
 const engine = ref<EngineStatusView | null>(null)
 const probing = ref(false)
-const repairing = ref(false)
-const showLog = ref(false)
 const dir = ref('')
 
 const settings = computed(() => app.settings)
@@ -113,31 +107,6 @@ async function restartEngine(): Promise<void> {
     else app.toast(engine.value?.error || '引擎未就绪', 'error')
   } finally {
     probing.value = false
-  }
-}
-
-async function choosePython(): Promise<void> {
-  probing.value = true
-  try {
-    engine.value = await window.api.engineChoosePython()
-    if (engine.value?.ready) app.toast('引擎已就绪', 'success')
-    else app.toast(engine.value?.error || '这个解释器不可用', 'error')
-  } finally {
-    probing.value = false
-  }
-}
-
-/** 引擎自愈：上游音源失效时重拉官方 musicdl 源码并重启引擎 */
-async function repairVendor(): Promise<void> {
-  repairing.value = true
-  try {
-    engine.value = await window.api.engineRepairVendor()
-    if (engine.value?.ready) app.toast('musicdl 源码已修复，引擎已就绪', 'success')
-    else app.toast(engine.value?.error || '修复后引擎仍未就绪', 'error')
-  } catch (error) {
-    app.toast(error instanceof Error ? error.message : '修复失败，请检查网络', 'error')
-  } finally {
-    repairing.value = false
   }
 }
 
@@ -529,8 +498,7 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <div class="account-actions">
-          <!-- 移动端无桌面扫码/网页登录弹窗，QQ 走应用内 WebView -->
-          <button v-if="!isNative" class="btn" @click="openQrLogin('qq')">
+          <button class="btn" @click="openQrLogin('qq')">
             <Icon name="qrcode" :size="14" /> 扫码登录
           </button>
           <button class="btn" @click="openBrowserLogin('qq')">
@@ -596,11 +564,9 @@ onBeforeUnmount(() => {
             <button class="btn primary" @click="openPhoneLogin">
               <Icon name="lock" :size="14" /> 手机号登录
             </button>
-            <!-- 移动端：扫码/网页登录依赖桌面能力，只保留手机号 + Cookie -->
-            <button v-if="!isNative" class="btn" @click="openQrLogin('netease')">
+            <button class="btn" @click="openQrLogin('netease')">
               <Icon name="qrcode" :size="14" /> 扫码
             </button>
-            <!-- 移动端：应用内 WebView 打开网易云官网，抓 MUSIC_U 登录态 -->
             <button class="btn" @click="openBrowserLogin('netease')">
               <Icon name="monitor" :size="14" /> 浏览器登录
             </button>
@@ -748,13 +714,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 引擎 -->
+    <!-- 音源引擎 -->
     <section class="card block">
       <div class="block-head">
         <span class="ico"><Icon name="search" :size="15" /></span>
         <div>
-          <strong>musicdl 引擎</strong>
-          <small>通过独立 Python 进程复用 musicdl 的 15 个音源、直链解析与标签写入</small>
+          <strong>音源引擎</strong>
+          <small>进程内 TypeScript 实现，内置 15 个长尾音源、直链解析与标签写入，无需额外运行时</small>
         </div>
         <span class="state" :class="engine?.ready ? 'ok' : 'bad'">
           {{ engine?.ready ? '已就绪' : '未就绪' }}
@@ -774,16 +740,12 @@ onBeforeUnmount(() => {
           <em>{{ engine.runtime?.label ?? '未找到' }}</em>
         </div>
         <div class="kv">
-          <span>解释器</span>
-          <em class="mono truncate">{{ engine.runtime?.command ?? '—' }}</em>
+          <span>版本</span>
+          <em class="mono truncate">{{ engine.runtime?.version ?? '—' }}</em>
         </div>
         <div class="kv">
-          <span>musicdl</span>
-          <em>{{ engine.runtime?.version || '—' }} · {{ engine.runtime?.sources ?? 0 }} 个音源</em>
-        </div>
-        <div class="kv">
-          <span>源码 / 脚本</span>
-          <em>{{ engine.musicdlFound ? '已找到' : '缺失' }} / {{ engine.bridgeFound ? '已找到' : '缺失' }}</em>
+          <span>音源</span>
+          <em>{{ engine.runtime?.sources ?? 0 }} 个</em>
         </div>
         <div v-if="engine.error" class="err">{{ engine.error }}</div>
 
@@ -791,40 +753,6 @@ onBeforeUnmount(() => {
           <button class="btn" :disabled="probing" @click="restartEngine">
             <Icon name="refresh" :size="13" /> {{ probing ? '检测中…' : '重新检测' }}
           </button>
-          <button class="btn" :disabled="probing" @click="choosePython">
-            <Icon name="folder" :size="13" /> 指定解释器
-          </button>
-          <button class="btn" :disabled="probing || repairing" @click="repairVendor">
-            <Icon name="refresh" :size="13" /> {{ repairing ? '修复中…（需联网）' : '修复源码' }}
-          </button>
-          <button v-if="engine.log.length" class="btn ghost" @click="showLog = !showLog">
-            {{ showLog ? '隐藏日志' : '查看日志' }}
-          </button>
-        </div>
-
-        <pre v-if="showLog" class="log">{{ engine.log.join('\n') }}</pre>
-
-        <div v-if="!engine.ready" class="install">
-          <template v-if="engine.packaged">
-            <strong>这个安装包需要本机有 Python 才能用引擎音源</strong>
-            <p>
-              装好 Python 3.10+ 后点上面的「指定解释器」选中它即可；解释器里还需要
-              <code>musicdl</code> 的依赖（<code>pip install musicdl</code>）。
-            </p>
-            <p class="tiny">
-              也可以把便携版运行时放到安装目录的 <code>resources/python</code>，
-              或用环境变量 <code>AURORA_PYTHON</code> 指定，都会自动被识别。
-            </p>
-          </template>
-          <template v-else>
-            <strong>首次使用需要准备引擎环境</strong>
-            <p>在项目根目录执行一次即可（会创建 <code>engine/.venv</code> 并安装依赖）：</p>
-            <code class="cmd">npm run engine:setup</code>
-            <p class="tiny">
-              也可用环境变量 <code>AURORA_PYTHON</code> 指定解释器、<code>AURORA_MUSICDL_PATH</code> 指定 musicdl 源码目录，
-              或在上面点「指定解释器」。
-            </p>
-          </template>
         </div>
       </div>
 
@@ -1264,7 +1192,10 @@ onBeforeUnmount(() => {
 /* 扫码登录弹层 */
 .qr-mask {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 60;
   display: flex;
   align-items: center;
@@ -1331,7 +1262,10 @@ onBeforeUnmount(() => {
 }
 .qr-expired {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: center;

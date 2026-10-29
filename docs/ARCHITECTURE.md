@@ -172,27 +172,30 @@ interface StreamInfo {
 启动时 `prune()` 校验文件是否仍存在，避免出现「列表里有、点开 404」。  
 `LocalProvider` 把索引包装成音源，因此本地播放与在线播放走完全相同的链路。
 
-### 5.5 musicdl 引擎
+### 5.5 音源引擎
 
-Aurora 自己实现了网易云/QQ/酷我（需要榜单与逐字歌词），剩下的平台签名算法太多，
-直接复用 musicdl 的 Python 实现，而不是在 TS 里重写一遍。
+Aurora 自己实现了网易云/QQ/酷我（需要榜单与逐字歌词），剩下的长尾平台签名算法太多且经常变，
+统一收在 `src/main/engine/ts`：**进程内 TypeScript 实现，没有子进程、没有额外运行时。**
 
 ```
-渲染进程 ──IPC──▶ MusicdlProvider ──▶ EngineClient ──NDJSON──▶ bridge.py ──▶ musicdl
-                                        │
-                                        ├─ 运行时探测（AURORA_PYTHON → 内置 → .venv → 系统）
-                                        ├─ 懒启动 / 超时 / 崩溃自动重启
-                                        └─ 请求 id 关联，事件与响应分流
+渲染进程 ──IPC──▶ MusicdlProvider ──▶ engine/musicdl（门面）──▶ engine/ts（15 个音源）
+                                          │
+                                          ├─ 分页并行 + 失败计数（AsyncLocalStorage）
+                                          ├─ 搜索缓存 / 请求合并锁 / 45s 超时
+                                          └─ 逐首回调（真流式，不轮询）
 ```
 
-**为什么用 stdio 而不是 HTTP**：不用抢端口、不用处理 CORS、进程生命周期天然跟随主进程；
-一行一个 JSON 也足够做流式进度推送（`download` 命令会持续吐 `event: progress`）。
+**为什么不再用子进程**：早期版本通过 stdio NDJSON 桥接 Python 的 musicdl
+（完整记录见 [`engine-ts-migration.md`](./engine-ts-migration.md)）。那座桥有三项固定成本：
+解释器冷启动 1.0s（外加 `import musicdl` 0.9s）、每条结果两次 JSON 编解码与跨进程拷贝、
+为拿到「逐首」粒度而加的 120ms 观察线程。进程内实现把三项一并去掉，
+最坏路径从 19~34s 降到 4~9s，首批结果从 3.0s 提前到 0.7s。
 
-**性能取舍**：musicdl 的 `search()` 会把「搜索」和「逐首解析真实地址」耦合在一起，
-所以引擎音源的搜索天然比原生音源慢一个数量级。桥里做了四件事：
+**性能取舍**：引擎的 `search()` 会把「搜索」和「逐首解析真实地址」耦合在一起，
+所以引擎音源的搜索天然比原生音源慢。引擎层做了四件事：
 
 1. **分页并行**：`search_size_per_page` 调到 2~3，让 10 条结果拆成 4~5 页并发解析
-   （同一页内是串行的，页与页之间才走线程池）。酷狗 19s → 9s，咪咕 17s → 6.7s；
+   （同一页内是串行的，页与页之间才并发）。酷狗从 31.8s 降到 3.9s；
    再往下拆会触发平台风控（咪咕每页 2 条反而退化到 50s+），所以按音源单独标定；
 2. **逐首推送**：解析出一首就推一首，用户不用等全部完成（见 5.5.1）；
 3. **并发去重**：同一 `(源, 关键词, 页, 条数)` 用一把锁串起来，后到的等前一个结果；
@@ -206,29 +209,19 @@ Aurora 自己实现了网易云/QQ/酷我（需要榜单与逐字歌词），剩
 引擎侧是「搜索慢、但结果可以逐条产出」的典型场景，所以搜索做成了流式：
 
 ```
-渲染进程  search({..., streamId})        ── invoke ──▶ 主进程
-                                                    │
-主进程    catalog.search(onPartial) ◀───────────────┘
-              │
-              ▼
-          musicdl.searchStream ── NDJSON ──▶ bridge
-                                              │ 每解析出一首
-              ┌───────────────────────────────┘
-              ▼
-          {"event":"partial","id":7,"items":[song]}
-              │
-主进程    engine.dispatch → pending.onPartial → win.webContents.send('provider:search-partial')
-              │
+渲染进程  search({..., streamId})  ── invoke ──▶ 主进程
+主进程    catalog.search(onPartial) ──▶ musicdl.searchStream ──▶ engine/ts
+                                              │ 每解析出一首回调一次
+主进程    win.webContents.send('provider:search-partial')
+                                              │
 渲染进程  store.results 追加（按 platform:id 去重）→ 表格实时增长
 ```
 
 两个实现细节值得记一笔：
 
-- **为什么钩在 `_search` 上而不是 `search` 上**：`search()` 要等所有页都跑完才返回，
-  按页推等于最后一起到（实测 4 个分页都在 7.3~7.6s 同时完成）。真正的颗粒度在页内——
-  `_search` 每解析出一首就往 `song_infos` 里 append 一次。桥里用一个 120ms 的观察线程
-  盯列表长度，有新元素就推，不侵入 musicdl 的任何代码。
-  效果：首条结果从 7.8s 提前到 3.7s，之后每 1~2s 追加一批。
+- **回调点在自己的循环里**：旧实现只能 monkeypatch 上游的 `_search`，再用 120ms 观察线程
+  盯列表长度伪造逐首；现在解析循环就在 `engine/ts` 里，每完成一首直接 `onItems([song])`。
+  效果：首批结果从 3.0s 提前到 0.7s（咪咕实测），事件粒度是「一首」而不是「一批」。
 - **收尾不整体替换**：流式顺序是「谁先解析完谁在前」，最终顺序是「按页序」。
   如果两者集合一致，渲染层保留已渲染的顺序不动——顺序跳变比顺序不完美更刺眼；
   只有集合不一致（比如上游去重掉了重复项）才用最终结果替换。
@@ -278,11 +271,31 @@ muse://local/?p=<encoded file path>                    → 本地文件
 
 ## 7. 播放层
 
-`AudioEngine` 只做三件事：
+`AudioEngine` 只做四件事：
 
 1. **事件归一化**：`time / duration / buffered / playing / waiting / ended / error`；
 2. **淡入淡出**：切歌时 0 → 目标音量 420ms，暂停时反向淡出后再 `pause()`，避免爆音；
-3. **音量安全**：所有写入 clamp 到 `[0,1]`（插值越界会让 `HTMLMediaElement.volume` 抛 `IndexSizeError`）。
+3. **音量安全**：所有写入 clamp 到 `[0,1]`（插值越界会让 `HTMLMediaElement.volume` 抛 `IndexSizeError`）；
+4. **音量双写**：每次设音量/静音都同时写元素和音频图的 `GainNode`（见 7.1）。
+
+### 7.1 音量必须写两个地方（Web Audio 接管陷阱）
+
+「正在播放」舞台打开时 `core/wave.ts` 会执行 `createMediaElementSource(el)` 取频谱。  
+**这一步会让浏览器彻底忽略元素的 `volume` 与 `muted`**——声音改由音频图输出，元素上的两个属性只是两个没人读的字段。
+
+症状很具体：滑块能拖、喇叭图标变成静音、`player.volume` 也变了，但声音一点没变。只在前端改 `el.volume` 的写法在「打开过舞台」之后必然失效，且在没有打开舞台时又是好的，所以极易被误判成偶发。
+
+因此音频图里必须有受控增益，且音量/静音双写：
+
+```
+source → gain → destination      ← 出声链，gain 由音量/静音控制
+source → analyser                ← 可视链，取样在增益之前
+```
+
+- `wave.setGain(v)` / `wave.setMuted(m)` 由 `AudioEngine.applyVolume` / `setMuted` 调用，未挂接时是空操作；
+- analyser 故意接在**增益前**：静音时波形仍在动（符合播放器习惯）。若串在增益后，静音 2 秒就会被 `checkSimulated` 判成「analyser 失效」而降级成假波形；
+- `attach` 用元素当前 `volume/muted` 初始化增益——舞台可能在播放中途才打开，挂接晚于设音量；
+- 舞台在首次播放前打开时元素还没有 `src`，`attach` 会跳过，所以 `playing` 事件里会再挂一次（幂等）。
 
 歌词同步在 `LyricPane` 内独立跑 rAF：直接读 `audio.currentTime`（精度远高于 `timeupdate` 的 4Hz），  
 二分查找当前行，行变化时用 `translate3d` 把该行移到容器中线，CSS `transition: 0.52s` 负责缓动。  
@@ -327,10 +340,9 @@ Store 中的 `activeLyricIndex` 则供桌面歌词与进度条使用。
 **引擎调用**
 
 ```
-MusicdlProvider.search → EngineClient.call('search', …)
-        → 引擎未启动？spawn python bridge.py，等 ready 事件
-        → 写一行 JSON 到 stdin，按 id 等 stdout 上的响应
-        → 超时/进程退出 → 杀进程、标记 error、下次调用重新拉起
+MusicdlProvider.search → musicdl.searchStream / resolve / lyric / tag
+        → 直接调用 src/main/engine/ts（进程内，无子进程）
+        → 失败按 EngineError.code 归一化成 ProviderError（blocked / notfound / timeout）
 ```
 
 ---
@@ -355,15 +367,12 @@ MusicdlProvider.search → EngineClient.call('search', …)
 2. QQ 音乐未登录时绝大多数曲目没有播放权限（`purl` 为空），实际播放依赖换源。
 3. 酷我搜索不返回封面、歌词接口需鉴权，因此封面用渐变占位、歌词走 LRCLIB。
 4. 已实现逐字歌词（网易云 YRC）；未实现音效均衡器（已在扩展点列出）。
-5. **引擎音源依赖本机 Python**：`engine/.venv` 未就绪时这些音源不可用（应用其余部分正常）。
-   打包只带 musicdl **源码**（`engine/vendor`，由 `npm run engine:vendor` 生成），不带虚拟环境——
-   虚拟环境与平台/解释器版本绑定，不能跨机分发。安装版首次使用引擎音源时，
-   需要目标机器有 Python 3.10+ 与 musicdl 依赖，设置页的「指定解释器」会写进
-   `settings.pythonPath` 并优先于其它探测顺序；也可以把便携运行时放到 `resources/python`。
-6. **引擎音源搜索较慢**（整批 5~10s）：这是 musicdl 在搜索阶段就解析真实地址导致的，
-   已通过分页并行 + 逐首推送 + 缓存 + 并发去重压到可接受范围——首条 3~4s 可见，
-   但整批完成仍需等这么久。要进一步提速需要改造上游的搜索/解析耦合。
+5. **引擎音源不依赖任何外部运行时**：15 个源全部在进程内用 TypeScript 实现，安装包不含 Python。
+   代价是签名算法维护在自己手上，平台改版时要改 `engine/ts/sources`，
+   没有「重新拉一次上游 wheel 就能修」的便利。
+6. **引擎音源搜索较慢**（整批 2~7s）：这是引擎在搜索阶段就解析真实地址导致的，
+   已通过分页并行 + 逐首推送 + 缓存 + 并发去重压到可接受范围——首条 0.7~1.5s 可见，
+   但整批完成仍需等这么久。要进一步提速需要改造搜索与解析的耦合。
 7. 部分引擎音源的歌词为空或只有纯文本，取决于平台是否返回。
-8. `musicdl` vendor 源码里曾出现空字节损坏（`quarkparser.py` / `cookies.py`），
-   已提供 `scripts/repair_musicdl.py` 从 PyPI 同版本回填；重新拉取 vendor 后若报
-   `SyntaxError: source code string cannot contain null bytes`，先跑一次该脚本。
+8. 本文 5.5 的行为描述以迁移后的 TS 实现为准；与旧 Python 版的逐源对拍基线见
+   [`engine-ts-parity-report.md`](./engine-ts-parity-report.md)（历史记录，不再更新）。

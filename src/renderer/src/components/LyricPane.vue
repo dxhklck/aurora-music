@@ -215,11 +215,11 @@ onBeforeUnmount(() => {
   font-size: 21px;
   font-weight: 700;
   letter-spacing: 0.2px;
-  background: linear-gradient(100deg, #fff, color-mix(in srgb, var(--accent) 70%, #fff));
+  background: linear-gradient(100deg, #fff, var(--accent));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 6px 26px color-mix(in srgb, var(--accent) 45%, transparent);
+  text-shadow: 0 6px 26px rgba(0, 0, 0, 0.35);
 }
 .line.active .trans {
   opacity: 0.8;
@@ -270,7 +270,10 @@ onBeforeUnmount(() => {
 }
 .w-fill {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   color: #fff;
   -webkit-text-fill-color: #fff;
   text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 60%, transparent),

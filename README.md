@@ -38,7 +38,6 @@
 
 ```bash
 npm install
-npm run engine:setup  # 可选：创建 engine/.venv 启用引擎音源
 npm run dev           # 开发模式
 npm test              # 单元测试
 npm run selftest      # 无界面跑通 音源→下载→引擎 全链路
@@ -48,15 +47,15 @@ npm run typecheck     # 类型检查
 ## 打包与发版
 
 ```bash
-npm run dist          # 本地打包（engine:vendor + build + electron-builder）
+npm run dist          # 本地打包（build + electron-builder）
 git tag v1.x.x && git push origin v1.x.x   # CI 三平台构建并自动发布 GitHub Release
 ```
 
-安装包的引擎依赖说明：
+运行时说明：
 
-- **Windows**：安装包已内置 Python 3.12 运行时与 musicdl 依赖，装完即用，无需配置
-- **macOS / Linux**：需本机 Python 3.10+ 且已 `pip install musicdl`，在设置页「指定解释器」选中即可
-- 引擎音源失效时，设置页「修复源码」按钮可一键重拉官方 musicdl 覆盖（需联网）
+- 15 个长尾音源（酷狗 / 咪咕 / 千千 / 5sing / B 站 …）由进程内的 TypeScript 引擎承载，
+  **安装包不含 Python，也不需要在目标机器上装任何运行时**
+- HLS 音源转封装依赖系统中的 `ffmpeg`；缺失时会退回 TS 分片并明确提示
 
 ## 平台支持
 
@@ -71,4 +70,5 @@ git tag v1.x.x && git push origin v1.x.x   # CI 三平台构建并自动发布 G
 
 本项目仅用于**学习与技术研究**：只访问各平台公开可访问的端点，不内置任何账号或 Cookie，不托管、不分发任何版权内容。请通过官方渠道获取付费/会员内容，并遵守各平台服务条款。
 
-`musicdl` 为上游 Python 项目（MIT），本应用以子进程方式调用，不做修改分发。
+音源引擎的分页并行、逐首回调与错误码分类借鉴自 `musicdl`（MIT）；实现已全部改为 TypeScript，
+运行时不包含 Python，也不再分发上游代码。迁移记录见 [`docs/python-removal.md`](docs/python-removal.md)。

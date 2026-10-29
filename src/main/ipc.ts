@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { AppSettings, Song } from '@shared/types'
+import type { AppSettings, MiniVolumeState, Song } from '@shared/types'
 import { setProviderCookies } from './providers/cookies'
 import type { TrayState } from '@shared/api'
 import { updateTrayState } from './tray'
@@ -29,7 +29,17 @@ import {
   getLyricWindow,
   getMainWindow,
   setLyricLocked,
-  setLyricMode
+  setLyricHover,
+  setLyricMode,
+  setMiniExtra,
+  toggleVolumePopup,
+  closeVolumePopup,
+  getVolumeState,
+  pushVolumeState,
+  emitVolumeChanged,
+  lyricDragStart,
+  lyricDragMove,
+  lyricDragEnd
 } from './windows'
 
 function handle(channel: string, fn: (...args: any[]) => unknown): void {
@@ -199,32 +209,9 @@ export function registerIpc(): void {
     return next
   })
 
-  // ---------- musicdl 引擎 ----------
+  // ---------- 音源引擎 ----------
   handle(IPC.engineStatus, () => musicdl.status())
   handle(IPC.engineRestart, () => musicdl.restart())
-  handle(IPC.engineChoosePython, async () => {
-    const win = getMainWindow()
-    const options = {
-      title: '选择 Python 解释器',
-      properties: ['openFile' as const],
-      filters:
-        process.platform === 'win32'
-          ? [{ name: 'Python', extensions: ['exe'] }]
-          : [{ name: '所有文件', extensions: ['*'] }]
-    }
-    const picked = win
-      ? await dialog.showOpenDialog(win, options)
-      : await dialog.showOpenDialog(options)
-    if (picked.canceled || !picked.filePaths.length) return musicdl.status()
-    await settings.set({ pythonPath: picked.filePaths[0] })
-    return musicdl.restart()
-  })
-  // 引擎自愈：上游音源失效时重拉官方源码覆盖 vendor，然后重启引擎
-  handle(IPC.engineRepairVendor, async () => {
-    const repair = await musicdl.repairVendor()
-    if (!repair.ok) throw new Error(repair.message ?? '修复失败')
-    return musicdl.restart()
-  })
 
   // ---------- 更新 ----------
   handle(IPC.updateCheck, () => checkForUpdate())
@@ -240,6 +227,17 @@ export function registerIpc(): void {
   })
   on(IPC.winClose, () => getMainWindow()?.close())
   handle(IPC.winIsMaximized, () => getMainWindow()?.isMaximized() ?? false)
+  // 迷你窗口附加区（歌词/队列/音量）：fire-and-forget，渲染层不等待窗口尺寸变更
+  on(IPC.miniSetExtra, (extra: number, direction: 'up' | 'down') =>
+    setMiniExtra(Number(extra) || 0, direction === 'up' ? 'up' : 'down')
+  )
+
+  // ---------- 迷你音量气泡 ----------
+  handle(IPC.miniVolumeToggle, (state: MiniVolumeState) => toggleVolumePopup(state))
+  handle(IPC.miniVolumeInit, () => getVolumeState())
+  on(IPC.miniVolumeSet, (volume: number) => emitVolumeChanged(Number(volume) || 0))
+  on(IPC.miniVolumePush, (state: MiniVolumeState) => pushVolumeState(state))
+  on(IPC.miniVolumeClose, () => closeVolumePopup())
 
   // ---------- 托盘 ----------
   on(IPC.trayState, (state: TrayState) => updateTrayState(state))
@@ -275,7 +273,8 @@ export function registerIpc(): void {
       destroyLyricWindow()
       return false
     }
-    createLyricWindow(settings.get().desktopLyricMode)
+    // 只保留大字样式：创建一律 full（旧配置里持久化的 mini 不再生效）
+    createLyricWindow('full')
     setLyricLocked(settings.get().desktopLyricLocked)
     return true
   })
@@ -301,10 +300,16 @@ export function registerIpc(): void {
     broadcastSettings(next)
     getLyricWindow()?.webContents.send(IPC.lyricWindowState, { locked })
   })
+  // 锁定态悬停：渲染层 mousemove/mouseleave 通知，临时恢复/收回交互
+  on(IPC.lyricWindowHover, (hover: boolean) => setLyricHover(hover))
   on(IPC.lyricWindowPush, (state: unknown) => {
     const win = getLyricWindow()
     if (win && !win.isDestroyed()) win.webContents.send(IPC.lyricWindowState, state)
   })
+  // 手动拖拽：渲染层 mousedown 记录起点，mousemove 报位移，mouseup 结束
+  on(IPC.lyricWindowDragStart, () => lyricDragStart())
+  on(IPC.lyricWindowDragMove, (dx: number, dy: number) => lyricDragMove(dx, dy))
+  on(IPC.lyricWindowDragEnd, () => lyricDragEnd())
 }
 
 function broadcastSettings(next: AppSettings): void {

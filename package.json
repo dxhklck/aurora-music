@@ -13,15 +13,15 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "demo:audio": "python scripts/make_demo_audio.py",
-    "engine:setup": "python scripts/setup_engine.py",
-    "engine:repair": "python scripts/repair_musicdl.py",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
+    "demo:audio": "node scripts/make-demo-audio.mjs",
     "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
     "selftest": "npm run build && node scripts/run-selftest.mjs",
     "test": "npm run test:unit",
-    "engine:vendor": "python scripts/vendor_engine.py",
-    "dist": "npm run engine:vendor && electron-vite build && electron-builder"
+    "engine:build": "node scripts/engine-ts/build.mjs",
+    "engine:e2e": "npm run engine:build && node scripts/engine-ts/.build/e2e.mjs",
+    "engine:test": "node scripts/engine-ts/test/run.mjs",
+    "dist": "electron-vite build && electron-builder"
   },
   "dependencies": {
     "@types/jsbn": "^1.2.33",

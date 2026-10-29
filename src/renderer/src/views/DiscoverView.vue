@@ -23,6 +23,8 @@ const starting = ref(false)
 
 const provider = computed(() => app.currentProvider)
 const recent = computed(() => player.recent.slice(0, 6))
+/** 首页排行榜区块只精选前 4 个（全量榜单在「排行榜」页） */
+const featuredCharts = computed(() => charts.value.slice(0, 4))
 /**
  * 底部搜索胶囊：三路混排，替代原来的 5 个写死词。
  * 1. 最近播放里的歌手（去重取 2 个）——跟着用户口味走
@@ -202,9 +204,11 @@ watch(() => app.platform, loadCharts)
       <h2 class="section-title">
         排行榜
         <span class="tag">{{ provider?.name }}</span>
+        <button class="text-btn" @click="router.push({ name: 'charts' })">更多榜单 →</button>
       </h2>
       <div class="chart-grid">
-        <ChartDotItem v-for="chart in charts" :key="chart.id" :chart="chart" />
+        <!-- 首页只精选前 4 个榜单（榜单全量在「排行榜」页） -->
+        <ChartDotItem v-for="chart in featuredCharts" :key="chart.id" :chart="chart" />
       </div>
     </template>
 
@@ -359,9 +363,10 @@ watch(() => app.platform, loadCharts)
 
 .chart-grid {
   display: grid;
-  /* auto-fit + 最小列宽：榜单名一律单行完整显示，窄屏自动减少列数而不是挤压换行 */
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 8px 12px;
+  /* 所有榜单强制同一行：列数跟随榜单数量，每列等宽收窄铺满容器 */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px 10px;
 }
 
 .text-btn {
@@ -442,6 +447,15 @@ watch(() => app.platform, loadCharts)
   }
   .chart-grid {
     gap: 4px 10px;
+    /* 手机上单行塞不下全部榜单：仍保持单行，改为横向滑动，列保住最小可读宽度 */
+    grid-auto-columns: minmax(150px, 1fr);
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-right: -14px;
+    padding-right: 14px;
+  }
+  .chart-grid::-webkit-scrollbar {
+    display: none;
   }
 }
 </style>

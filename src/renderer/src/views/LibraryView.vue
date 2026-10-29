@@ -7,10 +7,6 @@ import { useLibraryStore } from '../stores/library'
 import { useDownloadStore } from '../stores/download'
 import { useAppStore } from '../stores/app'
 import { formatBytes } from '@shared/lyric'
-import { isNativeMobile } from '../core/platform'
-
-/** 原生容器：目录选择/导入依赖桌面文件管理器，隐藏对应按钮 */
-const isNative = isNativeMobile()
 
 const library = useLibraryStore()
 const download = useDownloadStore()
@@ -53,12 +49,10 @@ onMounted(async () => {
         <p>下载完成的曲目会连同歌词与元数据一起归档，离线也能播放</p>
       </div>
       <div class="head-actions">
-        <!-- 移动端：MediaStore 目录导入为后续里程碑，先隐藏死入口 -->
-        <button v-if="!isNative" class="btn" @click="library.importDir()">
+        <button class="btn" @click="library.importDir()">
           <Icon name="folder-plus" :size="14" /> 导入本地音乐
         </button>
-        <!-- 移动端目录固定，无需选择 -->
-        <button v-if="!isNative" class="btn" @click="openDir">
+        <button class="btn" @click="openDir">
           <Icon name="folder" :size="14" /> 下载目录
         </button>
         <button class="btn" @click="library.refresh()">

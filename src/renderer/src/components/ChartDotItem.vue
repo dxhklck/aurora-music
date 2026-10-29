@@ -70,10 +70,10 @@ function hash(text: string): number {
   min-width: 0;
   font-size: 12.5px;
   font-weight: 500;
-  /* 单行完整显示：不换行、不省略 */
+  /* 单行显示：放不下时省略号收尾（等宽单行布局下列宽有限） */
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: clip;
+  text-overflow: ellipsis;
 }
 .chart-dot > small {
   flex: none;

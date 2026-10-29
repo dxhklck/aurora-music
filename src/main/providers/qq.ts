@@ -43,6 +43,14 @@ const CHARTS = [
   { id: '62', name: '飙升榜', subtitle: '播放增速最快' }
 ]
 
+/** 官方榜单目录条目（fcg_myqq_toplist） */
+interface QQTopListItem {
+  id: number
+  topTitle: string
+  listenCount?: number
+  picUrl?: string
+}
+
 /**
  * QQ 音乐适配器。
  * 搜索与榜单走公开的 c.y.qq.com 接口；播放地址需要通过 musicu.fcg 换取 vkey，
@@ -56,12 +64,14 @@ export class QQProvider extends BaseProvider {
     color: '#31c27c',
     gradient: ['#41d18a', '#0b6b43'],
     capabilities: { search: true, charts: true, stream: true, lyric: true },
-    description: '热歌榜 / 新歌榜 / 飙升榜，封面与歌词质量高',
+    description: '官方全量榜单（巅峰 / 地区 / 曲风），封面与歌词质量高',
     note: '搜索与播放都需要登录；未登录时将自动换源到其它平台'
   }
 
   private readonly referer = 'https://y.qq.com/'
   private readonly guid = String(1000000000 + Math.floor(Math.random() * 900000000))
+  /** 官方榜单目录缓存（10 分钟） */
+  private toplistCache: { at: number; items: ChartSummary[] } | null = null
 
   protected baseHeaders(): Record<string, string> {
     return {
@@ -168,6 +178,59 @@ export class QQProvider extends BaseProvider {
   }
 
   async charts(): Promise<ChartSummary[]> {
+    // 10 分钟缓存：榜单目录变化极慢，避免每次进页都打接口
+    if (this.toplistCache && Date.now() - this.toplistCache.at < 10 * 60_000) {
+      return this.toplistCache.items
+    }
+    try {
+      const data = await this.json<{ data?: { topList?: QQTopListItem[] } }>(
+        'https://c.y.qq.com/v8/fcg-bin/fcg_myqq_toplist.fcg?format=json',
+        { headers: { Referer: this.referer } }
+      )
+      const list = (data.data?.topList ?? []).filter(
+        (item) => item.topTitle && !/mv/i.test(item.topTitle)
+      )
+      if (list.length) {
+        const items = list.map((item) => ({
+          id: String(item.id),
+          platform: this.info.id,
+          name: item.topTitle,
+          subtitle:
+            item.listenCount && item.listenCount > 0
+              ? `${Math.round(item.listenCount / 10000)}万人在听`
+              : undefined,
+          coverUrl: item.picUrl ? mediaUrl(item.picUrl, this.referer) : null,
+          updateFrequency: '每日更新'
+        }))
+        // 精选 9 个（顺序即展示顺序）：前四个巅峰榜为发现页固定精选，其余为曲风/场景补充。
+        // 按关键字在官方目录里取首个匹配（官方名称带「巅峰榜·」前缀，且热歌/新歌有同名榜，官方排序在前者胜出）。
+        const keywords = [
+          '飙升',
+          '热歌',
+          '新歌',
+          '流行指数',
+          '说唱',
+          '电音',
+          '国乐',
+          '抖音热歌',
+          '影视金曲'
+        ]
+        const picked: ChartSummary[] = []
+        for (const keyword of keywords) {
+          const hit = items.find((item) => !picked.includes(item) && item.name.includes(keyword))
+          if (hit) picked.push(hit)
+        }
+        if (picked.length >= 9) {
+          this.toplistCache = { at: Date.now(), items: picked }
+          return picked
+        }
+        // 关键字匹配不齐（官方目录变动）时退回全量列表，保证页不空
+        this.toplistCache = { at: Date.now(), items }
+        return items
+      }
+    } catch {
+      /* 目录接口挂了回退到内置三榜 */
+    }
     return CHARTS.map((chart) => ({
       id: chart.id,
       platform: this.info.id,

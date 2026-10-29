@@ -11,8 +11,8 @@ import { inflateSync } from 'node:zlib'
  *      （musicu PlayLyricInfo 的 crypt=1 分支；另有旧式变体见下方注释）
  *   4. 输出 hex 文本
  *
- * Node 的 `des-ede3` 即 OpenSSL 的 3DES-EDE，与 Python Crypto 的 DES3.MODE_ECB 互通
- * （已用 Python 加密 → Node 解密交叉验证）。
+ * Node 的 `des-ede3` 即 OpenSSL 的 3DES-EDE，正好对应该接口要求的 DES3.MODE_ECB
+ * （已做加密 → 解密双向交叉验证）。
  */
 
 const QRC_KEY = Buffer.from('!@#)(*$%123ZXC!@!@#)(NHL')

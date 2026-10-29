@@ -1,79 +1,27 @@
-import { existsSync } from 'node:fs'
-import { spawn } from 'node:child_process'
-import { app } from 'electron'
-import { bridgeScript, musicdlDirs, repairScript, vendoredMusicdlDir } from '../paths'
-import { settings } from '../services/settings'
-import { engine, EngineCallError, type EngineEvent } from './python'
+import * as tsEngine from './ts'
 import type { EngineStatus } from './types'
-
-/** 引擎侧一首歌的原始形态（对应 musicdl SongInfo 的裁剪视图） */
-export interface EngineSong {
-  /** 源内稳定 id（musicdl identifier 或元信息 md5） */
-  id: string
-  /** 进程内句柄，用于跳过重新搜索直接取地址 */
-  token: string
-  name: string
-  singers: string
-  album: string
-  ext: string
-  durationMs: number
-  sizeBytes: number
-  bitrate: number
-  codec: string
-  coverUrl: string
-  hasUrl: boolean
-  protocol: string
-}
-
-export interface EngineSearchResult {
-  items: EngineSong[]
-  total: number
-  page: number
-  hasMore: boolean
-  cost?: number
-}
-
-export interface EngineResolveResult {
-  url: string
-  headers: Record<string, string>
-  cookies: Record<string, string>
-  ext: string
-  size: number
-  bitrate: number
-  codec: string
-  /** HTTP | HLS */
-  protocol: string
-  token: string
-  lyric: string
-  coverUrl: string
-}
-
-export interface EngineTagPayload {
-  path: string
-  title: string
-  artists: string
-  album: string
-  lyric?: string
-}
-
-export interface ResolveQuery {
-  source: string
-  token?: string
-  name?: string
-  artists?: string
-  durationMs?: number
-  keyword?: string
-}
+import type { ResolveQuery } from './ts/types'
+import type { TagPayload } from './ts/tag-types'
 
 /**
- * musicdl 引擎的类型化门面。
+ * 音源引擎门面。
  *
- * 只做三件事：参数整形、错误归一化、把「引擎没装」翻译成用户能懂的提示。
- * 业务判断（换源、缓存、落库）仍然在 services 层，避免引擎细节外溢。
+ * 实现全部在 `./ts`（进程内 TypeScript，无子进程、无外部运行时依赖）。
+ * 这里只保留上层依赖的窄接口与状态视图；业务判断（换源、缓存、落库）仍在 services 层。
  */
+
+export type { EngineSong, EngineSearchResult, EngineResolveResult } from './ts'
+export type { ResolveQuery } from './ts/types'
+export type EngineTagPayload = TagPayload
+
 class MusicdlEngine {
-  async search(source: string, keyword: string, page = 1, limit = 20): Promise<EngineSearchResult> {
-    return engine.call<EngineSearchResult>('search', { source, keyword, page, limit }, 60_000)
+  async search(
+    source: string,
+    keyword: string,
+    page: number,
+    limit: number
+  ): Promise<tsEngine.EngineSearchResult> {
+    return tsEngine.search({ source, keyword, page, limit })
   }
 
   /** 流式搜索：每解析出一首就回调一次，全部结束后返回完整结果 */
@@ -82,33 +30,17 @@ class MusicdlEngine {
     keyword: string,
     page: number,
     limit: number,
-    onItems: (items: EngineSong[]) => void
-  ): Promise<EngineSearchResult> {
-    return engine.callStream<EngineSearchResult>(
-      'search',
-      { source, keyword, page, limit },
-      (items) => onItems(items as EngineSong[]),
-      60_000
-    )
+    onItems: (items: tsEngine.EngineSong[]) => void
+  ): Promise<tsEngine.EngineSearchResult> {
+    return tsEngine.search({ source, keyword, page, limit }, onItems)
   }
 
-  async resolve(query: ResolveQuery): Promise<EngineResolveResult> {
-    return engine.call<EngineResolveResult>(
-      'resolve',
-      {
-        source: query.source,
-        token: query.token,
-        name: query.name,
-        artists: query.artists,
-        durationMs: query.durationMs,
-        keyword: query.keyword
-      },
-      60_000
-    )
+  async resolve(query: ResolveQuery): Promise<tsEngine.EngineResolveResult> {
+    return tsEngine.resolve(query)
   }
 
   async lyric(query: ResolveQuery): Promise<{ lyric: string; source: string }> {
-    return engine.call<{ lyric: string; source: string }>('lyric', { ...query }, 60_000)
+    return tsEngine.lyric(query)
   }
 
   /** HLS 只能交给引擎合并分片；HTTP 直链走主进程自己的下载器 */
@@ -118,116 +50,32 @@ class MusicdlEngine {
     taskId: string,
     onProgress: (received: number, total: number) => void
   ): Promise<{ path: string; size: number }> {
-    const off = engine.onEvent((event: EngineEvent) => {
-      if (event.event !== 'progress' || event.taskId !== taskId) return
-      onProgress(event.received ?? 0, event.total ?? 0)
-    })
-    try {
-      return await engine.call<{ path: string; size: number }>(
-        'download',
-        { ...query, path, taskId },
-        30 * 60_000
-      )
-    } finally {
-      off()
-    }
+    return tsEngine.downloadHlsTo({ ...query, path, taskId }, onProgress)
   }
 
-  async tag(payload: EngineTagPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
-    return engine.call('tag', { ...payload }, 20_000)
+  async tag(payload: TagPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
+    return tsEngine.tag(payload)
   }
 
+  /** 进程内实现：导入成功即可用，不存在「运行时就绪」这一说 */
   status(): EngineStatus {
-    const base = engine.status()
-    const bridgeFound = existsSync(bridgeScript())
-    const musicdlFound = musicdlDirs().length > 0
-    return { ...base, bridgeFound, musicdlFound, packaged: app.isPackaged }
+    return {
+      ready: true,
+      runtime: {
+        command: 'node',
+        label: '内置 TypeScript 引擎',
+        version: process.versions.node,
+        sources: tsEngine.sources().length
+      },
+      error: ''
+    }
   }
 
-  /** 设置页的「检测引擎」按钮：强制重启并回报结果 */
-  async restart(): Promise<EngineStatus> {
-    await engine.stop()
-    try {
-      await engine.ensure()
-    } catch {
-      /* 错误已记录在 status().error */
-    }
+  /** 设置页的「重新检测」：清缓存后重新报告状态 */
+  restart(): EngineStatus {
+    tsEngine.reset()
     return this.status()
-  }
-
-  /**
-   * 引擎自愈：重拉官方 musicdl wheel 覆盖随包 vendor 源码。
-   * 依次尝试引擎当前解释器 → 设置页指定解释器 → 系统解释器；
-   * 只有一行 stdout JSON（{"ok":...}），诊断都在 stderr。
-   */
-  async repairVendor(): Promise<{ ok: boolean; message?: string }> {
-    const script = repairScript()
-    if (!existsSync(script)) return { ok: false, message: `找不到修复脚本：${script}` }
-
-    const candidates = [
-      engine.status().runtime?.command,
-      settings.get().pythonPath,
-      process.platform === 'win32' ? 'py' : 'python3',
-      'python'
-    ].filter((item): item is string => !!item)
-
-    let lastMessage = ''
-    for (const command of candidates) {
-      try {
-        const result = await this.runRepairScript(command, script)
-        if (result.ok) return result
-        lastMessage = result.message ?? '未知错误'
-      } catch (error) {
-        lastMessage = (error as Error).message
-      }
-    }
-    return { ok: false, message: lastMessage || '没有可用的 Python 解释器' }
-  }
-
-  private runRepairScript(command: string, script: string): Promise<{ ok: boolean; message?: string }> {
-    return new Promise((resolve) => {
-      const child = spawn(command, [script, '--target', vendoredMusicdlDir()], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
-      })
-      let stdout = ''
-      let stderr = ''
-      const timer = setTimeout(() => {
-        child.kill()
-        resolve({ ok: false, message: '修复脚本执行超时（180s）' })
-      }, 180_000)
-
-      child.stdout?.setEncoding('utf8')
-      child.stdout?.on('data', (chunk: string) => {
-        stdout += chunk
-      })
-      child.stderr?.setEncoding('utf8')
-      child.stderr?.on('data', (chunk: string) => {
-        stderr += chunk
-      })
-      child.on('error', (error) => {
-        clearTimeout(timer)
-        resolve({ ok: false, message: `${command} 启动失败：${error.message}` })
-      })
-      child.on('exit', () => {
-        clearTimeout(timer)
-        const line = stdout.split(/\r?\n/).find((item) => item.trim().startsWith('{'))
-        if (!line) {
-          resolve({ ok: false, message: stderr.trim().slice(-300) || '脚本没有返回结果' })
-          return
-        }
-        try {
-          const parsed = JSON.parse(line) as { ok?: boolean; message?: string }
-          if (parsed.ok) resolve({ ok: true })
-          else resolve({ ok: false, message: parsed.message ?? '脚本报告失败' })
-        } catch {
-          resolve({ ok: false, message: `无法解析脚本输出：${line.slice(0, 120)}` })
-        }
-      })
-    })
   }
 }
 
 export const musicdl = new MusicdlEngine()
-export { EngineCallError }

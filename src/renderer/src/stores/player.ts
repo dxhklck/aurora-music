@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 import type { Lyric, PlayMode, Song } from '@shared/types'
 import { findLyricIndex } from '@shared/lyric'
 import { audio } from '../core/audio'
-import { bindNativeMediaControl, syncNativeMedia } from '../core/native-media'
 import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
@@ -26,6 +25,15 @@ function loadResume(): ResumeSnapshot | null {
   } catch {
     return null
   }
+}
+
+/** 音源可能返回 name 缺失或字面 "Undefined" 的脏数据：入队前统一兜底 */
+function sanitizeSongs(songs: Song[]): Song[] {
+  return songs.map((song) =>
+    !song.name || song.name.toLowerCase() === 'undefined'
+      ? { ...song, name: '未知曲目' }
+      : song
+  )
 }
 
 export const usePlayerStore = defineStore('player', () => {
@@ -93,21 +101,6 @@ export const usePlayerStore = defineStore('player', () => {
   function bindEngine(): void {
     if (engineBound) return
     engineBound = true
-    // C3：系统媒体控制（通知按钮/线控/蓝牙/锁屏拖动）→ 播放器动作（桌面 no-op）
-    bindNativeMediaControl({
-      toggle: () => void toggle(),
-      next: () => void next(),
-      prev: () => void prev(),
-      // 线控/蓝牙给的是明确意图，按当前状态收敛成幂等动作，
-      // 避免 toggle 语义在状态不同步时"按暂停变播放"
-      play: () => {
-        if (!playing.value) void toggle()
-      },
-      pause: () => {
-        if (playing.value) audio.pause()
-      },
-      seek: (ms) => seekTo(ms)
-    })
     audio.on('time', (value: number) => {
       time.value = value
       // 断点快照：5 秒一记，只在带标签的队列（首页榜单）下生效
@@ -115,7 +108,7 @@ export const usePlayerStore = defineStore('player', () => {
         lastResumeSave = Date.now()
         saveResume()
       }
-      // 原生通知栏进度条同步：5 秒一推，太频密会刷爆 bridge
+      // 系统媒体面板（MediaSession）状态同步：5 秒一推即可
       if (Date.now() - lastNativeSync > 5000) {
         lastNativeSync = Date.now()
         syncPlaybackState(playing.value)
@@ -194,7 +187,7 @@ export const usePlayerStore = defineStore('player', () => {
         autoSwitch: app.settings?.autoSwitchSource !== false,
         forceSwitch: opts.forceSwitch === true
       })
-      resolvedSong.value = resolved.song
+      resolvedSong.value = sanitizeSongs([resolved.song])[0]
       streamLabel.value = resolved.stream.label
       if (resolved.switchedFrom) {
         notice.value = resolved.notice ?? '已自动切换音源'
@@ -252,7 +245,7 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   function setQueue(songs: Song[], startIndex = 0, tag = ''): void {
-    queue.value = [...songs]
+    queue.value = sanitizeSongs([...songs])
     queueTag.value = tag
     if (queue.value.length) void playAt(Math.max(0, Math.min(startIndex, queue.value.length - 1)))
   }
@@ -265,7 +258,7 @@ export const usePlayerStore = defineStore('player', () => {
     songs: Song[],
     tag: string
   ): Promise<{ resumed: boolean; song: Song | null }> {
-    queue.value = [...songs]
+    queue.value = sanitizeSongs([...songs])
     queueTag.value = tag
     const snap = loadResume()
     if (snap && snap.tag === tag && snap.index >= 0 && snap.index < songs.length) {
@@ -292,6 +285,8 @@ export const usePlayerStore = defineStore('player', () => {
   function playNext(song: Song): void {
     const insertAt = index.value + 1
     queue.value.splice(insertAt, 0, song)
+    // 插队是静默操作，不给反馈用户会以为没点上（与「加入播放列表」的提示对齐）
+    useAppStore().toast(`下一首播放：${song.name}`, 'success')
   }
 
   function appendToQueue(song: Song): void {
@@ -460,18 +455,6 @@ export const usePlayerStore = defineStore('player', () => {
       } catch {
         /* ignore */
       }
-    }
-    // C3：Android 原生前台服务通知（WebView 里 Web MediaSession 不可靠）
-    const song = displaySong.value
-    if (song) {
-      syncNativeMedia({
-        title: song.name,
-        artist: song.artists.join(' / '),
-        album: song.album ?? '',
-        cover: song.coverUrl ?? null,
-        playing: isPlaying,
-        positionMs: Math.round(time.value)
-      })
     }
   }
 

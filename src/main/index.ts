@@ -13,7 +13,6 @@ import { library } from './services/library'
 import { playlists } from './services/playlists'
 import { settings } from './services/settings'
 import { downloads } from './services/download'
-import { engine } from './engine/python'
 import { runSelfTest } from './selftest'
 import { initUpdater } from './updater'
 
@@ -114,14 +113,6 @@ async function bootstrapRuntime(): Promise<void> {
 
   downloads.configure(app.getPath('userData'))
   await downloads.load()
-
-  // 后台预热引擎：第一次搜索不用等 Python 冷启动。
-  // 失败不阻塞启动——用户可能根本不用引擎音源。
-  if (settings.get().engineEnabled) {
-    void engine.ensure().catch((error) => {
-      process.stdout.write(`[engine] 预热失败：${(error as Error).message}\n`)
-    })
-  }
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -155,7 +146,6 @@ if (!app.requestSingleInstanceLock()) {
     if (process.env.AURORA_SELFTEST) {
       const code = await runSelfTest()
       await downloads.flush().catch(() => undefined)
-      await engine.dispose().catch(() => undefined)
       app.exit(code)
       return
     }
@@ -226,7 +216,7 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  // 退出前把下载队列刷盘、关掉 Python 子进程，避免留下孤儿进程与丢状态
+  // 退出前把下载队列刷盘，避免丢状态
   let quitting = false
   app.on('before-quit', (event) => {
     if (quitting) return
@@ -235,7 +225,6 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault()
     void (async () => {
       await downloads.flush().catch(() => undefined)
-      await engine.dispose().catch(() => undefined)
       app.exit(0)
     })()
   })

@@ -81,6 +81,8 @@ function keyOf(index: number): string {
   right: 16px;
   bottom: calc(var(--player) + 6px);
   width: 380px;
+  /* 手机窄屏（≤640px）不能超出视口，留出左右 12px 呼吸 */
+  max-width: calc(100vw - 24px);
   max-height: min(62vh, 560px);
   border-radius: 20px;
   z-index: 70;
@@ -125,7 +127,7 @@ function keyOf(index: number): string {
   transition: background 0.16s;
 }
 .item:hover {
-  background: var(--panel);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .item.playing .text strong {
   /* 混 text 而不是纯白：浅色主题下才不会糊成一片浅色 */

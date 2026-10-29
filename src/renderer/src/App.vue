@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import TitleBar from './components/TitleBar.vue'
 import SideBar from './components/SideBar.vue'
 import PlayerBar from './components/PlayerBar.vue'
-import BottomNav from './components/BottomNav.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
 import NowPlaying from './components/NowPlaying.vue'
 import QueueDrawer from './components/QueueDrawer.vue'
@@ -47,7 +46,11 @@ function pushLyricState(): void {
     sentAt: Date.now(),
     title: song?.name ?? '',
     artist: song?.artists.join(' / ') ?? '',
-    locked: app.settings?.desktopLyricLocked ?? false
+    locked: app.settings?.desktopLyricLocked ?? false,
+    // 强调色随 250ms 推送实时联动桌面歌词窗口（独立窗口拿不到 shellStyle；
+    // 歌词窗口恒定深色，不推 themeMode）
+    accent: app.accent[0],
+    accent2: app.accent[1]
   }
   window.api.pushLyricState(plain(state))
 }
@@ -159,7 +162,6 @@ onBeforeUnmount(() => {
         </router-view>
       </main>
       <PlayerBar />
-      <BottomNav />
     </template>
     <MiniPlayer v-else />
 
@@ -202,11 +204,8 @@ onBeforeUnmount(() => {
 .playerbar {
   grid-area: 3 / 1 / 4 / 3;
 }
-.bottomnav {
-  grid-area: 3 / 1 / 4 / 3;
-}
 
-/* 移动端：标题栏/侧栏退场，内容 + 播放条 + 底部标签栏单列三行 */
+/* 窄窗口：标题栏/侧栏退场，内容 + 播放条单列两行 */
 @media (max-width: 640px) {
   .titlebar,
   .sidebar {
@@ -217,9 +216,6 @@ onBeforeUnmount(() => {
   }
   .playerbar {
     grid-area: 2 / 1 / 3 / 2;
-  }
-  .bottomnav {
-    grid-area: 3 / 1 / 4 / 2;
   }
 }
 

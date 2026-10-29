@@ -1,0 +1,162 @@
+{
+  "sample-tail.m4a": {
+    "file": "sample-tail.m4a",
+    "bytes": 6093,
+    "boxes": [
+      {
+        "type": "ftyp",
+        "offset": 0,
+        "size": 28,
+        "payload": 8
+      },
+      {
+        "type": "free",
+        "offset": 28,
+        "size": 8,
+        "payload": 36
+      },
+      {
+        "type": "mdat",
+        "offset": 36,
+        "size": 5166,
+        "payload": 44
+      },
+      {
+        "type": "moov",
+        "offset": 5202,
+        "size": 891,
+        "payload": 5210
+      }
+    ],
+    "moov_before_mdat": false,
+    "mutagen": {
+      "title": "测试标题",
+      "artist": "测试歌手",
+      "album": "测试专辑",
+      "lyric": "[00:01.00]第一行",
+      "duration": 0.623,
+      "size": 7276
+    },
+    "tagged_bytes": 7276,
+    "tagged_boxes": [
+      {
+        "type": "ftyp",
+        "offset": 0,
+        "size": 28,
+        "payload": 8
+      },
+      {
+        "type": "free",
+        "offset": 28,
+        "size": 8,
+        "payload": 36
+      },
+      {
+        "type": "mdat",
+        "offset": 36,
+        "size": 5166,
+        "payload": 44
+      },
+      {
+        "type": "moov",
+        "offset": 5202,
+        "size": 2074,
+        "payload": 5210
+      }
+    ]
+  },
+  "sample-fast.m4a": {
+    "file": "sample-fast.m4a",
+    "bytes": 6093,
+    "boxes": [
+      {
+        "type": "ftyp",
+        "offset": 0,
+        "size": 28,
+        "payload": 8
+      },
+      {
+        "type": "moov",
+        "offset": 28,
+        "size": 891,
+        "payload": 36
+      },
+      {
+        "type": "free",
+        "offset": 919,
+        "size": 8,
+        "payload": 927
+      },
+      {
+        "type": "mdat",
+        "offset": 927,
+        "size": 5166,
+        "payload": 935
+      }
+    ],
+    "moov_before_mdat": true,
+    "mutagen": {
+      "title": "测试标题",
+      "artist": "测试歌手",
+      "album": "测试专辑",
+      "lyric": "[00:01.00]第一行",
+      "duration": 0.623,
+      "size": 7281
+    },
+    "tagged_bytes": 7281,
+    "tagged_boxes": [
+      {
+        "type": "ftyp",
+        "offset": 0,
+        "size": 28,
+        "payload": 8
+      },
+      {
+        "type": "moov",
+        "offset": 28,
+        "size": 2079,
+        "payload": 36
+      },
+      {
+        "type": "free",
+        "offset": 2107,
+        "size": 8,
+        "payload": 2115
+      },
+      {
+        "type": "mdat",
+        "offset": 2115,
+        "size": 5166,
+        "payload": 2123
+      }
+    ]
+  },
+  "sample-vorbis.ogg": {
+    "file": "sample-vorbis.ogg",
+    "bytes": 4828,
+    "boxes": [],
+    "mutagen": {
+      "title": "测试标题",
+      "artist": "测试歌手",
+      "album": "测试专辑",
+      "lyric": "[00:01.00]第一行",
+      "duration": 0.6,
+      "size": 5957
+    },
+    "tagged_bytes": 5957
+  },
+  "sample-opus.opus": {
+    "file": "sample-opus.opus",
+    "bytes": 6261,
+    "boxes": [],
+    "mutagen": {
+      "title": "测试标题",
+      "artist": "测试歌手",
+      "album": "测试专辑",
+      "lyric": "[00:01.00]第一行",
+      "duration": 0.6,
+      "size": 7392
+    },
+    "tagged_bytes": 7392
+  }
+}

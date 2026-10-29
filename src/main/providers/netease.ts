@@ -34,10 +34,27 @@ interface NeteaseChartCache {
 }
 
 const CHART_DEFS: Array<{ id: string; name: string; subtitle: string; freq: string }> = [
-  { id: '3778678', name: '热歌榜', subtitle: '此刻最多人播放', freq: '每日更新' },
-  { id: '19723756', name: '飙升榜', subtitle: '上升最快的单曲', freq: '每日更新' },
-  { id: '3779629', name: '新歌榜', subtitle: '新鲜出炉的作品', freq: '每日更新' },
-  { id: '2884035', name: '原创榜', subtitle: '独立与原创力量', freq: '每周更新' }
+  { id: '3778678', name: '热歌榜', subtitle: '此刻最多人播放', freq: '每天更新' },
+  { id: '19723756', name: '飙升榜', subtitle: '上升最快的单曲', freq: '刚刚更新' },
+  { id: '3779629', name: '新歌榜', subtitle: '新鲜出炉的作品', freq: '刚刚更新' },
+  { id: '2884035', name: '原创榜', subtitle: '独立与原创力量', freq: '每周四更新' }
+]
+
+/**
+ * 精选榜单白名单（顺序即展示顺序，共 9 个）：官方 /api/toplist 返回 65 个榜，
+ * 全收太杂（音乐合伙人子榜、俄语/越南语等），按「核心榜 + 曲风 + 全球」挑选。
+ * 前四个（飙升/新歌/热歌/原创）同时是发现音乐页的固定精选；id 动态取，官方调整自动跟上。
+ */
+const CHART_NAME_WHITELIST = [
+  '飙升榜',
+  '新歌榜',
+  '热歌榜',
+  '原创榜',
+  '网易云中文说唱榜',
+  '网易云电音榜',
+  '网易云ACG榜',
+  '网易云国风榜',
+  '美国Billboard榜'
 ]
 
 const LEVEL_LABEL: Record<string, string> = {
@@ -61,12 +78,14 @@ export class NeteaseProvider extends BaseProvider {
     color: '#ec4141',
     gradient: ['#ff5f6d', '#8b1a1a'],
     capabilities: { search: true, charts: true, stream: true, lyric: true },
-    description: '曲库最全，热歌榜 / 飙升榜 / 新歌榜',
+    description: '曲库最全，官方 20 个榜单：热歌 / 飙升 / 说唱 / 电音 / 国风 / ACG…',
     note: '部分 VIP / 独家歌曲可能无法播放，会自动跨平台换源'
   }
 
   private readonly referer = 'https://music.163.com/'
   private readonly chartCache = new Map<string, NeteaseChartCache>()
+  /** 官方榜单目录缓存（10 分钟） */
+  private toplistCache: { at: number; items: ChartSummary[] } | null = null
 
   protected baseHeaders(): Record<string, string> {
     return {
@@ -120,6 +139,39 @@ export class NeteaseProvider extends BaseProvider {
   }
 
   async charts(): Promise<ChartSummary[]> {
+    // 10 分钟缓存：官方榜单目录变化极慢，避免每次进页都打接口
+    if (this.toplistCache && Date.now() - this.toplistCache.at < 10 * 60_000) {
+      return this.toplistCache.items
+    }
+    try {
+      const data = await this.json<{
+        list?: Array<{ id: number; name: string; updateFrequency?: string; coverImgUrl?: string }>
+      }>('https://music.163.com/api/toplist', { headers: { Referer: this.referer } })
+      const byName = new Map((data.list ?? []).map((item) => [item.name, item]))
+      const picked: ChartSummary[] = []
+      for (const name of CHART_NAME_WHITELIST) {
+        const item = byName.get(name)
+        if (!item) continue
+        // 四大核心榜沿用内置文案，其余用官方更新频率
+        const preset = CHART_DEFS.find((def) => def.name === name)
+        picked.push({
+          id: String(item.id),
+          platform: this.info.id,
+          name: item.name,
+          subtitle: preset?.subtitle,
+          coverUrl: item.coverImgUrl
+            ? mediaUrl(`${item.coverImgUrl}?param=300y300`, this.referer)
+            : null,
+          updateFrequency: item.updateFrequency ?? preset?.freq ?? '每日更新'
+        })
+      }
+      if (picked.length) {
+        this.toplistCache = { at: Date.now(), items: picked }
+        return picked
+      }
+    } catch {
+      /* 目录接口挂了回退到内置四榜 */
+    }
     return CHART_DEFS.map((item) => ({
       id: item.id,
       platform: this.info.id,

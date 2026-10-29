@@ -18,7 +18,6 @@
   --titlebar: 48px;
   --sidebar: 240px;
   --player: 92px;
-  --bottomnav: calc(60px + env(safe-area-inset-bottom, 0px));
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* 播放条/悬浮条底色（深浅主题各自给定） */
@@ -26,12 +25,12 @@
   /* 输入框底色 */
   --input-bg: rgba(255, 255, 255, 0.055);
   /* 桌面歌词配色（独立窗口，DesktopLyric.vue 消费） */
-  --ly-panel: linear-gradient(180deg, rgba(24, 24, 32, 0.86), rgba(10, 10, 14, 0.9));
-  --ly-panel-border: rgba(255, 255, 255, 0.1);
-  --ly-panel-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  --ly-panel: linear-gradient(180deg, rgba(18, 18, 26, 0.22), rgba(8, 8, 12, 0.3));
+  --ly-panel-border: rgba(255, 255, 255, 0.06);
+  --ly-panel-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
   --ly-fg: #ffffff;
   --ly-fg-2: rgba(255, 255, 255, 0.78);
-  --ly-fg-3: rgba(255, 255, 255, 0.32);
+  --ly-fg-3: rgba(255, 255, 255, 0.45);
   --ly-ctrl-fg: rgba(255, 255, 255, 0.62);
   --ly-ctrl-bg: rgba(255, 255, 255, 0.06);
   --ly-ctrl-border: rgba(255, 255, 255, 0.14);
@@ -42,10 +41,15 @@
   --ly-tool-hover-bg: rgba(0, 0, 0, 0.55);
   --ly-line-1: #ffffff;
   --ly-line-2: rgba(255, 255, 255, 0.72);
-  --ly-wbase: rgba(255, 255, 255, 0.28);
+  /* 未唱部分：面板隐去后 0.28 几乎归零，提到 0.42 才能看出「还没唱到哪」 */
+  --ly-wbase: rgba(255, 255, 255, 0.42);
   --ly-on: #ffd479;
   --ly-glow: rgba(0, 0, 0, 0.65);
   --ly-glow-soft: rgba(0, 0, 0, 0.5);
+  /* 无面板时的字形描边：白色渐变字在亮壁纸上只有 1.1:1，靠它勾出轮廓 */
+  --ly-outline: rgba(0, 0, 0, 0.5);
+  /* 小字（上一行/下一行/署名）是实色字，可以直接用 text-shadow 描边 */
+  --ly-outline-soft: rgba(0, 0, 0, 0.34);
 }
 
 /* 浅色主题：只翻转中性色；强调色由当前音源的渐变色提供（App.vue shellStyle） */
@@ -69,7 +73,7 @@ html[data-theme='light'] {
   --ly-panel-shadow: 0 8px 26px rgba(30, 40, 70, 0.2);
   --ly-fg: #1c1f2a;
   --ly-fg-2: rgba(28, 31, 42, 0.72);
-  --ly-fg-3: rgba(28, 31, 42, 0.4);
+  --ly-fg-3: rgba(28, 31, 42, 0.5);
   --ly-ctrl-fg: rgba(28, 31, 42, 0.62);
   --ly-ctrl-bg: rgba(20, 24, 40, 0.06);
   --ly-ctrl-border: rgba(20, 24, 40, 0.14);
@@ -80,10 +84,12 @@ html[data-theme='light'] {
   --ly-tool-hover-bg: rgba(255, 255, 255, 0.99);
   --ly-line-1: #1c1f2a;
   --ly-line-2: rgba(28, 31, 42, 0.72);
-  --ly-wbase: rgba(28, 31, 42, 0.25);
+  --ly-wbase: rgba(28, 31, 42, 0.34);
   --ly-on: #b4791f;
   --ly-glow: rgba(255, 255, 255, 0.85);
   --ly-glow-soft: rgba(255, 255, 255, 0.7);
+  --ly-outline: rgba(255, 255, 255, 0.75);
+  --ly-outline-soft: rgba(255, 255, 255, 0.55);
 }
 
 * {
@@ -123,6 +129,14 @@ html[data-platform='darwin'] .win-controls {
 html.lyric-window,
 html.lyric-window body,
 html.lyric-window #app {
+  background: transparent !important;
+  overflow: hidden;
+}
+
+/* 迷你音量气泡：独立透明窗口，不铺应用背景 */
+html.volume-popup,
+html.volume-popup body,
+html.volume-popup #app {
   background: transparent !important;
   overflow: hidden;
 }
@@ -177,7 +191,7 @@ a {
 }
 
 /* 移动端（Capacitor WebView / 窄窗口）：单列骨架，标题栏与侧栏退场，
-   底部标签栏 + 紧凑播放条（网格区域在 App.vue 的同名断点里重排） */
+   紧凑播放条（网格区域在 App.vue 的同名断点里重排） */
 @media (max-width: 640px) {
   :root {
     --titlebar: 0px;
@@ -186,7 +200,7 @@ a {
   }
   .shell {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) var(--player) var(--bottomnav);
+    grid-template-rows: minmax(0, 1fr) var(--player);
   }
   .page {
     padding: 12px 14px 20px;

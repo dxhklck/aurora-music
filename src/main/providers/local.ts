@@ -26,7 +26,9 @@ export class LocalProvider extends BaseProvider {
     color: '#3fb6ff',
     gradient: ['#4facfe', '#0f3f66'],
     capabilities: { search: true, charts: false, stream: true, lyric: true },
-    description: '已下载到本地的曲目，离线可播'
+    description: '已下载到本地的曲目，离线可播',
+    // 不作为可选音源出现在切换列表；仅承担本地文件播放/歌词的底层职责
+    hidden: true
   }
 
   protected baseHeaders(): Record<string, string> {

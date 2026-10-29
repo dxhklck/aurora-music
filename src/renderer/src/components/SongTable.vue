@@ -341,7 +341,8 @@ function qualityBadge(song: Song): string {
   cursor: default;
 }
 .row:hover {
-  background: var(--panel);
+  /* --panel 只有 4.5% 白，深色底上几乎看不出；用 --text 混合保持两套主题都可见 */
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .row.playing {
   background: color-mix(in srgb, var(--accent) 10%, transparent);

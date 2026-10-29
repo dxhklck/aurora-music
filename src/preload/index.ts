@@ -32,8 +32,6 @@ const api: AuroraApi = {
 
   engineStatus: () => ipcRenderer.invoke(IPC.engineStatus),
   engineRestart: () => ipcRenderer.invoke(IPC.engineRestart),
-  engineChoosePython: () => ipcRenderer.invoke(IPC.engineChoosePython),
-  engineRepairVendor: () => ipcRenderer.invoke(IPC.engineRepairVendor),
 
   listLibrary: () => ipcRenderer.invoke(IPC.libraryList),
   removeLibrary: (id) => ipcRenderer.invoke(IPC.libraryRemove, id),
@@ -67,10 +65,30 @@ const api: AuroraApi = {
   winMaximize: () => ipcRenderer.send(IPC.winMaximize),
   winClose: () => ipcRenderer.send(IPC.winClose),
   isMaximized: () => ipcRenderer.invoke(IPC.winIsMaximized),
+  setMiniExtra: (extra, direction) => ipcRenderer.send(IPC.miniSetExtra, extra, direction),
+  toggleMiniVolume: (state) => ipcRenderer.invoke(IPC.miniVolumeToggle, state),
+  getMiniVolume: () => ipcRenderer.invoke(IPC.miniVolumeInit),
+  setMiniVolume: (volume) => ipcRenderer.send(IPC.miniVolumeSet, volume),
+  pushMiniVolume: (state) => ipcRenderer.send(IPC.miniVolumePush, state),
+  onMiniVolumeChanged: (cb) => {
+    const listener = (_event: unknown, state: any): void => cb(state)
+    ipcRenderer.on(IPC.miniVolumeChanged, listener)
+    return () => ipcRenderer.removeListener(IPC.miniVolumeChanged, listener)
+  },
+  onMiniVolumeState: (cb) => {
+    const listener = (_event: unknown, state: any): void => cb(state)
+    ipcRenderer.on(IPC.miniVolumeState, listener)
+    return () => ipcRenderer.removeListener(IPC.miniVolumeState, listener)
+  },
+  closeMiniVolume: () => ipcRenderer.send(IPC.miniVolumeClose),
 
   toggleLyricWindow: () => ipcRenderer.invoke(IPC.lyricWindowToggle),
   closeLyricWindow: () => ipcRenderer.send(IPC.lyricWindowClose),
   setLyricWindowLock: (locked) => ipcRenderer.send(IPC.lyricWindowLock, locked),
+  setLyricWindowHover: (hover) => ipcRenderer.send(IPC.lyricWindowHover, hover),
+  dragLyricWindow: () => ipcRenderer.send(IPC.lyricWindowDragStart),
+  moveLyricWindow: (dx, dy) => ipcRenderer.send(IPC.lyricWindowDragMove, dx, dy),
+  endLyricWindowDrag: () => ipcRenderer.send(IPC.lyricWindowDragEnd),
   pushLyricState: (state) => ipcRenderer.send(IPC.lyricWindowPush, state),
   getLyricMode: () => ipcRenderer.invoke(IPC.lyricWindowMode),
   setLyricMode: (mode) => ipcRenderer.invoke(IPC.lyricWindowMode, mode),
@@ -112,6 +130,11 @@ const api: AuroraApi = {
     const listener = (_event: unknown, state: any): void => cb(state)
     ipcRenderer.on(IPC.lyricWindowState, listener)
     return () => ipcRenderer.removeListener(IPC.lyricWindowState, listener)
+  },
+  onLyricContextMenu: (cb) => {
+    const listener = (_event: unknown, pos: { x: number; y: number }): void => cb(pos)
+    ipcRenderer.on(IPC.lyricWindowContextMenu, listener)
+    return () => ipcRenderer.removeListener(IPC.lyricWindowContextMenu, listener)
   },
   onToast: (cb) => {
     const listener = (_event: unknown, payload: any): void => cb(payload)

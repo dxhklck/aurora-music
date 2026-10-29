@@ -101,7 +101,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 <style scoped>
 .backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 130;
   display: grid;
   place-items: center;
@@ -111,6 +114,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .picker {
   width: 380px;
+  max-width: calc(100vw - 24px);
   max-width: calc(100vw - 48px);
   border-radius: 18px;
   padding: 18px;

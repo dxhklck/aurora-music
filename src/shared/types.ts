@@ -129,6 +129,8 @@ export interface ProviderInfo {
   description: string
   /** 已知限制提示，例如"部分歌曲需会员" */
   note?: string
+  /** 内部音源（如本地音乐）：不进音源切换列表，但保留播放等底层能力 */
+  hidden?: boolean
 }
 
 export type DownloadStatus =
@@ -220,8 +222,6 @@ export interface AppSettings {
   engineEnabled: boolean
   /** 点关闭按钮时最小化到系统托盘（关掉 = 隐藏后台播放）；为 false 时关闭即退出。托盘不可用时始终退出 */
   closeToTray: boolean
-  /** 手动指定的 Python 解释器路径（安装版没有 npm 脚本，靠这个兜底） */
-  pythonPath: string
   /** QQ 音乐登录 Cookie（浏览器登录后复制粘贴；解锁逐字歌词与播放权限） */
   qqCookie: string
   /** 网易云音乐登录 Cookie（解锁无损音质与 VIP 曲目） */
@@ -267,6 +267,9 @@ export interface LyricWindowState {
   title: string
   artist: string
   locked: boolean
+  /** 主窗口强调色：桌面歌词窗口据此实时联动（旧推送可缺省） */
+  accent?: string
+  accent2?: string
 }
 
 /* ---------------- 扫码登录 ---------------- */
@@ -314,4 +317,20 @@ export interface CellphoneLoginResult {
   ok: boolean
   account?: NeteaseAccountInfo
   message?: string
+}
+
+/** 迷你窗口音量气泡的状态（主窗口 ↔ 气泡窗口双向同步） */
+export interface MiniVolumeState {
+  volume: number
+  muted: boolean
+  /** 当前音源的强调色：气泡是独立窗口，拿不到主窗口运行时设置的 CSS 变量，必须显式传 */
+  accent: string
+  accent2: string
+  /** 主题：气泡窗口默认只有深色变量，浅色主题需要显式切 data-theme */
+  theme: 'dark' | 'light'
+  /**
+   * 气泡在迷你条的上方还是下方（上方放不下时会翻到下方）。
+   * 三角要跟着翻转，否则会指向远离迷你条的一侧。
+   */
+  placement?: 'above' | 'below'
 }

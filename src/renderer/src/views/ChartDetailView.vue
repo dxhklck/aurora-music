@@ -6,7 +6,6 @@ import SongTable from '../components/SongTable.vue'
 import Icon from '../components/Icon.vue'
 import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
-import { gradientFromSeed } from '../core/cover'
 
 const props = defineProps<{ platform: string; id: string }>()
 
@@ -26,11 +25,6 @@ const error = ref('')
 const provider = computed(() => app.providers.find((item) => item.id === props.platform))
 /** 引擎音源才带精确文件大小（sizeBytes），内置音源没有这个数据 */
 const isEngine = computed(() => props.platform.startsWith('mdl-'))
-const gradient = computed(() =>
-  provider.value
-    ? `linear-gradient(135deg, ${provider.value.gradient[0]}, ${provider.value.gradient[1]})`
-    : gradientFromSeed(props.id)
-)
 
 async function load(): Promise<void> {
   loading.value = true
@@ -91,7 +85,7 @@ onMounted(load)
       <span>←</span> 返回
     </button>
 
-    <header class="banner" :style="{ background: gradient }">
+    <header class="banner">
       <div class="banner-mask" />
       <div class="banner-deco">
         <span class="deco-num">{{ String(total || 100).padStart(3, '0') }}</span>
@@ -164,10 +158,15 @@ onMounted(load)
   overflow: hidden;
   padding: 32px 34px;
   margin-bottom: 24px;
+  /* 跟随当前音源强调色：与全站 accent 同源，切音源即时刷新（原来绑定路由平台，切音源不动） */
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 .banner-mask {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background:
     radial-gradient(60% 100% at 90% 10%, rgba(255, 255, 255, 0.22), transparent 60%),
     linear-gradient(90deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.12));

@@ -1,0 +1,92 @@
+[
+  {
+    "source": "kugou",
+    "items": 4,
+    "requests": 38,
+    "note": ""
+  },
+  {
+    "source": "migu",
+    "items": 3,
+    "requests": 10,
+    "note": ""
+  },
+  {
+    "source": "qianqian",
+    "items": 2,
+    "requests": 10,
+    "note": ""
+  },
+  {
+    "source": "fivesing",
+    "items": 3,
+    "requests": 10,
+    "note": ""
+  },
+  {
+    "source": "bodian",
+    "items": 3,
+    "requests": 10,
+    "note": ""
+  },
+  {
+    "source": "streetvoice",
+    "items": 3,
+    "requests": 10,
+    "note": ""
+  },
+  {
+    "source": "bilibili",
+    "items": 3,
+    "requests": 11,
+    "note": ""
+  },
+  {
+    "source": "jiosaavn",
+    "items": 3,
+    "requests": 10,
+    "note": ""
+  },
+  {
+    "source": "jamendo",
+    "items": 3,
+    "requests": 7,
+    "note": ""
+  },
+  {
+    "source": "ccmixter",
+    "items": 3,
+    "requests": 5,
+    "note": ""
+  },
+  {
+    "source": "opengameart",
+    "items": 3,
+    "requests": 7,
+    "note": ""
+  },
+  {
+    "source": "wikimedia",
+    "items": 0,
+    "requests": 0,
+    "note": ""
+  },
+  {
+    "source": "audius",
+    "items": 2,
+    "requests": 5,
+    "note": ""
+  },
+  {
+    "source": "fma",
+    "items": 3,
+    "requests": 9,
+    "note": ""
+  },
+  {
+    "source": "soundcloud",
+    "items": 0,
+    "requests": 0,
+    "note": ""
+  }
+]

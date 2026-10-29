@@ -9,7 +9,7 @@ const search = useSearchStore()
 const app = useAppStore()
 const input = ref(search.keyword)
 
-/** 引擎音源走 Python 解析，单次搜索明显更慢，加载态要给出解释 */
+/** 引擎音源要逐首解析真实地址，比官方接口慢，加载态要给出解释 */
 const isEngine = computed(() => app.platform.startsWith('mdl-'))
 
 function submit(): void {
@@ -83,7 +83,7 @@ watch(
 
       <div v-if="search.loading && isEngine && !search.results.length" class="engine-hint">
         <span class="pulse" />
-        引擎音源要逐首解析真实地址，解析出一首就显示一首；同一关键词会缓存 10 分钟
+        引擎音源要逐首解析真实地址，解析出一首就显示一首；同一关键词会缓存 3 分钟
       </div>
 
       <SongTable

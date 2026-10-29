@@ -256,7 +256,7 @@ export async function runSelfTest(): Promise<number> {
     const status = await musicdl.restart()
     assert(status.ready, status.error || '引擎未就绪')
     assert(status.runtime, '运行时信息缺失')
-    return `${status.runtime.label} · Python ${status.runtime.version} · ${status.runtime.sources} 个音源`
+    return `${status.runtime.label} · 运行时 ${status.runtime.version} · ${status.runtime.sources} 个音源`
   })
 
   // 各平台 CDN 的可达性因网络环境差异很大（例如酷狗在部分网络下 TLS 直接失败），

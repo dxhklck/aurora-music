@@ -25,17 +25,8 @@ extraResources:
   # 托盘图标
   - from: resources/icons
     to: icons
-  # 引擎桥：主进程按 resources/engine/musicdl/bridge.py 拉起 Python
-  - from: engine/musicdl
-    to: engine/musicdl
-  # 随包内置的 musicdl 源码（npm run engine:vendor 生成）。
-  # 只带纯源码，不带 .venv —— 虚拟环境与平台/解释器版本绑定，不能跨机分发。
-  - from: engine/vendor
-    to: engine/vendor
-  # 自带 Python 运行时（engine/python，Windows 为嵌入式 3.12）：
-  # 主进程探测 resources/python/python.exe，安装版开箱即用引擎音源
-  - from: engine/python
-    to: python
+  # 音源引擎是进程内 TS 实现（src/main/engine/ts），安装包不携带任何 Python 运行时。
+  # 历史背景见 docs/python-removal.md
 
 win:
   target:

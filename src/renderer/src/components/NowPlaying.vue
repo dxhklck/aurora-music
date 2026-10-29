@@ -7,10 +7,6 @@ import ProgressBar from './ProgressBar.vue'
 import { usePlayerStore } from '../stores/player'
 import { useAppStore } from '../stores/app'
 import { audio } from '../core/audio'
-import { isNativeMobile } from '../core/platform'
-
-/** 原生容器（Android/iOS）：隐藏桌面专属入口 */
-const isNative = isNativeMobile()
 import { wave } from '../core/wave'
 import AudioWave from './AudioWave.vue'
 import { formatDuration } from '@shared/lyric'
@@ -69,8 +65,6 @@ function pickTheme(id: PlayerTheme): void {
 }
 
 function close(): void {
-  // TODO(diagnose): 收起无反应排查用，定位后删除
-  console.log('[nowplaying] close() 被调用，当前 showNowPlaying =', player.showNowPlaying)
   player.showNowPlaying = false
 }
 
@@ -100,7 +94,7 @@ const compact = ref(false)
 /** 紧凑布局下封面 / 歌词二选一（点封面区切换） */
 const mobilePane = ref<'cover' | 'lyric'>('lyric')
 function syncCompact(): void {
-  compact.value = isNative || window.innerWidth <= 640
+  compact.value = window.innerWidth <= 640
 }
 
 onMounted(() => {
@@ -110,7 +104,11 @@ onMounted(() => {
   // 音波可视化：舞台是挂接点（幂等），AudioContext 被系统挂起时靠播放事件唤醒
   wave.attach(audio.mediaEl)
   offResume = audio.on('playing', (isPlaying) => {
-    if (isPlaying) wave.resume()
+    if (!isPlaying) return
+    // 舞台可能在首次播放前就打开（此时还没有 src，挂接会跳过），
+    // 每次真正开始播放都重试一次；attach 幂等，已挂接时只做 resume
+    wave.attach(audio.mediaEl)
+    wave.resume()
   })
 })
 onBeforeUnmount(() => {
@@ -148,8 +146,7 @@ onBeforeUnmount(() => {
         <button class="icon-btn" title="播放器样式" @click.stop="stylePanel = !stylePanel">
           <Icon name="equalizer" :size="18" />
         </button>
-        <!-- 桌面歌词依赖 Electron 多窗口，移动端无此能力 -->
-        <button v-if="!isNative" class="icon-btn" title="桌面歌词" @click="openDesktopLyric">
+        <button class="icon-btn" title="桌面歌词" @click="openDesktopLyric">
           <Icon name="monitor" :size="18" />
         </button>
       </div>
@@ -341,7 +338,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .stage {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 80;
   display: flex;
   flex-direction: column;
@@ -350,6 +350,16 @@ onBeforeUnmount(() => {
   animation: stage-in 0.4s var(--ease);
   /* 双保险：舞台自身不参与拖拽区计算，避免顶部 48px 吞掉按钮点击 */
   -webkit-app-region: no-drag;
+  /* 舞台是恒定深色的沉浸场景，与应用主题无关：在这里把中性 token 钉回深色值，
+     否则浅色主题下 --text/--border 翻成深色，出现深底配深字（歌词舞台全盲）。
+     强调色 --accent 与主题无关（由音源渐变色提供），不用动。 */
+  --panel: rgba(255, 255, 255, 0.045);
+  --panel-strong: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #f4f5f9;
+  --text-2: rgba(244, 245, 249, 0.66);
+  --text-3: rgba(244, 245, 249, 0.4);
 }
 
 @keyframes stage-in {
@@ -365,7 +375,10 @@ onBeforeUnmount(() => {
 
 .bg {
   position: absolute;
-  inset: -12%;
+  top: -12%;
+  right: -12%;
+  bottom: -12%;
+  left: -12%;
   background-size: cover;
   background-position: center;
   filter: blur(90px) saturate(1.3);
@@ -375,7 +388,10 @@ onBeforeUnmount(() => {
 
 .bg-mask {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background:
     radial-gradient(70% 60% at 25% 40%, rgba(8, 8, 12, 0.2), rgba(8, 8, 12, 0.86) 70%),
     linear-gradient(180deg, rgba(8, 8, 12, 0.55), rgba(8, 8, 12, 0.92));
@@ -384,7 +400,10 @@ onBeforeUnmount(() => {
 /* 音波可视化层：在遮罩之上、内容之下；pointer-events none 不挡「点背景收起」 */
 .stage-wave {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   pointer-events: none;
   opacity: 0.85;
 }
@@ -392,7 +411,10 @@ onBeforeUnmount(() => {
 /* ===== 炫彩皮肤层（纯 transform/opacity 合成器动画，不引图形库） ===== */
 .theme-layer {
   position: absolute;
-  inset: -25%;
+  top: -25%;
+  right: -25%;
+  bottom: -25%;
+  left: -25%;
   pointer-events: none;
   overflow: hidden;
 }
@@ -478,7 +500,10 @@ onBeforeUnmount(() => {
 }
 .stars {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   will-change: opacity, transform;
 }
 .stars.s1 {
@@ -707,7 +732,10 @@ onBeforeUnmount(() => {
 .arm-base::after {
   content: '';
   position: absolute;
-  inset: 12px;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
   border-radius: 50%;
   background: #0c0c10;
   box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.18);
@@ -773,7 +801,10 @@ onBeforeUnmount(() => {
 
 .groove {
   position: absolute;
-  inset: 14px;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
   border-radius: 50%;
   background: repeating-radial-gradient(
     circle at 50% 50%,

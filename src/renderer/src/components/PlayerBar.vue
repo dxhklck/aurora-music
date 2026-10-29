@@ -7,12 +7,9 @@ import { usePlayerStore } from '../stores/player'
 import { useDownloadStore } from '../stores/download'
 import { usePlaylistStore } from '../stores/playlists'
 import { formatDuration } from '@shared/lyric'
-import { isNativeMobile } from '../core/platform'
-
+import type { Quality } from '@shared/types'
 const player = usePlayerStore()
 
-/** Capacitor 原生环境（Android/iOS）：音量走系统实体键，不显示软件音量控件 */
-const isNative = isNativeMobile()
 const download = useDownloadStore()
 const playlists = usePlaylistStore()
 
@@ -140,21 +137,18 @@ function setVolume(event: Event): void {
 
       <div class="right">
         <span v-if="player.streamLabel" class="quality">{{ player.streamLabel }}</span>
-        <!-- 移动端（Capacitor 原生环境）音量交给系统实体键，控件只占底部栏空间 -->
-        <template v-if="!isNative">
-          <button class="icon-btn" :title="player.muted ? '取消静音' : '静音'" @click="player.toggleMute()">
-            <Icon :name="player.muted || player.volume === 0 ? 'volume-mute' : 'volume-high'" :size="18" />
-          </button>
-          <input
-            class="volume"
-            type="range"
-            min="0"
-            max="100"
-            :value="Math.round(player.volume * 100)"
-            :style="{ '--vol': Math.round(player.volume * 100) + '%' }"
-            @input="setVolume"
-          />
-        </template>
+        <button class="icon-btn" :title="player.muted ? '取消静音' : '静音'" @click="player.toggleMute()">
+          <Icon :name="player.muted || player.volume === 0 ? 'volume-mute' : 'volume-high'" :size="18" />
+        </button>
+        <input
+          class="volume"
+          type="range"
+          min="0"
+          max="100"
+          :value="Math.round(player.volume * 100)"
+          :style="{ '--vol': Math.round(player.volume * 100) + '%' }"
+          @input="setVolume"
+        />
         <button
           class="icon-btn"
           :class="{ active: player.showNowPlaying }"
@@ -201,7 +195,10 @@ function setVolume(event: Event): void {
 }
 .cover-btn .expand {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.5);

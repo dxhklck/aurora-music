@@ -7,10 +7,6 @@ import { useDownloadStore } from '../stores/download'
 import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
 import { formatBytes } from '@shared/lyric'
-import { isNativeMobile } from '../core/platform'
-
-/** 原生容器：目录固定/无系统文件管理器联动，隐藏对应按钮 */
-const isNative = isNativeMobile()
 import type { DownloadTask, Song } from '@shared/types'
 
 const store = useDownloadStore()
@@ -107,8 +103,7 @@ onMounted(async () => {
         <button v-if="counts.failed" class="btn" @click="store.retryFailed()">
           <Icon name="refresh" :size="14" /> 全部重试
         </button>
-        <!-- 移动端目录固定写入应用专属空间，不可更改 -->
-        <button v-if="!isNative" class="btn" @click="chooseDir">
+        <button class="btn" @click="chooseDir">
           <Icon name="folder" :size="14" /> 更改目录
         </button>
         <button class="btn" @click="store.clearFinished()">
@@ -187,7 +182,7 @@ onMounted(async () => {
             <Icon name="play" :size="16" />
           </button>
           <button
-            v-if="task.status === 'done' && !isNative"
+            v-if="task.status === 'done'"
             class="icon-btn"
             title="用系统播放器打开"
             @click="openTask(task.id)"
@@ -195,7 +190,7 @@ onMounted(async () => {
             <Icon name="play_circle" :size="16" />
           </button>
           <button
-            v-if="task.status === 'done' && !isNative"
+            v-if="task.status === 'done'"
             class="icon-btn"
             title="在文件夹中显示"
             @click="revealTask(task.id)"

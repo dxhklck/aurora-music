@@ -31,10 +31,6 @@ export const IPC = {
   // musicdl 引擎
   engineStatus: 'engine:status',
   engineRestart: 'engine:restart',
-  /** 手动指定 Python 解释器（安装版没有 npm 脚本时用） */
-  engineChoosePython: 'engine:choose-python',
-  /** 引擎自愈：重拉官方 musicdl 源码覆盖随包 vendor */
-  engineRepairVendor: 'engine:repair-vendor',
 
   // 本地库
   libraryList: 'library:list',
@@ -65,6 +61,16 @@ export const IPC = {
   winMaximize: 'win:maximize',
   winClose: 'win:close',
   winIsMaximized: 'win:is-maximized',
+  /** 迷你窗口：临时附加区（歌词 / 队列）的高度与生长方向，主进程同步调整窗口 */
+  miniSetExtra: 'mini:set-extra',
+  /** 迷你窗口：音量气泡（独立透明窗口）开/关与双向同步 */
+  miniVolumeToggle: 'mini:volume-toggle',
+  miniVolumeInit: 'mini:volume-init',
+  miniVolumeSet: 'mini:volume-set',
+  miniVolumeState: 'mini:volume-state',
+  miniVolumeChanged: 'mini:volume-changed',
+  miniVolumePush: 'mini:volume-push',
+  miniVolumeClose: 'mini:volume-close',
 
   // 桌面歌词
   lyricWindowToggle: 'lyric-window:toggle',
@@ -72,10 +78,18 @@ export const IPC = {
   lyricWindowLock: 'lyric-window:lock',
   lyricWindowState: 'lyric-window:state',
   lyricWindowPush: 'lyric-window:push',
+  // 歌词窗口右键菜单：主进程 context-menu 事件转发（拖拽区上 DOM 事件可能收不到）
+  lyricWindowContextMenu: 'lyric-window:context-menu',
   // 形态切换（mini / full）：不传参数 = 读取当前形态
   lyricWindowMode: 'lyric-window:mode',
   // 歌词窗口发起的播放控制（toggle / next / prev），由主进程转发给主窗口
   lyricWindowCommand: 'lyric-window:command',
+  // 手动拖拽：透明窗口上 -webkit-app-region 不可靠，渲染层上报鼠标位移、主进程移动窗口
+  lyricWindowDragStart: 'lyric-window:drag-start',
+  lyricWindowDragMove: 'lyric-window:drag-move',
+  lyricWindowDragEnd: 'lyric-window:drag-end',
+  // 锁定态悬停：穿透窗口只转发 mousemove，渲染层据此通知主进程临时恢复交互
+  lyricWindowHover: 'lyric-window:hover',
 
   // 系统托盘 / 全局快捷键共用的播放控制命令（主 → 渲染）：toggle / next / prev
   trayState: 'tray:state',

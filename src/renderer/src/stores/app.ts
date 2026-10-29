@@ -27,7 +27,8 @@ export const useAppStore = defineStore('app', () => {
 
   async function boot(): Promise<void> {
     const [list, config] = await Promise.all([window.api.providers(), window.api.getSettings()])
-    providers.value = list
+    // hidden 音源（本地音乐等）不在切换列表中出现，但底层仍在服务播放
+    providers.value = list.filter((item) => !item.hidden)
     settings.value = config
     platform.value = list.some((item) => item.id === config.platform)
       ? config.platform
@@ -37,7 +38,7 @@ export const useAppStore = defineStore('app', () => {
 
   /** 引擎开关会改变音源列表，设置页改完要重新拉一次 */
   async function reloadProviders(): Promise<void> {
-    providers.value = await window.api.providers()
+    providers.value = (await window.api.providers()).filter((item) => !item.hidden)
     if (!providers.value.some((item) => item.id === platform.value)) {
       platform.value = providers.value[0]?.id ?? 'demo'
       await patchSettings({ platform: platform.value })

@@ -87,7 +87,10 @@ const showSrc = computed(() => resolved.value)
 .cover::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.18), transparent 45%);
   pointer-events: none;
 }

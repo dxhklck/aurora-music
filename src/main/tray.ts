@@ -69,16 +69,16 @@ function showMainWindow(): void {
 }
 
 /**
- * 桌面歌词锁定后鼠标完全穿透，窗口里的按钮点不到——托盘必须留一个解锁出口，
- * 否则用户一旦点了「锁定」就再也解不开（连关闭按钮都点不到）。
+ * 桌面歌词解锁兜底入口（正常情况下窗口里的锁按钮随时可点）。
  * 这里直接改设置并广播，避免 import ipc.ts 造成循环依赖。
  */
 function unlockLyric(): void {
   const win = getLyricWindow()
-  if (!win || win.isDestroyed()) return
-  setLyricLocked(false)
+  if (win && !win.isDestroyed()) {
+    setLyricLocked(false)
+    win.webContents.send(IPC.lyricWindowState, { locked: false })
+  }
   void settings.set({ desktopLyricLocked: false })
-  win.webContents.send(IPC.lyricWindowState, { locked: false })
   for (const target of BrowserWindow.getAllWindows()) {
     target.webContents.send(IPC.settingsChanged, settings.get())
   }

@@ -5,14 +5,9 @@ release
 *.log
 .DS_Store
 
-# 引擎：虚拟环境与临时工作目录不进仓库，vendor 由 npm run engine:vendor 生成
-engine/.venv
-engine/.tmp
-engine/vendor
-engine/python
-
-# 坏损环境备份（2026-10-25 修复 musicdl 时的现场留存，确认无误后手动删除）
-engine/.venv.broken-*
+# 仓库根目录下历史的 Python 引擎目录（2026-10-29 已删除）。保留忽略规则，防止误把这类体积重新入库。
+# 必须带前导斜杠：否则 `engine/` 会匹配任意层级同名目录，把 src/main/engine/ts 一起忽略掉。
+/engine/
 
 # 工作区本地数据
 .workbuddy/
@@ -21,8 +16,6 @@ engine/.venv.broken-*
 mobile/
 build/android/
 docs/android_migration_plan.md
-scripts/make_android_icons.py
 
-# Python 字节码
-__pycache__/
-*.pyc
+# TS 引擎验证脚本的临时产物
+scripts/engine-ts/.build/

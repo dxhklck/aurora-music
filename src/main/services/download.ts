@@ -443,8 +443,8 @@ class DownloadManager extends EventEmitter {
   }
 
   /**
-   * 写标签：复用引擎里的 mutagen（mp3/m4a/flac/ogg）。
-   * 引擎不可用时静默跳过——标签是加分项，不能让一次成功的下载变成失败。
+   * 写标签：走引擎内的容器写入器（ID3 / Vorbis / MP4 ilst）。
+   * 失败静默跳过——标签是加分项，不能让一次成功的下载变成失败。
    */
   private async writeTags(filePath: string, song: Song, lyric: string): Promise<boolean> {
     if (!settings.get().writeTags) return false

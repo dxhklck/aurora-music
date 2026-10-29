@@ -34,7 +34,9 @@ export class DemoProvider extends BaseProvider {
     color: '#7c6cff',
     gradient: ['#7c6cff', '#2a1d6e'],
     capabilities: { search: true, charts: true, stream: true, lyric: true },
-    description: '内置离线曲目，无需网络即可体验完整功能'
+    description: '内置离线曲目，无需网络即可体验完整功能',
+    // 不出现在音源切换列表；保留作为离线自检/最小适配样例
+    hidden: true
   }
 
   private readonly tracks: DemoTrack[]
