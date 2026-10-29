@@ -90,21 +90,67 @@ jobs:
 
       # 资产齐了再转正：prerelease=false 会让它进入 releases/latest，
       # 自动更新才会把这一版当作可升级目标。
-      # make_latest 在 API 里是字符串（"true"/"false"/"legacy"），只能用 -f 传，
-      # 用 -F 会被当成布尔值而报 422。
+      #
+      # 这一步在 v1.3.0~v1.3.3 连续失败三次，前两次归因都错了（草稿不可见 / tags 端点 404），
+      # 第三次换成 prerelease 仍失败，说明问题不在「怎么查 release」。所以现在不再靠猜：
+      # 三条路依次兜底，最后一步只认「最终状态对不对」。
+      #   A. gh api PATCH /releases/<id>（GET 取数字 id，请求体用 --input 显式 JSON，
+      #      绕开 -F/-f 的布尔/字符串类型推断）
+      #   B. softprops 再跑一次（本仓库已验证可用，代价是重传资产）
+      #   C. 终检：真的不是 prerelease 才算成功，否则报 ::error::
+      # 失败信息一律压成一行写进注解——job 没有 checkout，运行日志还要管理员权限才读得到。
       - name: Promote to latest
+        id: promote
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          # 这个 job 没有 checkout，运行日志也读不到（匿名 API 403），
-          # 所以失败原因必须自己塞进 ::error:: 注解，否则只能看到 exit code 1。
-          if ! OUT=$(gh api -X PATCH "repos/$REPO/releases/tags/$TAG" \
-              -F prerelease=false -f make_latest=true \
-              --jq '"完成：prerelease=\(.prerelease)  \(.html_url)"' 2>&1); then
-            echo "::error::转正失败：$(echo "$OUT" | head -3)"
+          set -uo pipefail
+          oneline() { tr '\n' ' ' | tr -s ' ' | head -c 600; }
+
+          if ! ID=$(gh api "repos/$REPO/releases/tags/$TAG" --jq '.id' 2>&1); then
+            echo "::warning::查不到 $TAG 的 release：$(echo "$ID" | oneline)"
+            exit 0
+          fi
+          echo "release id = $ID"
+
+          BODY='{"prerelease":false,"make_latest":"true"}'
+          if ! OUT=$(echo "$BODY" | gh api --method PATCH \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/releases/$ID" --input - 2>&1); then
+            echo "::warning::gh api 转正失败（id=$ID），交给下一步兜底：$(echo "$OUT" | oneline)"
+            exit 0
+          fi
+          echo "完成：$(echo "$OUT" | oneline)"
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      # A 失败时用 action 再更新一次（同一个 release，会覆盖已存在的资产）
+      - name: Promote fallback via action
+        if: steps.promote.outputs.ok != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          prerelease: false
+          make_latest: true
+
+      # 只认最终状态：这一步绿了，说明 releases/latest 真的指向本版本
+      - name: Verify published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          oneline() { tr '\n' ' ' | tr -s ' ' | head -c 600; }
+          if ! INFO=$(gh api "repos/$REPO/releases/tags/$TAG" --jq '"\(.prerelease) \(.draft) \(.assets|length)"' 2>&1); then
+            echo "::error::终检读取失败：$(echo "$INFO" | oneline)"
             exit 1
           fi
-          echo "$OUT"
+          set -- $INFO
+          echo "prerelease=$1 draft=$2 assets=$3"
+          if [ "$1" != "false" ] || [ "$2" != "false" ] || [ "$3" -lt 3 ]; then
+            echo "::error::$TAG 仍未正式发布（prerelease=$1 draft=$2 assets=$3）"
+            exit 1
+          fi
+          echo "已发布：https://github.com/$REPO/releases/tag/$TAG"

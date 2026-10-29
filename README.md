@@ -73,7 +73,7 @@ npm run shots       # 重拍文档截图（见 scripts/shots.mjs，需先 npm ru
 
 ```bash
 npm run dist                        # 本机出包（产物在 release/）
-git tag v1.3.4 && git push origin v1.3.4   # 打 tag 触发 CI 三平台构建并发布 GitHub Release
+git tag v1.4.0 && git push origin v1.4.0   # 打 tag 触发 CI 三平台构建并发布 GitHub Release
 ```
 
 - CI（`.github/workflows/build.yml`）在 Windows / macOS / Ubuntu 上分别构建，前置四道关口：
