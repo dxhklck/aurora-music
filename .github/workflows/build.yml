@@ -76,46 +76,34 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Upload installers to draft release
+      # 上传到「预发布」而不是「草稿」，原因是草稿在 API 里几乎不可见：
+      #   /releases/tags/<tag> 对草稿永远 404（v1.3.0 gh release edit、
+      #   v1.3.1 PATCH tags 端点、v1.3.2 列 /releases 取 id 全都死在这一步）。
+      # 预发布是真实 release：既能按 tag 查到，又不会被 releases/latest 选中，
+      # 所以「资产还没传完就被自动更新拉到 404」这个原始问题同样被规避掉。
+      - name: Upload installers as prerelease
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           generate_release_notes: true
-          # 先建草稿：资产传完再转正，避免「版本已可见但安装包还下不到」的瞬时 404
-          draft: true
+          prerelease: true
 
-      # 转正草稿：必须先「列 release 找 id」再 PATCH 该 id。
-      # 不能用 /releases/tags/<tag> —— 那个端点对草稿返回 404
-      # （v1.3.0 用 gh release edit、v1.3.1 用 /releases/tags 都死在这一步）。
-      # /releases 列表在有写权限的 token 下是包含草稿的，按 tag 选中即可。
-      - name: Publish release once all assets are attached
+      # 资产齐了再转正：prerelease=false 会让它进入 releases/latest，
+      # 自动更新才会把这一版当作可升级目标。
+      # make_latest 在 API 里是字符串（"true"/"false"/"legacy"），只能用 -f 传，
+      # 用 -F 会被当成布尔值而报 422。
+      - name: Promote to latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # 这个 job 没有 checkout，也读不到运行日志（需要 admin 权限），
+          # 这个 job 没有 checkout，运行日志也读不到（匿名 API 403），
           # 所以失败原因必须自己塞进 ::error:: 注解，否则只能看到 exit code 1。
-          if ! LIST=$(gh api "repos/$REPO/releases?per_page=100" \
-              --jq '.[] | "  \(.id)  \(.tag_name)  draft=\(.draft)  assets=\(.assets|length)"' 2>&1); then
-            echo "::error::列 release 失败：$(echo "$LIST" | head -3)"
-            exit 1
-          fi
-          echo "所有 release（含草稿）："
-          echo "$LIST"
-          if ! ID=$(gh api "repos/$REPO/releases?per_page=100" \
-              --jq ".[] | select(.tag_name == \"$TAG\") | .id" 2>&1); then
-            echo "::error::按 tag 查 release 失败：$(echo "$ID" | head -3)"
-            exit 1
-          fi
-          if [ -z "$ID" ]; then
-            echo "::error::找不到 $TAG 对应的 release（上传步骤应当已建草稿）"
-            exit 1
-          fi
-          echo "转正 $TAG（release id=$ID）"
-          if ! OUT=$(gh api -X PATCH "repos/$REPO/releases/$ID" -F draft=false \
-              --jq '"完成：draft=\(.draft)  \(.html_url)"' 2>&1); then
+          if ! OUT=$(gh api -X PATCH "repos/$REPO/releases/tags/$TAG" \
+              -F prerelease=false -f make_latest=true \
+              --jq '"完成：prerelease=\(.prerelease)  \(.html_url)"' 2>&1); then
             echo "::error::转正失败：$(echo "$OUT" | head -3)"
             exit 1
           fi
