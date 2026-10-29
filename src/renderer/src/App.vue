@@ -245,7 +245,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   font-size: 11.5px;
   color: var(--text-2);
-  background: rgba(22, 22, 30, 0.9);
+  background: var(--toast-bg);
   border: 1px solid var(--border-strong);
   backdrop-filter: blur(14px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);

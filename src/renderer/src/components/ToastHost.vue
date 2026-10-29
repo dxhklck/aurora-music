@@ -38,7 +38,8 @@ const app = useAppStore()
   gap: 10px;
   padding: 10px 12px 10px 14px;
   border-radius: 12px;
-  background: rgba(22, 22, 30, 0.92);
+  background: var(--toast-bg);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow);
   font-size: 12.5px;
   max-width: 380px;
