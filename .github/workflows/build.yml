@@ -84,13 +84,39 @@ jobs:
           # 先建草稿：资产传完再转正，避免「版本已可见但安装包还下不到」的瞬时 404
           draft: true
 
-      # 用 gh api 走显式路径：这个 job 没有 checkout，`gh release edit` 依赖本地 git 仓库
-      # 或 GH_REPO 来判断仓库，在空工作目录里会直接失败（v1.3.0 首次走草稿流程就是这么挂的）。
-      # 端点里带 owner/repo 就不需要任何仓库上下文。
+      # 转正草稿：必须先「列 release 找 id」再 PATCH 该 id。
+      # 不能用 /releases/tags/<tag> —— 那个端点对草稿返回 404
+      # （v1.3.0 用 gh release edit、v1.3.1 用 /releases/tags 都死在这一步）。
+      # /releases 列表在有写权限的 token 下是包含草稿的，按 tag 选中即可。
       - name: Publish release once all assets are attached
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          gh api -X PATCH "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" \
-            -F draft=false
-          echo "已发布 ${{ github.ref_name }}"
+          set -euo pipefail
+          # 这个 job 没有 checkout，也读不到运行日志（需要 admin 权限），
+          # 所以失败原因必须自己塞进 ::error:: 注解，否则只能看到 exit code 1。
+          if ! LIST=$(gh api "repos/$REPO/releases?per_page=100" \
+              --jq '.[] | "  \(.id)  \(.tag_name)  draft=\(.draft)  assets=\(.assets|length)"' 2>&1); then
+            echo "::error::列 release 失败：$(echo "$LIST" | head -3)"
+            exit 1
+          fi
+          echo "所有 release（含草稿）："
+          echo "$LIST"
+          if ! ID=$(gh api "repos/$REPO/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" 2>&1); then
+            echo "::error::按 tag 查 release 失败：$(echo "$ID" | head -3)"
+            exit 1
+          fi
+          if [ -z "$ID" ]; then
+            echo "::error::找不到 $TAG 对应的 release（上传步骤应当已建草稿）"
+            exit 1
+          fi
+          echo "转正 $TAG（release id=$ID）"
+          if ! OUT=$(gh api -X PATCH "repos/$REPO/releases/$ID" -F draft=false \
+              --jq '"完成：draft=\(.draft)  \(.html_url)"' 2>&1); then
+            echo "::error::转正失败：$(echo "$OUT" | head -3)"
+            exit 1
+          fi
+          echo "$OUT"
