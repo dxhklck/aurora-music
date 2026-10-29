@@ -14,6 +14,7 @@ import { useDownloadStore } from './stores/download'
 import { useLibraryStore } from './stores/library'
 import { usePlaylistStore } from './stores/playlists'
 import { plain } from './core/plain'
+import { wave } from './core/wave'
 import type { LyricWindowState } from '@shared/types'
 import type { TrayState } from '@shared/api'
 
@@ -123,6 +124,9 @@ onMounted(async () => {
   await app.boot()
   if (app.settings) {
     player.hydrate({ volume: app.settings.volume, playMode: app.settings.playMode })
+    // 均衡器：音频图是懒创建的，这里先灌一次参数，等第一次打开播放舞台时按它初始化
+    const eq = app.settings.equalizer
+    if (eq) wave.setEqualizer(eq.gains, eq.enabled)
   }
   player.bindEngine()
   await Promise.all([download.init(), library.load(), playlists.load()])

@@ -31,10 +31,15 @@ export const IPC = {
   // musicdl 引擎
   engineStatus: 'engine:status',
   engineRestart: 'engine:restart',
+  /** 上游健康巡检：读快照 / 立刻重扫 */
+  sourceHealth: 'engine:source-health',
+  sourceHealthRefresh: 'engine:source-health-refresh',
 
   // 本地库
   libraryList: 'library:list',
   libraryRemove: 'library:remove',
+  /** 改本地曲目的歌名/歌手/专辑（同时写 sidecar 与音频标签） */
+  libraryUpdateMeta: 'library:update-meta',
   libraryRefresh: 'library:refresh',
   libraryReveal: 'library:reveal',
   /** 导入本地音乐目录（对话框选目录 → 追加到 settings.musicDirs → 重新扫描） */

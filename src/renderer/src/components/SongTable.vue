@@ -17,6 +17,8 @@ const props = withDefaults(
     /** 显示文件大小列；平台不返回 fileSize 时显示 — */
     showSize?: boolean
     removable?: boolean
+    /** 显示「编辑信息」按钮（只给本地库用） */
+    editable?: boolean
     /** 显示多选列与批量下载工具条 */
     selectable?: boolean
     emptyTitle?: string
@@ -28,13 +30,14 @@ const props = withDefaults(
     showPlatform: false,
     showSize: false,
     removable: false,
+    editable: false,
     selectable: false,
     emptyTitle: '暂无歌曲',
     emptyHint: '换个关键词或切换音源试试'
   }
 )
 
-const emit = defineEmits<{ remove: [song: Song] }>()
+const emit = defineEmits<{ remove: [song: Song]; edit: [song: Song] }>()
 
 const player = usePlayerStore()
 const download = useDownloadStore()
@@ -217,14 +220,13 @@ function qualityBadge(song: Song): string {
           <button title="下一首播放" @click.stop="addNext(song)">
             <Icon name="plus" :size="15" />
           </button>
-          <button
-            v-if="!removable"
-            title="下载"
-            @click.stop="download.enqueue(song)"
-          >
+          <button v-if="editable" title="编辑歌曲信息" @click.stop="emit('edit', song)">
+            <Icon name="pencil" :size="15" />
+          </button>
+          <button v-else title="下载" @click.stop="download.enqueue(song)">
             <Icon name="download" :size="15" />
           </button>
-          <button v-else title="从音乐库移除" @click.stop="emit('remove', song)">
+          <button v-if="removable" title="从音乐库移除" @click.stop="emit('remove', song)">
             <Icon name="trash" :size="15" />
           </button>
         </span>

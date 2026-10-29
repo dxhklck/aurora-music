@@ -28,6 +28,53 @@ async function remove(song: Song): Promise<void> {
   await library.remove(song.id)
 }
 
+/* ---------- 元数据编辑 ---------- */
+const editing = ref<Song | null>(null)
+const editName = ref('')
+const editArtists = ref('')
+const editAlbum = ref('')
+const saving = ref(false)
+
+function openEditor(song: Song): void {
+  editing.value = song
+  editName.value = song.name
+  editArtists.value = song.artists.join('/')
+  editAlbum.value = song.album ?? ''
+}
+
+function closeEditor(): void {
+  if (saving.value) return
+  editing.value = null
+}
+
+async function saveEditor(): Promise<void> {
+  const song = editing.value
+  if (!song) return
+  if (!editName.value.trim()) {
+    app.toast('歌名不能为空', 'error')
+    return
+  }
+  saving.value = true
+  try {
+    const updated = await window.api.updateLibraryMeta(song.id, {
+      name: editName.value,
+      artists: editArtists.value,
+      album: editAlbum.value
+    })
+    if (!updated) {
+      app.toast('这条记录已不在库里，刷新后再试', 'error')
+      return
+    }
+    await library.load()
+    app.toast('已保存到文件标签与音乐库', 'success')
+    editing.value = null
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : '保存失败', 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function openDir(): Promise<void> {
   if (!dir.value) return
   const result = await window.api.chooseDownloadDir()
@@ -97,11 +144,38 @@ onMounted(async () => {
       :songs="songs"
       :loading="library.loading"
       removable
+      editable
       show-size
       empty-title="音乐库还是空的"
       empty-hint="去搜索页找首歌，点右侧的下载按钮试试"
       @remove="remove"
+      @edit="openEditor"
     />
+
+    <div v-if="editing" class="editor-mask" @click.self="closeEditor">
+      <div class="editor">
+        <h3>编辑歌曲信息</h3>
+        <p class="tip">同时写入文件标签与音乐库索引，换个播放器、重装应用都能保留</p>
+        <label>
+          <span>歌名</span>
+          <input v-model="editName" maxlength="120" placeholder="必填" />
+        </label>
+        <label>
+          <span>歌手</span>
+          <input v-model="editArtists" maxlength="120" placeholder="多个歌手用 / 分隔" />
+        </label>
+        <label>
+          <span>专辑</span>
+          <input v-model="editAlbum" maxlength="120" placeholder="可留空" />
+        </label>
+        <div class="editor-actions">
+          <button class="btn" :disabled="saving" @click="closeEditor">取消</button>
+          <button class="btn primary" :disabled="saving" @click="saveEditor">
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -211,5 +285,65 @@ onMounted(async () => {
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* 元数据编辑弹层 */
+.editor-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+}
+.editor {
+  width: 380px;
+  padding: 20px 22px 16px;
+  border-radius: 18px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+.editor h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--text-1);
+}
+.editor .tip {
+  margin: 0 0 14px;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.editor label {
+  display: block;
+  margin-bottom: 10px;
+}
+.editor label span {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.editor input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-1);
+  font-size: 12px;
+  outline: none;
+}
+.editor input:focus {
+  border-color: rgba(110, 231, 255, 0.45);
+}
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 </style>

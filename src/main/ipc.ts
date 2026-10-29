@@ -19,6 +19,7 @@ import {
 } from './services/qrlogin'
 import { loginCellphone, sendCaptcha } from './services/cellphone-login'
 import { musicdl } from './engine/musicdl'
+import { refresh as refreshSourceHealth, snapshot as sourceHealthSnapshot } from './services/source-health'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
 import { checkForUpdate, installUpdate } from './updater'
 import {
@@ -133,6 +134,13 @@ export function registerIpc(): void {
     await library.remove(id)
     return library.list()
   })
+  handle(
+    IPC.libraryUpdateMeta,
+    async (id: string, patch: { name?: string; artists?: string; album?: string }) => {
+      const updated = await library.updateMeta(id, patch)
+      return updated ?? null
+    }
+  )
   handle(IPC.libraryReveal, (id: string) => {
     const record = library.findById(id)
     if (record) shell.showItemInFolder(record.filePath)
@@ -212,6 +220,8 @@ export function registerIpc(): void {
   // ---------- 音源引擎 ----------
   handle(IPC.engineStatus, () => musicdl.status())
   handle(IPC.engineRestart, () => musicdl.restart())
+  handle(IPC.sourceHealth, () => sourceHealthSnapshot())
+  handle(IPC.sourceHealthRefresh, () => refreshSourceHealth())
 
   // ---------- 更新 ----------
   handle(IPC.updateCheck, () => checkForUpdate())

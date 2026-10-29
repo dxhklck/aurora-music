@@ -9,6 +9,7 @@ import { useAppStore } from '../stores/app'
 import { audio } from '../core/audio'
 import { wave } from '../core/wave'
 import AudioWave from './AudioWave.vue'
+import EqualizerPanel from './EqualizerPanel.vue'
 import { formatDuration } from '@shared/lyric'
 
 type NowPlayingStyle = 'vinyl' | 'lyrics' | 'cover'
@@ -25,6 +26,13 @@ const modeIcon = computed(
 )
 const style = computed<NowPlayingStyle>(() => app.settings?.nowPlayingStyle ?? 'vinyl')
 const stylePanel = ref(false)
+/** 均衡器面板与样式面板共用右上角的位置，同时只开一个 */
+const eqPanel = ref(false)
+
+function toggleEqualizer(): void {
+  eqPanel.value = !eqPanel.value
+  if (eqPanel.value) stylePanel.value = false
+}
 
 const styleOptions: { id: NowPlayingStyle; name: string; desc: string }[] = [
   { id: 'vinyl', name: '黑胶经典', desc: '旋转唱片 + 唱臂 + 侧边歌词' },
@@ -74,6 +82,10 @@ function seek(ratio: number): void {
 
 function onKey(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
+    if (eqPanel.value) {
+      eqPanel.value = false
+      return
+    }
     if (stylePanel.value) {
       stylePanel.value = false
       return
@@ -144,6 +156,9 @@ onBeforeUnmount(() => {
       </div>
       <div class="head-actions">
         <button class="icon-btn" title="播放器样式" @click.stop="stylePanel = !stylePanel">
+          <Icon name="settings" :size="18" />
+        </button>
+        <button class="icon-btn" :class="{ active: eqPanel }" title="均衡器" @click.stop="toggleEqualizer">
           <Icon name="equalizer" :size="18" />
         </button>
         <button class="icon-btn" title="桌面歌词" @click="openDesktopLyric">
@@ -177,6 +192,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
+      <EqualizerPanel v-if="eqPanel" />
     </header>
 
     <div class="stage-body" :class="{ compact }" @click="stylePanel = false">

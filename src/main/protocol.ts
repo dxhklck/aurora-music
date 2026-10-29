@@ -1,5 +1,5 @@
 import { protocol, net } from 'electron'
-import { readFile } from 'node:fs/promises'
+import { open, readFile, stat, type FileHandle } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { MEDIA_SCHEME } from './media'
 
@@ -23,6 +23,11 @@ const MIME: Record<string, string> = {
 }
 
 const ALLOWED_EXT = new Set(Object.keys(MIME))
+
+/** 超过这个体积才走流式：小文件整读更简单，也彻底绕开背压问题 */
+const STREAM_THRESHOLD = 8 * 1024 * 1024
+/** 流式分块：太小 syscall 过密，太大首块等待变长 */
+const CHUNK = 256 * 1024
 
 /**
  * Web Audio 的 MediaElementAudioSourceNode 只接受「同源或带 CORS 头」的媒体，
@@ -133,12 +138,11 @@ async function serveLocal(request: Request, url: URL): Promise<Response> {
   const ext = extname(filePath).toLowerCase()
   if (!filePath || !ALLOWED_EXT.has(ext)) return new Response('Forbidden', { status: 403 })
 
-  // 整读进内存后以 Buffer 直出。不要换成 createReadStream + Readable.toWeb：
-  // Node 流适配器在 protocol.handle 下有背压恢复丢失的问题——元素缓冲耗尽后
-  // 恢复信号不再送达，表现为"显示播放中但永久静音"（进歌词舞台等重负载时机触发）。
-  let data: Buffer
+  let size: number
   try {
-    data = await readFile(filePath)
+    const info = await stat(filePath)
+    if (!info.isFile()) return new Response('Not Found', { status: 404 })
+    size = info.size
   } catch {
     return new Response('Not Found', { status: 404 })
   }
@@ -150,31 +154,91 @@ async function serveLocal(request: Request, url: URL): Promise<Response> {
     ...CORS_HEADERS
   }
 
+  // 只解析单区间：<audio> 的拖动与断点续播只发这一种
+  let start = 0
+  let end = size - 1
+  let partial = false
   const rangeHeader = request.headers.get('range')
   if (rangeHeader) {
     const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader)
     if (match) {
-      const start = match[1] ? Number(match[1]) : 0
-      const end = match[2] ? Math.min(Number(match[2]), data.length - 1) : data.length - 1
-      if (start >= data.length || start > end) {
+      start = match[1] ? Number(match[1]) : 0
+      end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1
+      if (start >= size || start > end) {
         return new Response(null, {
           status: 416,
-          headers: { 'Content-Range': `bytes */${data.length}`, ...CORS_HEADERS }
+          headers: { 'Content-Range': `bytes */${size}`, ...CORS_HEADERS }
         })
       }
-      return new Response(data.subarray(start, end + 1) as unknown as BodyInit, {
-        status: 206,
-        headers: {
-          ...baseHeaders,
-          'Content-Range': `bytes ${start}-${end}/${data.length}`,
-          'Content-Length': String(end - start + 1)
-        }
-      })
+      partial = true
     }
   }
 
-  return new Response(data as unknown as BodyInit, {
-    status: 200,
-    headers: { ...baseHeaders, 'Content-Length': String(data.length) }
+  const length = Math.max(0, end - start + 1)
+  const headers: Record<string, string> = { ...baseHeaders, 'Content-Length': String(length) }
+  if (partial) headers['Content-Range'] = `bytes ${start}-${end}/${size}`
+  const status = partial ? 206 : 200
+
+  if (request.method === 'HEAD') return new Response(null, { status, headers })
+
+  // 小文件整读：这条路径已经跑稳了，不给它引入变化
+  if (size <= STREAM_THRESHOLD) {
+    try {
+      const data = await readFile(filePath)
+      return new Response(data.subarray(start, end + 1) as unknown as BodyInit, { status, headers })
+    } catch {
+      return new Response('Not Found', { status: 404 })
+    }
+  }
+
+  // 大文件按需流式：一首 100MB 无损整读，峰值就是一个完整文件；拖动进度条还会再叠一次
+  return new Response(fileBody(filePath, start, end), { status, headers })
+}
+
+/**
+ * 按需读取的文件流。
+ *
+ * 刻意不用 `createReadStream` + `Readable.toWeb`：那个适配器在 protocol.handle 下会丢
+ * 背压恢复信号，表现为「显示播放中但永久静音」（进歌词舞台等重负载时机触发）。
+ * 这里手写 ReadableStream，`pull` 由 Chromium 按消费速度调用，本身就是拉模型——
+ * 它不想要数据时我们就不读盘，也就不存在「恢复信号丢失」。
+ */
+function fileBody(path: string, start: number, end: number): ReadableStream<Uint8Array> {
+  let handle: FileHandle | null = null
+  let position = start
+  const close = async (): Promise<void> => {
+    const current = handle
+    handle = null
+    await current?.close().catch(() => undefined)
+  }
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        handle ??= await open(path, 'r')
+        if (position > end) {
+          controller.close()
+          await close()
+          return
+        }
+        const size = Math.min(CHUNK, end - position + 1)
+        const buffer = Buffer.allocUnsafe(size)
+        // 用定位读，不依赖句柄内部游标：并发分段读时游标会被相互踩
+        const { bytesRead } = await handle.read(buffer, 0, size, position)
+        if (bytesRead <= 0) {
+          controller.close()
+          await close()
+          return
+        }
+        position += bytesRead
+        controller.enqueue(new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead))
+      } catch (error) {
+        controller.error(error)
+        await close()
+      }
+    },
+    // 拖动进度条 / 切歌时 Chromium 会 cancel 掉旧流，句柄必须在这里放掉，否则泄漏
+    async cancel() {
+      await close()
+    }
   })
 }

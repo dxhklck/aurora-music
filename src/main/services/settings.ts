@@ -3,6 +3,22 @@ import { readFile, writeFile, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import type { AppSettings } from '@shared/types'
 
+/** 均衡器固定五段，增益必须恒为 5 个数字：长度不对时 setEqualizer 会静默不生效 */
+const EQ_BANDS = 5
+const EQ_MAX_GAIN = 12
+
+function normalizeEqualizer(input: unknown): AppSettings['equalizer'] {
+  const source = (input ?? {}) as { enabled?: unknown; gains?: unknown }
+  const raw = Array.isArray(source.gains) ? source.gains : []
+  return {
+    enabled: source.enabled === true,
+    gains: Array.from({ length: EQ_BANDS }, (_, index) => {
+      const value = Number(raw[index])
+      return Number.isFinite(value) ? Math.max(-EQ_MAX_GAIN, Math.min(EQ_MAX_GAIN, value)) : 0
+    })
+  }
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   platform: 'demo',
   quality: 'high',
@@ -22,6 +38,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   downloadRetries: 3,
   writeTags: true,
   engineEnabled: true,
+  equalizer: { enabled: false, gains: [0, 0, 0, 0, 0] },
   closeToTray: true,
   qqCookie: '',
   neteaseCookie: '',
@@ -52,6 +69,8 @@ class SettingsService {
       }
     }
     if (!this.cache.downloadDir) this.cache.downloadDir = defaultDownloadDir
+    // 老版本 settings.json 没有这个字段，或者只存了一半：统一补成合法形态
+    this.cache.equalizer = normalizeEqualizer(this.cache.equalizer)
     return this.get()
   }
 
@@ -60,7 +79,11 @@ class SettingsService {
   }
 
   async set(patch: Partial<AppSettings>): Promise<AppSettings> {
-    this.cache = { ...this.cache, ...patch }
+    this.cache = {
+      ...this.cache,
+      ...patch,
+      equalizer: normalizeEqualizer(patch.equalizer ?? this.cache.equalizer)
+    }
     if (this.filePath) {
       // 快照必须在排队前取：串行执行时用的应是「调用那一刻」的完整状态
       const snapshot = JSON.stringify(this.cache, null, 2)

@@ -14,12 +14,17 @@
  *    这样静音时可视化仍在起伏——符合播放器习惯；若串在增益后，
  *    一静音波形就变直线，2 秒后还会被判成「analyser 失效」而降级成假波形。
  *
- * 输出链：`source → gain → destination`；可视链：`source → analyser`。
+ * 输出链：`source → b0..b4（均衡器） → gain → destination`；可视链：`source → analyser`。
  */
 
 const FFT_SIZE = 2048
 /** 连续全 0 超过此时长（ms）即判定 analyser 失效 */
 const FLAT_TIMEOUT = 2000
+
+/** 五段均衡器的中心频率（Hz），与 UI 的滑块一一对应 */
+export const EQ_BANDS = [60, 230, 910, 3600, 14000] as const
+/** 单段可调范围（dB），正负对称 */
+export const EQ_MAX_GAIN = 12
 
 class WaveEngine {
   private ctx: AudioContext | null = null
@@ -27,6 +32,11 @@ class WaveEngine {
   private analyser: AnalyserNode | null = null
   /** 真正控制出声的增益节点（元素自身的 volume/muted 被接管后已失效） */
   private gain: GainNode | null = null
+  /** 五段滤波器，按 EQ_BANDS 顺序串联在 source 与 gain 之间 */
+  private bands: BiquadFilterNode[] = []
+  /** 均衡器参数的缓存：挂接可能晚于用户调参，创建节点时要按当前值初始化 */
+  private eqGains: number[] = EQ_BANDS.map(() => 0)
+  private eqEnabled = false
   /** 缓存的音量/静音：挂接可能发生在设过音量之后，创建 GainNode 时要按当前值初始化 */
   private volume = 1
   private muted = false
@@ -59,12 +69,26 @@ class WaveEngine {
       this.volume = el.volume
       this.muted = el.muted
       gain.gain.value = this.muted ? 0 : this.volume
-      source.connect(gain)
+      // 均衡器：五个 peaking 滤波器串在 source 与 gain 之间。
+      // 关闭时不拆链（拆了再接极易踩到「接了没通」的静音），只把增益归零。
+      const bands = EQ_BANDS.map((freq) => {
+        const band = ctx.createBiquadFilter()
+        band.type = 'peaking'
+        band.frequency.value = freq
+        band.Q.value = 1
+        band.gain.value = 0
+        return band
+      })
+      source.connect(bands[0])
+      for (let i = 0; i < bands.length - 1; i += 1) bands[i].connect(bands[i + 1])
+      bands[bands.length - 1].connect(gain)
       gain.connect(ctx.destination)
       this.ctx = ctx
       this.source = source
       this.analyser = analyser
       this.gain = gain
+      this.bands = bands
+      this.applyEqualizer()
       this.freqData = new Uint8Array(analyser.frequencyBinCount)
       this.timeData = new Uint8Array(analyser.fftSize)
       if (!el.paused) this.resume()
@@ -97,6 +121,36 @@ class WaveEngine {
   private applyGain(): void {
     if (!this.gain) return
     this.gain.gain.value = this.muted ? 0 : this.volume
+  }
+
+  /**
+   * 设定五段增益（dB，长度必须等于 EQ_BANDS）。
+   * 未挂接音频图时只缓存，等 attach 时生效——用户常常先调 EQ 再打开播放舞台。
+   * 非法输入直接忽略而不是抛错：这个接口被 UI 的 input 事件高频调用。
+   */
+  setEqualizer(gainsDb: number[], enabled: boolean): void {
+    if (
+      Array.isArray(gainsDb) &&
+      gainsDb.length === EQ_BANDS.length &&
+      gainsDb.every((value) => Number.isFinite(value))
+    ) {
+      this.eqGains = gainsDb.map((value) =>
+        Math.max(-EQ_MAX_GAIN, Math.min(EQ_MAX_GAIN, value))
+      )
+    }
+    this.eqEnabled = Boolean(enabled)
+    this.applyEqualizer()
+  }
+
+  private applyEqualizer(): void {
+    this.bands.forEach((band, index) => {
+      band.gain.value = this.eqEnabled ? (this.eqGains[index] ?? 0) : 0
+    })
+  }
+
+  /** 诊断/测试用：当前均衡器参数与是否已挂接 */
+  get eq(): { attached: boolean; enabled: boolean; gains: number[] } {
+    return { attached: this.bands.length > 0, enabled: this.eqEnabled, gains: [...this.eqGains] }
   }
 
   /** 诊断/测试用：当前增益值与是否已挂接 */

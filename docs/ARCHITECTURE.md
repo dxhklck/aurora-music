@@ -226,6 +226,22 @@ Aurora 自己实现了网易云/QQ/酷我（需要榜单与逐字歌词），剩
   如果两者集合一致，渲染层保留已渲染的顺序不动——顺序跳变比顺序不完美更刺眼；
   只有集合不一致（比如上游去重掉了重复项）才用最终结果替换。
 
+### 5.5.2 上游健康巡检
+
+15 个引擎音源全是爬取实现，上游一改版就静默失效，表现是「这个源什么都搜不到」——用户分不清「没这首歌」和「这个源挂了」。`services/source-health.ts` 定期给每个源发一次最小搜索（`limit=1`，关键词固定），结果落 `userData/source-health.json`，设置页按源显色。
+
+三条纪律决定了它不会变成负担：
+
+| 约束 | 取值 | 原因 |
+| --- | --- | --- |
+| 启动延迟 | 20s | 不和用户第一次搜索抢带宽 |
+| 并发 | 3，间隔 400ms | 15 个请求同一秒打出去容易被风控 |
+| 保鲜期 | 12h | 上游改版没这么频繁，天天扫纯属送风控分 |
+
+结果分四态：`ok`（有结果）、`empty`（通但搜不到）、`fail`（请求失败，带错误文案与连续失败次数）、`unknown`（还没巡检过）。`empty` 不并进 `fail`：能连通说明域名和协议没变，多半只是关键词没命中，判成坏源会误导用户。
+
+同源还有一份**会话内**的成败计数（`engine/ts/index.ts` 的 `recordHealth`），那是换源排序的输入（见 4.4），与这份跨启动的巡检结果用途不同，不要合并。
+
 ---
 
 ## 6. 主进程边界
@@ -288,8 +304,8 @@ muse://local/?p=<encoded file path>                    → 本地文件
 因此音频图里必须有受控增益，且音量/静音双写：
 
 ```
-source → gain → destination      ← 出声链，gain 由音量/静音控制
-source → analyser                ← 可视链，取样在增益之前
+source → b0..b4（均衡器）→ gain → destination      ← 出声链，gain 由音量/静音控制
+source → analyser                                  ← 可视链，取样在增益之前
 ```
 
 - `wave.setGain(v)` / `wave.setMuted(m)` 由 `AudioEngine.applyVolume` / `setMuted` 调用，未挂接时是空操作；
@@ -316,6 +332,22 @@ Store 中的 `activeLyricIndex` 则供桌面歌词与进度条使用。
 | `invalidate()` | `stop()` / `reset()` 时让在途请求一并作废 |
 
 两个使用点的差别值得记：`playAt` 每次领号；`search.loadMore` 用 `current()` **只跟随不领号**——翻页若领新号，会把「正在进行的新搜索」判成过期，反而制造 bug。
+
+### 7.3 均衡器（五段 peaking）
+
+链路里串 5 个 `BiquadFilterNode`（`peaking`，`Q=1`），中心频率 60 / 230 / 910 / 3600 / 14000 Hz，单段 ±12 dB：
+
+```
+source → b0 → b1 → b2 → b3 → b4 → gain → destination
+```
+
+三个约束：
+
+1. **关闭时不拆链**，只把 5 段增益归零。拆了重连在 Web Audio 里极易踩到「接了没通」的静音，而静音态排查成本极高（表现为 UI 一切正常、就是没声）。
+2. **参数先缓存后生效**。音频图是懒创建的（第一次打开播放舞台才 `attach`），用户完全可能先调 EQ 再打开舞台，所以 `setEqualizer` 在未挂接时只写缓存，`attach` 时按缓存初始化——和 `volume/muted` 的处理方式一致。
+3. **analyser 仍直连 `source`**，不串在 EQ 之后。否则关掉某段时频谱会跟着变化，且静音时波形变直线会被判成 analyser 失效。
+
+持久化在 `settings.equalizer`，`settings.ts` 的 `load()` 会做一次归一化：老配置缺字段、长度不足 5、含 `NaN` 都补成合法形态。长度不对时 `wave.setEqualizer` 会静默忽略参数——不归一化的话，用户看到滑块在动而声音不变。
 
 ---
 

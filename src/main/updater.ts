@@ -21,6 +21,7 @@ import { markQuitting } from './tray'
  */
 
 const REPO = 'dxhklck/aurora-music'
+const MANUAL_URL = `https://github.com/${REPO}/releases/latest`
 
 /** 更新渠道：空串 = GitHub 直连；其余为反代镜像前缀（代理完整 GitHub URL）。
  *  渠道可用性实测会变（mirror.ghproxy.com 已下线），失效的直接删行即可 */
@@ -106,6 +107,18 @@ async function ensureChannel(): Promise<void> {
   throw new Error(`所有更新渠道均不可达。${failures.join('；')}`)
 }
 
+/** 把 electron-updater 的原始错误翻成能看懂的文案，并在确定性失败时给出兜底地址 */
+function failureStatus(error: unknown): UpdateStatusView {
+  const message = (error as Error)?.message ?? String(error)
+  // 下载 404 几乎只有一种原因：latest.yml 指向的文件名与 Release 上的资产名不一致。
+  // 这类错重试一百次还是 404，直接把「手动下载」的地址给用户，别让他困在英文文案里。
+  const missingAsset = /404|not found|cannot download/i.test(message)
+  return currentStatus('error', {
+    message: missingAsset ? `安装包下载失败（HTTP 404）：${message.slice(0, 120)}` : message,
+    ...(missingAsset ? { manualUrl: MANUAL_URL } : {})
+  })
+}
+
 function bindEvents(): void {
   autoUpdater.on('checking-for-update', () => broadcast(currentStatus('checking')))
   autoUpdater.on('update-available', (info) => broadcast(currentStatus('available', { version: info.version })))
@@ -117,7 +130,7 @@ function bindEvents(): void {
   autoUpdater.on('error', (error) => {
     // 渠道中途失效（镜像挂了/直连被断）：忘掉当前选择，下次检查重新探测
     activeChannel = null
-    broadcast(currentStatus('error', { message: (error as Error).message ?? String(error) }))
+    broadcast(failureStatus(error))
   })
 }
 
@@ -145,7 +158,7 @@ export async function checkForUpdate(): Promise<UpdateStatusView> {
     if (version && version !== app.getVersion()) return currentStatus('available', { version })
     return currentStatus('none')
   } catch (error) {
-    return currentStatus('error', { message: (error as Error).message })
+    return failureStatus(error)
   }
 }
 

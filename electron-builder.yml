@@ -31,7 +31,11 @@ extraResources:
 win:
   target:
     - nsis
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  # 文件名必须用字面量 Aurora-Music，不能引 ${productName}：
+  # productName 是「Aurora Music」带空格，空格在「本地文件名 → latest.yml → GitHub 资产名」
+  # 这条链上被不同环节各自规范化一次（本地留着空格、GitHub 换成点），
+  # 最终 latest.yml 指向的名字和实际资产名对不上，更新永远 404。
+  artifactName: Aurora-Music-${version}-${arch}.${ext}
 
 nsis:
   oneClick: false
@@ -47,7 +51,7 @@ mac:
   # 未配置开发者证书时跳过公证，本地可直接产出可运行的 .app
   hardenedRuntime: false
   gatekeeperAssess: false
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: Aurora-Music-${version}-${arch}.${ext}
 
 linux:
   target:
@@ -56,4 +60,4 @@ linux:
   category: AudioVideo
   synopsis: 跨平台桌面音乐播放器
   description: 多音源统一适配的沉浸式音乐播放器，支持搜索、榜单、下载与逐行歌词。
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: Aurora-Music-${version}-${arch}.${ext}

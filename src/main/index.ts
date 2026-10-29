@@ -7,6 +7,7 @@ import { registerMediaScheme, installMediaProtocol } from './protocol'
 import { createMainWindow } from './windows'
 import { createTray } from './tray'
 import { bootstrapProviders, registerEngineProviders } from './providers'
+import { initSourceHealth } from './services/source-health'
 import { setProviderCookies } from './providers/cookies'
 import { registerIpc } from './ipc'
 import { library } from './services/library'
@@ -109,7 +110,11 @@ async function bootstrapRuntime(): Promise<void> {
   await playlists.load()
 
   // 引擎音源：设置里关掉就不注册，避免音源列表出现一堆不可用的平台
-  if (settings.get().engineEnabled) registerEngineProviders()
+  if (settings.get().engineEnabled) {
+    registerEngineProviders()
+    // 上游巡检：12 小时内扫过就复用结果，否则延后 20 秒在后台跑一轮
+    initSourceHealth(true)
+  }
 
   downloads.configure(app.getPath('userData'))
   await downloads.load()

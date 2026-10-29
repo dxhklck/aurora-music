@@ -32,9 +32,12 @@ const api: AuroraApi = {
 
   engineStatus: () => ipcRenderer.invoke(IPC.engineStatus),
   engineRestart: () => ipcRenderer.invoke(IPC.engineRestart),
+  sourceHealth: () => ipcRenderer.invoke(IPC.sourceHealth),
+  sourceHealthRefresh: () => ipcRenderer.invoke(IPC.sourceHealthRefresh),
 
   listLibrary: () => ipcRenderer.invoke(IPC.libraryList),
   removeLibrary: (id) => ipcRenderer.invoke(IPC.libraryRemove, id),
+  updateLibraryMeta: (id, patch) => ipcRenderer.invoke(IPC.libraryUpdateMeta, id, patch),
   refreshLibrary: () => ipcRenderer.invoke(IPC.libraryRefresh),
   revealLibrary: (id) => ipcRenderer.invoke(IPC.libraryReveal, id),
   importMusicDir: () => ipcRenderer.invoke(IPC.libraryImportDir),

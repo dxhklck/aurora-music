@@ -3,6 +3,7 @@ import { readFile, writeFile, rename, readdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import type { LibraryTrack, Song } from '@shared/types'
 import { ensureDir, fileSize } from '../utils'
+import { musicdl } from '../engine/musicdl'
 
 /** 本地库识别的音频格式（与 Muse 播放支持的格式保持一致） */
 const AUDIO_EXTS = new Set(['mp3', 'flac', 'wav', 'm4a', 'ogg', 'aac', 'opus'])
@@ -89,6 +90,56 @@ class LibraryService {
     this.loaded = false
     await this.load()
     return this.list()
+  }
+
+  /** 元数据编辑允许改的三个字段；artist 用 `/` 或 `、` 分隔多个歌手 */
+  async updateMeta(
+    id: string,
+    patch: { name?: string; artists?: string; album?: string }
+  ): Promise<LibraryTrack | undefined> {
+    const track = this.findById(id)
+    if (!track) return undefined
+
+    const name = (patch.name ?? track.song.name).trim()
+    const album = (patch.album ?? track.song.album).trim()
+    const rawArtists = (patch.artists ?? track.song.artists.join('/')).trim()
+    const artists = rawArtists
+      .split(/[\/、,，]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+
+    track.song = { ...track.song, name: name || track.song.name, artists, album }
+    await this.persist()
+
+    // sidecar 决定「重启/重装后还能不能看到改动」，音频标签决定「换个播放器认不认」。
+    // 两个都写，各写各的，一个失败不推翻另一个。
+    const metaPath = track.metaPath ?? track.filePath.replace(/\.[^.]+$/, '.meta.json')
+    try {
+      let payload: Record<string, unknown> = {}
+      if (existsSync(metaPath)) {
+        payload = JSON.parse(await readFile(metaPath, 'utf8')) as Record<string, unknown>
+      }
+      // 只覆盖用户改的三个字段：sidecar 里还存着原始平台、音质、下载时间，别一起冲掉
+      const previous = (payload.song as Record<string, unknown> | undefined) ?? {}
+      payload.song = { ...previous, name: track.song.name, artists, album }
+      await writeFile(metaPath, JSON.stringify(payload, null, 2), 'utf8')
+      track.metaPath = metaPath
+    } catch {
+      /* sidecar 写失败不影响文件标签，继续往下走 */
+    }
+
+    try {
+      await musicdl.tag({
+        path: track.filePath,
+        title: track.song.name,
+        artists: artists.join('/'),
+        album
+      })
+    } catch {
+      /* 标签写入失败（不支持的容器/文件被占用）不阻断编辑，sidecar 已记住改动 */
+    }
+
+    return track
   }
 
   /**

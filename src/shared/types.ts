@@ -220,6 +220,11 @@ export interface AppSettings {
   writeTags: boolean
   /** 启用 musicdl 引擎音源 */
   engineEnabled: boolean
+  /**
+   * 五段均衡器。gain 单位为 dB，固定 5 段（60/230/910/3600/14000 Hz），范围 ±12。
+   * 关闭时滤波器仍在链路里，只是增益归零——拆链重接极易踩到静音。
+   */
+  equalizer: { enabled: boolean; gains: number[] }
   /** 点关闭按钮时最小化到系统托盘（关掉 = 隐藏后台播放）；为 false 时关闭即退出。托盘不可用时始终退出 */
   closeToTray: boolean
   /** QQ 音乐登录 Cookie（浏览器登录后复制粘贴；解锁逐字歌词与播放权限） */

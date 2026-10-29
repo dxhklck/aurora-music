@@ -37,6 +37,29 @@ export interface EngineStatusView {
   health: EngineSourceHealthView[]
 }
 
+/** 单个引擎音源的上游巡检结果 */
+export interface SourceHealthItemView {
+  key: string
+  label: string
+  /** ok=正常；empty=能通但搜不到东西；fail=请求失败；unknown=还没巡检过 */
+  state: 'ok' | 'empty' | 'fail' | 'unknown'
+  /** 本次探测耗时（毫秒） */
+  ms: number
+  error: string
+  checkedAt: number
+  /** 连续失败次数，跨启动累计 */
+  streak: number
+}
+
+/** 上游健康巡检快照 */
+export interface SourceHealthView {
+  /** 上次完整巡检的时间戳，0 = 从未巡检 */
+  checkedAt: number
+  /** 是否正在巡检 */
+  running: boolean
+  items: SourceHealthItemView[]
+}
+
 export interface SearchArgs {
   platform: string
   keyword: string
@@ -85,9 +108,18 @@ export interface AuroraApi {
 
   engineStatus(): Promise<EngineStatusView>
   engineRestart(): Promise<EngineStatusView>
+  /** 上游健康巡检结果（读缓存快照，不触发探测） */
+  sourceHealth(): Promise<SourceHealthView>
+  /** 立刻巡检 15 个引擎音源，跑完返回（约 20-60 秒，期间不要重复点） */
+  sourceHealthRefresh(): Promise<SourceHealthView>
 
   listLibrary(): Promise<LibraryTrack[]>
   removeLibrary(id: string): Promise<void>
+  /** 改本地曲目的元数据；歌手指多个时用 `/` 分隔。返回更新后的条目，找不到返回 null */
+  updateLibraryMeta(
+    id: string,
+    patch: { name?: string; artists?: string; album?: string }
+  ): Promise<LibraryTrack | null>
   refreshLibrary(): Promise<LibraryTrack[]>
   revealLibrary(id: string): Promise<void>
   /** 导入本地音乐目录：对话框选目录，追加到 musicDirs 并立即扫描，返回当前目录列表 */
@@ -205,6 +237,11 @@ export interface UpdateStatusView {
   /** 下载进度（0-100） */
   percent?: number
   message?: string
+  /**
+   * 自动更新走不通时的兜底地址。只在「下载 404」这类确定性失败上给，
+   * 用来把用户从「检查失败：Cannot download ...」里捞出来。
+   */
+  manualUrl?: string
 }
 
 declare global {

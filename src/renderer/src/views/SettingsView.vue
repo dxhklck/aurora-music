@@ -5,7 +5,7 @@ import { useAppStore } from '../stores/app'
 import { useDownloadStore } from '../stores/download'
 import { useLibraryStore } from '../stores/library'
 import { formatBytes } from '@shared/lyric'
-import type { EngineStatusView, UpdateStatusView } from '@shared/api'
+import type { EngineStatusView, SourceHealthView, UpdateStatusView } from '@shared/api'
 import { type QrLoginPlatform, type QrLoginState } from '@shared/types'
 import type { NeteaseAccountInfo } from '@shared/types'
 import type { Quality } from '@shared/types'
@@ -34,18 +34,42 @@ const qualities: Array<{ value: Quality; label: string; hint: string }> = [
 const engineSources = computed(() => app.providers.filter((item) => item.id.startsWith('mdl-')))
 
 /**
- * 引擎健康度摘要：15 个源全是爬取实现，坏的源通常表现为「搜什么都没结果」，
- * 用户很难自己判断是「没这首歌」还是「这个源挂了」。只展示最近有请求的那些，
- * 没请求过的不占版面。
+ * 上游健康巡检：15 个源全是爬取实现，上游一改版就静默失效，表现是「这个源什么都搜不到」。
+ * 用户分不清「没这首歌」还是「源挂了」，所以主进程定期给每个源发一次最小搜索，这里按源显色。
  */
-const engineHealth = computed(() => {
-  const used = (engine.value?.health ?? []).filter((item) => item.ok + item.fail > 0)
-  if (!used.length) return null
-  const broken = used.filter((item) => item.fail > 0 && item.ok === 0)
-  if (!broken.length) return `${used.length} 个音源本次请求全部成功`
-  const detail = broken.map((item) => `${item.label} ${item.fail} 次失败`).join('、')
-  return `${used.length - broken.length}/${used.length} 正常 · ${detail}`
+const health = ref<SourceHealthView | null>(null)
+
+const healthText = computed(() => {
+  const s = health.value
+  if (!s) return '尚未巡检'
+  if (s.running) return '巡检中…'
+  if (!s.checkedAt) return '尚未巡检（启动 20 秒后自动开始）'
+  const good = s.items.filter((item) => item.state === 'ok').length
+  const empty = s.items.filter((item) => item.state === 'empty').length
+  const bad = s.items.filter((item) => item.state === 'fail').length
+  const parts = [`${good}/${s.items.length} 正常`]
+  if (empty) parts.push(`${empty} 个搜不到`)
+  if (bad) parts.push(`${bad} 个失败`)
+  return `${parts.join(' · ')} · ${agoText(s.checkedAt)}`
 })
+
+function agoText(at: number): string {
+  if (!at) return '从未'
+  const minutes = Math.round((Date.now() - at) / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  return `${Math.round(hours / 24)} 天前`
+}
+
+function healthTip(item: SourceHealthView['items'][number]): string {
+  const when = item.checkedAt ? agoText(item.checkedAt) : '未巡检'
+  if (item.state === 'fail') return `${item.label} · ${when}失败：${item.error}`
+  if (item.state === 'empty') return `${item.label} · ${when}能连通，但搜索没有结果`
+  if (item.state === 'ok') return `${item.label} · ${when}正常（${item.ms}ms）`
+  return `${item.label} · 尚未巡检`
+}
 
 /* ---------- 自动更新 ---------- */
 const update = ref<UpdateStatusView | null>(null)
@@ -65,7 +89,8 @@ const updateText = computed(() => {
     case 'ready':
       return s.version ? `v${s.version} 已就绪，重启后安装` : '更新已就绪，重启后安装'
     case 'error':
-      return s.message ? `检查失败：${s.message}` : '检查更新失败'
+      // 失败可能发生在「检查」也可能发生在「下载」，不要一律写成检查失败
+      return s.message ?? '更新失败，请稍后重试'
     default:
       return '已是最新版本'
   }
@@ -82,6 +107,11 @@ async function checkUpdate(): Promise<void> {
 
 function installUpdateNow(): void {
   window.api.installUpdate()
+}
+
+/** 自动更新走不通时的兜底：直接打开 Releases 页，用户自己下安装包 */
+function openManualDownload(): void {
+  if (update.value?.manualUrl) window.open(update.value.manualUrl)
 }
 
 onMounted(() => {
@@ -106,6 +136,7 @@ async function probe(): Promise<void> {
   probing.value = true
   try {
     engine.value = await window.api.engineStatus()
+    health.value = await window.api.sourceHealth()
   } catch (error) {
     app.toast(error instanceof Error ? error.message : String(error), 'error')
   } finally {
@@ -117,10 +148,24 @@ async function restartEngine(): Promise<void> {
   probing.value = true
   try {
     engine.value = await window.api.engineRestart()
-    if (engine.value?.ready) app.toast('引擎已就绪', 'success')
+    if (engine.value?.ready) app.toast('引擎已就绪，开始巡检上游…', 'success')
     else app.toast(engine.value?.error || '引擎未就绪', 'error')
   } finally {
     probing.value = false
+  }
+  await refreshHealth()
+}
+
+/** 手动巡检：15 个源串行错开跑，可能要等 20-60 秒，期间按钮禁用 */
+async function refreshHealth(): Promise<void> {
+  health.value = health.value ? { ...health.value, running: true } : { checkedAt: 0, running: true, items: [] }
+  try {
+    health.value = await window.api.sourceHealthRefresh()
+    const bad = health.value.items.filter((item) => item.state === 'fail')
+    if (!bad.length) app.toast('全部音源正常', 'success')
+    else app.toast(`${bad.length} 个音源请求失败：${bad.map((item) => item.label).join('、')}`, 'error')
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : String(error), 'error')
   }
 }
 
@@ -761,11 +806,24 @@ onBeforeUnmount(() => {
           <span>音源</span>
           <em>{{ engine.runtime?.sources ?? 0 }} 个</em>
         </div>
-        <div v-if="engineHealth" class="kv">
-          <span>近期请求</span>
-          <em>{{ engineHealth }}</em>
+        <div class="kv">
+          <span>上游巡检</span>
+          <em>{{ healthText }}</em>
         </div>
         <div v-if="engine.error" class="err">{{ engine.error }}</div>
+
+        <!-- 按源显色：红=请求失败、黄=能通但搜不到、灰=还没巡检过 -->
+        <div v-if="health?.items.length" class="health-grid">
+          <span
+            v-for="item in health.items"
+            :key="item.key"
+            class="src"
+            :class="item.state"
+            :title="healthTip(item)"
+          >
+            <i />{{ item.label }}
+          </span>
+        </div>
 
         <div class="engine-actions">
           <button class="btn" :disabled="probing" @click="restartEngine">
@@ -804,6 +862,9 @@ onBeforeUnmount(() => {
           </button>
           <button v-if="update?.state === 'ready'" class="btn primary" @click="installUpdateNow">
             重启并安装
+          </button>
+          <button v-if="update?.manualUrl" class="btn primary" @click="openManualDownload">
+            <Icon name="download" :size="14" /> 手动下载新版
           </button>
         </div>
       </div>
@@ -1381,6 +1442,45 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   margin-top: 10px;
+}
+/* 上游巡检：每个源一个色点，红=请求失败、黄=能通但搜不到、灰=没巡检过 */
+.health-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.src {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  cursor: default;
+}
+.src i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-3);
+}
+.src.ok i {
+  background: #4ad295;
+}
+.src.empty i {
+  background: #f0b732;
+}
+.src.fail {
+  color: #ffc2cc;
+  border-color: rgba(255, 92, 124, 0.3);
+}
+.src.fail i {
+  background: #ff5c7c;
 }
 .btn.ghost {
   background: transparent;
