@@ -234,6 +234,8 @@ class DownloadManager extends EventEmitter {
         const message = error instanceof Error ? error.message : String(error)
         task.error = message
         if (attempt < maxAttempts) {
+          // 地址可能已过期（签名吊销/CDN 换源）：不清缓存的话三次重试都用同一个死链
+          catalog.invalidateStream(task.song)
           await sleep(600 * attempt)
           continue
         }

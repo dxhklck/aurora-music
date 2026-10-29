@@ -24,6 +24,33 @@ const chartCache = new TtlCache<SearchPage>(10 * 60_000, 60)
  */
 const partialListeners = new Map<string, Set<(items: Song[]) => void>>()
 
+/**
+ * 取址结果缓存。
+ *
+ * 取一次播放地址要三趟往返（取 URL → probe 实测 → 嗅探封装），一秒起。
+ * 而「上一首 / 列表循环 / 拖动后重播」都会对同一首歌重复取址——这是纯浪费。
+ * 每个 provider 都已经算了 `StreamInfo.expiresAt`，只是从来没人用。
+ *
+ * 上限 3 分钟而不是直接信 expiresAt：CDN 临时吊销签名时缓存会把死链多喂一次，
+ * 窗口越短越安全，3 分钟已足够覆盖连续播放与来回切歌。
+ */
+const streamCache = new Map<string, { track: ResolvedTrack; expireAt: number }>()
+const STREAM_CACHE_MAX = 80
+const STREAM_CACHE_CAP = 3 * 60_000
+/** 离过期不到这么久就不用缓存了，避免刚过期就命中 */
+const STREAM_CACHE_MARGIN = 60_000
+
+/**
+ * 换源熔断。
+ *
+ * `findAlternative` 是串行试候选，每个都要等满超时才算失败——一个坏源就能让
+ * 「换源」多花 6~8 秒。这里记「刚失败过的平台」，短时间内直接跳过，
+ * 退避 30s 起、翻倍、封顶 5 分钟，到点自动半开重试。
+ */
+const breaker = new Map<string, { fails: number; until: number }>()
+const BREAKER_BASE = 30_000
+const BREAKER_MAX = 5 * 60_000
+
 export interface SearchInput {
   platform: string
   keyword: string
@@ -118,14 +145,21 @@ class CatalogService {
    */
   async resolveTrack(song: Song, autoSwitch = true, forceSwitch = false): Promise<ResolvedTrack> {
     const quality: Quality = settings.get().quality
+    const cacheKey = `${song.platform}:${song.id}:${quality}`
+    // forceSwitch 的语义是「这个地址可疑，换一个」：不读缓存，但新结果要覆盖回去
+    if (!forceSwitch) {
+      const cached = this.readStream(cacheKey)
+      if (cached) return cached
+    }
     const provider = providers.get(song.platform)
     // forceSwitch：跳过原平台直接跨源（用于音频流停滞——URL 本身有效，重取大概率还是同一个 CDN）
     if (forceSwitch) {
       const alternative = await this.findAlternative(song, quality)
       if (alternative) {
         const sourceName = providers.get(alternative.song.platform).info.name
+        const track = this.rememberStream(cacheKey, alternative)
         return {
-          ...alternative,
+          ...track,
           switchedFrom: song.platform,
           notice: `音频流停滞，已自动切换到 ${sourceName}`
         }
@@ -134,19 +168,73 @@ class CatalogService {
     }
     try {
       const stream = await provider.resolveStream(song, quality)
-      return { song, stream }
+      return this.rememberStream(cacheKey, { song, stream })
     } catch (error) {
       if (!autoSwitch) throw this.normalizeError(error, provider.info.name)
       const alternative = await this.findAlternative(song, quality)
       if (!alternative) throw this.normalizeError(error, provider.info.name)
       const sourceName = providers.get(alternative.song.platform).info.name
+      const track = this.rememberStream(cacheKey, alternative)
       return {
-        song: alternative.song,
-        stream: alternative.stream,
+        ...track,
         switchedFrom: song.platform,
         notice: `原音源无法播放，已自动切换到 ${sourceName}`
       }
     }
+  }
+
+  /** 缓存命中直接复用同一个对象（调用方只读，不复制） */
+  private readStream(key: string): ResolvedTrack | null {
+    const entry = streamCache.get(key)
+    if (!entry) return null
+    if (entry.expireAt <= Date.now()) {
+      streamCache.delete(key)
+      return null
+    }
+    return entry.track
+  }
+
+  /** 只缓存 {song, stream}：switchedFrom/notice 是「这一次」的提示，缓存进去会反复弹 */
+  private rememberStream(key: string, track: { song: Song; stream: ResolvedTrack['stream'] }): ResolvedTrack {
+    const expiresAt = track.stream.expiresAt
+    if (Number.isFinite(expiresAt)) {
+      const expireAt = Math.min(expiresAt - STREAM_CACHE_MARGIN, Date.now() + STREAM_CACHE_CAP)
+      if (expireAt > Date.now()) {
+        if (streamCache.size >= STREAM_CACHE_MAX) {
+          const oldest = streamCache.keys().next().value
+          if (oldest) streamCache.delete(oldest)
+        }
+        streamCache.set(key, { track, expireAt })
+      }
+    }
+    return track
+  }
+
+  /**
+   * 作废某首歌的取址缓存。
+   * 下载失败重试前必须调用：否则三次重试都用同一个已吊销的地址，必然全失败。
+   */
+  invalidateStream(song: Song): void {
+    const prefix = `${song.platform}:${song.id}:`
+    for (const key of [...streamCache.keys()]) {
+      if (key.startsWith(prefix)) streamCache.delete(key)
+    }
+  }
+
+  /** 熔断中的平台：短时间内不再作为换源候选，避免每次都等满超时 */
+  private isTripped(providerId: string): boolean {    const entry = breaker.get(providerId)
+    if (!entry) return false
+    if (entry.until <= Date.now()) {
+      breaker.delete(providerId)
+      return false
+    }
+    return true
+  }
+
+  private trip(providerId: string): void {
+    const fails = (breaker.get(providerId)?.fails ?? 0) + 1
+    const backoff = Math.min(BREAKER_BASE * 2 ** (fails - 1), BREAKER_MAX)
+    breaker.set(providerId, { fails, until: Date.now() + backoff })
   }
 
   private normalizeError(error: unknown, providerName: string): ProviderError {
@@ -165,27 +253,35 @@ class CatalogService {
     const candidates = providers
       .streamCandidates(song.platform)
       .sort((a, b) => Number(a.info.id.startsWith('mdl-')) - Number(b.info.id.startsWith('mdl-')))
-    const deadline = Date.now() + 15_000
+    const deadline = Date.now() + 12_000
     let engineTried = 0
 
     for (const candidate of candidates) {
       if (!candidate.info.capabilities.search) continue
       const isEngine = candidate.info.id.startsWith('mdl-')
       if (isEngine && engineTried >= 2) continue
+      // 刚失败过的平台直接跳过：换源最怕的不是找不到，而是在一个死源上等满超时
+      if (this.isTripped(candidate.info.id)) continue
       if (Date.now() > deadline) break
       if (isEngine) engineTried += 1
       try {
         const page = await withTimeout(
           candidate.search({ keyword, page: 1, limit: isEngine ? 5 : 8 }),
-          isEngine ? 12_000 : 20_000
+          isEngine ? 12_000 : 8_000
         )
+        // 超时（null）不算平台坏了：只说明这次慢，下次还给它机会
         if (!page) continue
         const match = this.pickBest(song, page.items)
         if (!match) continue
         const stream = await candidate.resolveStream(match, quality)
+        breaker.delete(candidate.info.id)
         return { song: match, stream }
-      } catch {
-        /* 该平台也不可用，继续下一个 */
+      } catch (error) {
+        // 只有传输/解析层面的失败才熔断。blocked（没版权）、empty、unsupported 都是
+        // 「这首歌不行」，熔断它们等于因为一首 VIP 歌把整个平台拉黑
+        if (error instanceof ProviderError && (error.code === 'network' || error.code === 'parse')) {
+          this.trip(candidate.info.id)
+        }
       }
     }
     return null

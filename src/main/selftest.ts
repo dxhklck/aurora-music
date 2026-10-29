@@ -113,6 +113,18 @@ export async function runSelfTest(): Promise<number> {
     return `${stream.label} → ${stream.directUrl!.slice(0, 60)}`
   })
 
+  // 取址要三趟往返（取 URL → probe → 嗅探封装），缓存没命中就意味着上一首/循环播放
+  // 每次都要重付一遍。用对象同一性判定，不依赖耗时，不会在慢机器上抖动。
+  await check('取址缓存命中（同曲二次取址不再打上游）', false, async () => {
+    const page = await providers.get('netease').search({ keyword: '晴天', page: 1, limit: 1 })
+    const song = page.items[0]
+    assert(song, '没有可测试的曲目')
+    const first = await catalog.resolveTrack(song, false)
+    const second = await catalog.resolveTrack(song, false)
+    assert(first.stream === second.stream, '二次取址没有复用缓存结果')
+    return `命中缓存，复用 ${first.stream.label}`
+  })
+
   await check('netease 歌词', false, async () => {
     const page = await providers.get('netease').search({ keyword: '稻香', page: 1, limit: 1 })
     const song = page.items[0]
