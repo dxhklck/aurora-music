@@ -338,6 +338,9 @@ git tag v1.3.x ──▶ CI（三平台矩阵）
    资产齐了再 `PATCH prerelease=false`。
 3. **开着「关闭到托盘」时 `quitAndInstall()` 会被自己的 close 处理器拦成「隐藏窗口」**，
    安装器只能干等进程结束。安装前先调 `markQuitting()` 放行退出。
+4. **`gh api -F/-f` 的类型推断会坑到转正**。`-F prerelease=false` 与 `-f make_latest=true`
+   混用看似正确，实际发出的 body 里布尔/字符串边界由 gh 猜测，PATCH 被拒（422）。
+   改成 `--input -` 传显式 JSON（`{"prerelease":false,"make_latest":"true"}`）才稳定通得过。
 
 范围刻意做小：仅 Windows 开启自动更新（NSIS 支持；macOS 未签名装不了更新包），
 失败静默；下载失败会附 `manualUrl`，设置页给「手动下载新版」入口。
