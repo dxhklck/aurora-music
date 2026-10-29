@@ -141,6 +141,8 @@ export interface HlsDownloadOptions {
   cookies?: Record<string, string>
   onProgress?: HlsProgress
   concurrency?: number
+  /** 取消信号：下载分片是长循环，没有它用户点取消要等整首跑完 */
+  signal?: AbortSignal
 }
 
 /**
@@ -173,8 +175,10 @@ export async function downloadHls(options: HlsDownloadOptions): Promise<{ path: 
   let received = 0
 
   const downloadOne = async (index: number): Promise<void> => {
+    // 每个分片开始前检查一次：取消要能在秒级生效，不能等整条流跑完
+    if (options.signal?.aborted) throw new EngineError('internal', 'HLS 下载已取消')
     const segment = segments[index]
-    const response = await session.get(segment.url, { retries: 2 })
+    const response = await session.get(segment.url, { retries: 2, signal: options.signal })
     if (!response.ok) throw new EngineError('blocked', `HLS 分片下载失败（${response.status}）`)
     let data: Buffer = Buffer.from(response.bytes)
     if (segment.key && segment.key.method === 'AES-128') {

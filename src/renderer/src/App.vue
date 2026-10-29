@@ -27,6 +27,7 @@ let lyricTimer = 0
 let offSettings: (() => void) | null = null
 let offToast: (() => void) | null = null
 let offTray: (() => void) | null = null
+let offLyricState: (() => void) | null = null
 /** 托盘状态只在变化时推送，缓存上一次的比较基准 */
 let lastTrayState = ''
 
@@ -133,9 +134,16 @@ onMounted(async () => {
     else if (command === 'next') player.next()
     else if (command === 'prev') player.prev()
   })
+  // 歌词窗口的开关由主进程掌控（设置页、托盘、快捷键都能触发），只认它推来的标记
+  offLyricState = window.api.onLyricWindowState((state) => {
+    const flag = state as { open?: boolean; closed?: boolean } | null
+    if (flag?.open) app.lyricOpen = true
+    else if (flag?.closed) app.lyricOpen = false
+  })
   window.addEventListener('keydown', onKey)
   lyricTimer = window.setInterval(() => {
-    pushLyricState()
+    // 窗口没开时不必序列化整份歌词再跨进程送一次
+    if (app.lyricOpen) pushLyricState()
     pushTrayState()
   }, 250)
 })
@@ -146,6 +154,7 @@ onBeforeUnmount(() => {
   offSettings?.()
   offToast?.()
   offTray?.()
+  offLyricState?.()
 })
 </script>
 

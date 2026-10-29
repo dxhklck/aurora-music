@@ -21,7 +21,7 @@
     "engine:build": "node scripts/engine-ts/build.mjs",
     "engine:e2e": "npm run engine:build && node scripts/engine-ts/.build/e2e.mjs",
     "engine:test": "node scripts/engine-ts/test/run.mjs",
-    "dist": "electron-vite build && electron-builder"
+    "dist": "npm run typecheck && electron-vite build && electron-builder"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

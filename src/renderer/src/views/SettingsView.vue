@@ -33,6 +33,20 @@ const qualities: Array<{ value: Quality; label: string; hint: string }> = [
 
 const engineSources = computed(() => app.providers.filter((item) => item.id.startsWith('mdl-')))
 
+/**
+ * 引擎健康度摘要：15 个源全是爬取实现，坏的源通常表现为「搜什么都没结果」，
+ * 用户很难自己判断是「没这首歌」还是「这个源挂了」。只展示最近有请求的那些，
+ * 没请求过的不占版面。
+ */
+const engineHealth = computed(() => {
+  const used = (engine.value?.health ?? []).filter((item) => item.ok + item.fail > 0)
+  if (!used.length) return null
+  const broken = used.filter((item) => item.fail > 0 && item.ok === 0)
+  if (!broken.length) return `${used.length} 个音源本次请求全部成功`
+  const detail = broken.map((item) => `${item.label} ${item.fail} 次失败`).join('、')
+  return `${used.length - broken.length}/${used.length} 正常 · ${detail}`
+})
+
 /* ---------- 自动更新 ---------- */
 const update = ref<UpdateStatusView | null>(null)
 let offUpdateStatus: (() => void) | null = null
@@ -746,6 +760,10 @@ onBeforeUnmount(() => {
         <div class="kv">
           <span>音源</span>
           <em>{{ engine.runtime?.sources ?? 0 }} 个</em>
+        </div>
+        <div v-if="engineHealth" class="kv">
+          <span>近期请求</span>
+          <em>{{ engineHealth }}</em>
         </div>
         <div v-if="engine.error" class="err">{{ engine.error }}</div>
 

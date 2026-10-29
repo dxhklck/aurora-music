@@ -6,6 +6,7 @@ import { audio } from '../core/audio'
 import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
+import { createLatestGate } from '../core/latest'
 
 const HISTORY_KEY = 'aurora.recent'
 /** 榜单队列断点：记录「哪份榜单 + 第几首 + 播到几毫秒」，跨重启续播 */
@@ -73,10 +74,10 @@ export const usePlayerStore = defineStore('player', () => {
   let pendingSeek: number | null = null
   let lastResumeSave = 0
   /**
-   * 播放入口序号。取址是网络请求（引擎音源要几秒），连点两首歌时后发的请求可能先回来，
-   * 先发的后回来就会把正在放的那首顶掉。每次 playAt 领一个号，await 之后号变了就丢弃结果。
+   * 播放入口门闩。取址是网络请求（引擎音源要几秒），连点两首歌时后发的请求可能先回来，
+   * 先发的后回来就会把正在放的那首顶掉。每次 playAt 领号，await 之后校验。
    */
-  let playToken = 0
+  const playGate = createLatestGate()
 
   const current = computed<Song | null>(() =>
     index.value >= 0 ? queue.value[index.value] ?? null : null
@@ -177,7 +178,7 @@ export const usePlayerStore = defineStore('player', () => {
     if (!song) return
     const app = useAppStore()
     bindEngine()
-    const token = (playToken += 1)
+    const token = playGate.next()
     if (!opts.isRetry) stallCount = 0
     index.value = target
     loading.value = true
@@ -194,7 +195,7 @@ export const usePlayerStore = defineStore('player', () => {
         forceSwitch: opts.forceSwitch === true
       })
       // 期间用户又点了别的歌：这次的结果已经过期，丢弃，别把正在放的那首顶掉
-      if (token !== playToken) return
+      if (!playGate.isCurrent(token)) return
       resolvedSong.value = sanitizeSongs([resolved.song])[0]
       streamLabel.value = resolved.stream.label
       if (resolved.switchedFrom) {
@@ -210,7 +211,7 @@ export const usePlayerStore = defineStore('player', () => {
       updateMediaSession(song)
     } catch (err) {
       // 过期请求的失败不该报错、也不该触发自动跳过（用户已经去点别的歌了）
-      if (token !== playToken) return
+      if (!playGate.isCurrent(token)) return
       error.value = friendlyError(err)
       playing.value = false
       failureStreak += 1
@@ -222,7 +223,7 @@ export const usePlayerStore = defineStore('player', () => {
         }, 900)
       }
     } finally {
-      if (token === playToken) loading.value = false
+      if (playGate.isCurrent(token)) loading.value = false
     }
   }
 
@@ -417,7 +418,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   function stop(): void {
     // 让还在路上的取址请求作废，否则它回来会把已经停掉的队列重新播起来
-    playToken += 1
+    playGate.invalidate()
     audio.pause()
     audio.seek(0)
     playing.value = false

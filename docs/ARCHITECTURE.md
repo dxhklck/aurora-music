@@ -303,12 +303,26 @@ Store 中的 `activeLyricIndex` 则供桌面歌词与进度条使用。
 
 播放模式：`loop`（列表循环）/ `single`（单曲循环，自然结束才重播）/ `shuffle`（随机，避免连续重复）/ `order`（顺序，播完停止）。
 
+### 7.2 异步结果的门闩（连点竞态）
+
+`playAt` 与 `search.run` 都是「发请求 → 等 → 落地」。用户连点两首歌时会有两个取址请求同时在飞，完成顺序不保证等于发出顺序；先发后回的那个若照常 `audio.load()`，表现就是「点了 A 在放 B」。搜索同理，会变成「关键词是 B、列表是 A」。这类 bug 不报错、不复现于慢速点按，只在手快时出现。
+
+`core/latest.ts` 的 `createLatestGate()` 把这件事收敛成三个动作：
+
+| 动作 | 时机 |
+| --- | --- |
+| `next()` | 每次发起请求前领号 |
+| `isCurrent(token)` | `await` 回来后校验；false 则整体丢弃（不写状态、不报错、不触发自动跳过） |
+| `invalidate()` | `stop()` / `reset()` 时让在途请求一并作废 |
+
+两个使用点的差别值得记：`playAt` 每次领号；`search.loadMore` 用 `current()` **只跟随不领号**——翻页若领新号，会把「正在进行的新搜索」判成过期，反而制造 bug。
+
 ---
 
 ## 8. UI 层
 
 - **App.vue** 负责外壳与全局副作用：启动装配、快捷键（空格/方向键）、歌词状态推送、Toast 监听；
-- **stores** 五个：`app`（音源+设置+Toast）、`player`（队列+播放+歌词）、`search`、`download`、`library`；
+- **stores** 六个：`app`（音源+设置+Toast+歌词窗口开关）、`player`（队列+播放+歌词）、`search`、`download`、`library`、`playlists`；
 - **视觉**：`--accent` / `--accent-2` 由当前音源主题色注入，页面顶部有动态光斑；封面缺失时按 id 哈希生成渐变；
 - **动效**：路由 `fade + translate`、歌词舞台 `scale + fade`、黑胶 20s 匀速旋转（`animation-play-state` 随播放暂停）、播放条封面 hover 蒙层。
 

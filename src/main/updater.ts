@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { IPC } from '@shared/ipc'
 import type { UpdateStatusView } from '@shared/api'
+import { markQuitting } from './tray'
 
 /**
  * 自动更新（electron-updater + GitHub Releases）。
@@ -150,5 +151,8 @@ export async function checkForUpdate(): Promise<UpdateStatusView> {
 
 export function installUpdate(): void {
   if (!initialized) return
+  // quitAndInstall 内部走 app.quit()。默认开着「关闭到托盘」时，主窗口的 close 会被
+  // 拦成隐藏 → 退出流程走不完，安装器只能一直等进程结束。先置退出标记，让 close 放行。
+  markQuitting()
   autoUpdater.quitAndInstall()
 }

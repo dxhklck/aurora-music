@@ -48,9 +48,10 @@ class MusicdlEngine {
     query: ResolveQuery,
     path: string,
     taskId: string,
-    onProgress: (received: number, total: number) => void
+    onProgress: (received: number, total: number) => void,
+    signal?: AbortSignal
   ): Promise<{ path: string; size: number }> {
-    return tsEngine.downloadHlsTo({ ...query, path, taskId }, onProgress)
+    return tsEngine.downloadHlsTo({ ...query, path, taskId, signal }, onProgress)
   }
 
   async tag(payload: TagPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
@@ -67,7 +68,8 @@ class MusicdlEngine {
         version: process.versions.node,
         sources: tsEngine.sources().length
       },
-      error: ''
+      error: '',
+      health: tsEngine.sourceHealth()
     }
   }
 

@@ -534,9 +534,13 @@ export function createLyricWindow(mode: LyricMode = lyricMode): BrowserWindow {
   setLyricLocked(Boolean(settings.get().desktopLyricLocked))
 
   lyricWindow.on('ready-to-show', () => lyricWindow?.showInactive())
+  // 主窗口据此决定要不要推送歌词状态：窗口没开时每 250ms 推一次纯属白跑
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC.lyricWindowState, { open: true })
+  }
   lyricWindow.on('closed', () => {
     lyricWindow = null
-    mainWindow?.webContents.send('lyric-window:state', { closed: true })
+    mainWindow?.webContents.send(IPC.lyricWindowState, { closed: true })
   })
   // 右键菜单转发：拖拽区（-webkit-app-region: drag）上的右键在部分平台到不了 DOM，
   // 统一走主进程 context-menu 事件转发给渲染层弹菜单

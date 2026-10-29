@@ -16,6 +16,8 @@ export const useAppStore = defineStore('app', () => {
   const settings = ref<AppSettings | null>(null)
   const toasts = ref<Toast[]>([])
   const booted = ref(false)
+  /** 桌面歌词窗口是否开着：主进程在创建/销毁时推过来，用来决定要不要每 250ms 推歌词状态 */
+  const lyricOpen = ref(false)
 
   const currentProvider = computed<ProviderInfo | undefined>(
     () => providers.value.find((item) => item.id === platform.value) ?? providers.value[0]
@@ -74,6 +76,7 @@ export const useAppStore = defineStore('app', () => {
     settings,
     toasts,
     booted,
+    lyricOpen,
     currentProvider,
     accent,
     canCharts,

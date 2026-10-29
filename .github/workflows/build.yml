@@ -28,57 +28,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test
+
+      # 引擎是纯 TypeScript，91 个用例覆盖 15 个音源的解析与加密逻辑，不需要任何外部运行时
+      - name: Engine tests
+        run: npm run engine:test
+
       - name: Build (main / preload / renderer)
         run: npm run build
-
-      # 把 musicdl 源码收进 engine/vendor，随包分发（仓库里没有时只建占位，不会失败）
-      - name: Vendor engine sources
-        run: npm run engine:vendor
-
-      # 生成随包内置的 Python 运行时（engine/python，gitignore，不进仓库）：
-      # 嵌入式 3.12 + pip 引导 + musicdl 全量依赖，主进程探测 resources/python/python.exe
-      # 只有 Windows 打这个包；macOS/Linux 仍回落系统解释器
-      - name: Bundle portable Python (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $ver = '3.12.10'
-          Invoke-WebRequest "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip" -OutFile python-embed.zip
-          Expand-Archive python-embed.zip -DestinationPath engine/python
-          # 启用 site 并把依赖目录挂进搜索路径（与本地 engine/python 的 ._pth 一致）
-          $pth = (Get-Item engine/python/python*._pth).FullName
-          (Get-Content $pth) -replace '^#import site', 'import site' | Set-Content $pth -Encoding ascii
-          Add-Content $pth "`n# engine deps installed here by pip`nLib/site-packages" -Encoding ascii
-          Invoke-WebRequest https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
-          engine\python\python.exe get-pip.py --no-warn-script-location
-          # 只装经验证必需的 44 个依赖（engine/requirements-bundle.txt，全部为小 wheel），
-          # 绕开 nodejs-wheel/av 等大文件下载——CI 两次 IncompleteRead 均死在大 wheel 上。
-          # 生成方式：精简环境 pip freeze，经 vendored 导入自检（VENDOR-OK）验证充分。
-          $installed = $false
-          for ($i = 1; $i -le 3; $i++) {
-            engine\python\python.exe -m pip install --disable-pip-version-check -q --retries 10 --timeout 60 --only-binary=:all: -r engine/requirements-bundle.txt > pip-log.txt 2>&1
-            if ($LASTEXITCODE -eq 0) { $installed = $true; break }
-            Write-Output "pip install 第 $i 次失败，10-30s 后重试…"
-            Get-Content pip-log.txt -Tail 10 | ForEach-Object { Write-Output "::error::pip: $_" }
-            Start-Sleep -Seconds (10 * $i)
-          }
-          if (-not $installed) {
-            Get-Content pip-log.txt -Tail 15 | ForEach-Object { Write-Output "::error::pip: $_" }
-            throw 'pip install requirements-bundle 连续 3 次失败'
-          }
-          # pywidevine/pymp4 死锁声明 construct==2.8.8（该版本无 wheel），
-          # 与清单里的 construct==2.8.10 解析冲突——跳过元数据检查单装，
-          # 它们的其余依赖已在清单里；本地已验证该组合导入链完整（VENDOR-OK）
-          engine\python\python.exe -m pip install --disable-pip-version-check -q --no-deps --only-binary=:all: "pywidevine==1.9.0" "pymp4==1.4.0" 2>&1 | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw 'pywidevine/pymp4 安装失败' }
-          # 自检：vendored 源码必须能完整导入（与 bridge.py 同一导入方式）
-          engine\python\python.exe -c "import sys; sys.path.insert(0, 'engine/vendor/musicdl'); from musicdl.modules import BuildMusicClient, SongInfo; print('VENDOR-OK')" > import-check.txt 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Get-Content import-check.txt -Tail 15 | ForEach-Object { Write-Output "::error::import: $_" }
-            throw 'vendored musicdl import check failed'
-          }
-          Get-Content import-check.txt
 
       - name: Package
         env:

@@ -17,11 +17,24 @@ import type {
   Song
 } from './types'
 
+/** 单个音源在本次运行期间的请求成败统计 */
+export interface EngineSourceHealthView {
+  key: string
+  label: string
+  ok: number
+  fail: number
+  /** 最近一次失败原因；成功后清空 */
+  lastError: string
+  /** 最近一次请求时间戳，0 = 本次会话还没用过 */
+  lastAt: number
+}
+
 /** 引擎运行时状态（主进程 → 设置页） */
 export interface EngineStatusView {
   ready: boolean
-  runtime: { command: string; label: string; version?: string; sources?: number } | null
+  runtime: { command: string; label: string; version?: number | string; sources?: number } | null
   error: string
+  health: EngineSourceHealthView[]
 }
 
 export interface SearchArgs {

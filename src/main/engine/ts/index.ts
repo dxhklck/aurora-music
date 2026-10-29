@@ -63,6 +63,56 @@ export const ENGINE_MAX_RESULTS = 20
 export const SEARCH_TIMEOUT_MS = 45_000
 
 /**
+ * 音源健康度：本会话的请求成败计数。
+ *
+ * 15 个源全是爬取实现，上游改版即失效，而失效通常表现为「这个源什么都搜不到」——
+ * 没有计数就只能靠用户逐个试。这里只记事实，不做自动降权：降权阈值一旦拍错，
+ * 会把只是临时被限速的源永久打入冷宫。
+ */
+interface HealthEntry {
+  ok: number
+  fail: number
+  lastError: string
+  lastAt: number
+}
+
+const health = new Map<string, HealthEntry>()
+
+function recordHealth(source: string, ok: boolean, error = ''): void {
+  const entry = health.get(source) ?? { ok: 0, fail: 0, lastError: '', lastAt: 0 }
+  if (ok) {
+    entry.ok += 1
+    entry.lastError = ''
+  } else {
+    entry.fail += 1
+    entry.lastError = error.slice(0, 160)
+  }
+  entry.lastAt = Date.now()
+  health.set(source, entry)
+}
+
+export function sourceHealth(): Array<{
+  key: string
+  label: string
+  ok: number
+  fail: number
+  lastError: string
+  lastAt: number
+}> {
+  return availableSources().map((item) => {
+    const entry = health.get(item.key)
+    return {
+      key: item.key,
+      label: item.label,
+      ok: entry?.ok ?? 0,
+      fail: entry?.fail ?? 0,
+      lastError: entry?.lastError ?? '',
+      lastAt: entry?.lastAt ?? 0
+    }
+  })
+}
+
+/**
  * 对外统一的单曲形态，所有音源解析结果都归一到这里。
  *
  * 所有数值都走 `_as_int` 语义（截断、失败归零），文本走 `_clean` 语义。
@@ -182,9 +232,11 @@ async function runSearch(
       )
     )
   } catch (error) {
+    recordHealth(source, false, error instanceof Error ? error.message : String(error))
     if (error instanceof EngineError) throw error
     throw new EngineError('internal', error instanceof Error ? error.message : String(error))
   }
+  recordHealth(source, true)
 
   const payload = songs.filter((song) => Boolean(song.songName)).map((song) => toEngineSong(song))
   // 空结果 + 上游报过错 = 平台接口异常，必须与「真没这首歌」区分开
@@ -227,7 +279,14 @@ async function resolveSongInfo(query: ResolveQuery): Promise<SongInfo> {
   if (!client) throw new EngineError('unsupported', `未知音源：${source}`)
   const failure = { errors: 0 }
   const size = clamp(toInt(query.size ?? 12, 12), 1, 50)
-  const songs = await withFailureScope(failure, () => client.search({ keyword, size }))
+  let songs: SongInfo[]
+  try {
+    songs = await withFailureScope(failure, () => client.search({ keyword, size }))
+    recordHealth(source, true)
+  } catch (error) {
+    recordHealth(source, false, error instanceof Error ? error.message : String(error))
+    throw error
+  }
   if (!songs.length && failure.errors > 0) {
     throw new EngineError('blocked', `音源接口异常（${failure.errors} 次请求失败），请换其他音源或稍后再试`)
   }
@@ -274,6 +333,8 @@ export async function lyric(query: ResolveQuery): Promise<{ lyric: string; sourc
 export interface DownloadParams extends ResolveQuery {
   path: string
   taskId?: string
+  /** 取消信号：由下载管理器在用户点取消时触发 */
+  signal?: AbortSignal
 }
 
 /** 引擎侧下载：目前只服务 HLS，HTTP 直链由主进程 DownloadManager 自己流式下载 */
@@ -291,7 +352,8 @@ export async function downloadHlsTo(
     target: params.path,
     headers: song.headers,
     cookies: song.cookies,
-    onProgress: progress
+    onProgress: progress,
+    signal: params.signal
   })
   onProgress?.(result.size, result.size)
   return { path: result.path, size: result.size }

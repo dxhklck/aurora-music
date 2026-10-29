@@ -5,6 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createCipheriv } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -160,6 +161,48 @@ test('HLS：清单不可用 / 没有分片时报 blocked', async () => {
         return true
       }
     )
+  } finally {
+    await rm(workDir, { recursive: true, force: true })
+    await server.close()
+  }
+})
+
+test('HLS：取消信号能在分片之间立即生效，且不产出目标文件', async () => {
+  const segment = Buffer.from('payload'.repeat(200), 'utf8')
+  const server = await startServer((req, res) => {
+    if (req.url === '/cancel.m3u8') {
+      res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' })
+      res.end(['#EXTM3U', '#EXT-X-TARGETDURATION:10', '/s0.ts', '/s1.ts', '/s2.ts', '#EXT-X-ENDLIST'].join('\n'))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'video/mp2t' })
+    res.end(segment)
+  })
+  const workDir = await mkdtemp(join(tmpdir(), 'aurora-hls-cancel-'))
+  const target = join(workDir, 'cancelled.ts')
+  try {
+    // 并发 1 + 首片进度回调里 abort：第二片开始前的守卫必须命中
+    const controller = new AbortController()
+    let first = true
+    await assert.rejects(
+      downloadHls({
+        url: `${server.url}/cancel.m3u8`,
+        target,
+        concurrency: 1,
+        signal: controller.signal,
+        onProgress: () => {
+          if (!first) return
+          first = false
+          controller.abort()
+        }
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, 'internal')
+        assert.match((error as Error).message, /取消/)
+        return true
+      }
+    )
+    assert.equal(existsSync(target), false, '取消后不应留下目标文件')
   } finally {
     await rm(workDir, { recursive: true, force: true })
     await server.close()

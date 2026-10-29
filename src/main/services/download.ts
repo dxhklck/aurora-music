@@ -416,11 +416,14 @@ class DownloadManager extends EventEmitter {
   }
 
   /**
-   * HLS（m3u8）交给引擎合并分片：分片下载 + 解密 + remux 是 musicdl 已有的能力，
-   * 在 Node 侧重写一遍不划算。代价是取消只能在完成后清理文件。
+   * HLS（m3u8）交给引擎合并分片：分片下载 + 解密 + remux 是引擎已有的能力，
+   * 在 Node 侧重写一遍不划算。取消通过 AbortSignal 传进去，分片循环逐片检查。
    */
   private async downloadHls(task: InternalTask, partPath: string, stream: StreamInfo): Promise<void> {
     const target = `${partPath}.hls`
+    const controller = new AbortController()
+    // 复用同一个 controller 字段：cancel() 里 abort 一次，HTTP 与 HLS 两条路都生效
+    task.controller = controller
     await musicdl.downloadHls(
       {
         source: String(task.song.extra?.engine ?? task.song.platform.replace(/^mdl-/, '')),
@@ -436,7 +439,8 @@ class DownloadManager extends EventEmitter {
         task.total = total
         task.progress = total ? Math.min(received / total, 0.999) : 0
         this.scheduleEmit()
-      }
+      },
+      controller.signal
     )
     if (task.status === 'canceled') {
       await safeUnlink(target)
