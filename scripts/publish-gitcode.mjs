@@ -84,14 +84,31 @@ async function ensureRelease(tag, { pointer = false } = {}) {
   }
 }
 
-async function upload(tag, file, absPath) {
+async function uploadOnce(tag, file, absPath) {
   const up = await api(`/repos/${REPO}/releases/${tag}/upload_url?file_name=${encodeURIComponent(file)}`)
   const body = new Uint8Array(await readFile(absPath))
   const res = await fetch(up.url, { method: 'PUT', headers: up.headers, body })
   if (!res.ok) {
     throw new Error(`PUT ${tag}/${file}: HTTP ${res.status} ${await res.text().catch(() => '')}`.slice(0, 200))
   }
-  console.log(`已上传 ${tag}/${file}（${(body.length / 1048576).toFixed(1)} MB）`)
+  return body.length
+}
+
+/** 单文件重试：110MB 的 exe 跨洋直传华为 OBS 偶发中断（v1.3.5 首跑的疑似死因），重试 2 次 */
+async function upload(tag, file, absPath) {
+  let lastError
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const size = await uploadOnce(tag, file, absPath)
+      console.log(`已上传 ${tag}/${file}（${(size / 1048576).toFixed(1)} MB）${attempt > 1 ? `，第 ${attempt} 次尝试成功` : ''}`)
+      return
+    } catch (error) {
+      lastError = error
+      console.log(`上传 ${tag}/${file} 第 ${attempt} 次失败：${String(error).slice(0, 120)}`)
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 5000 * attempt))
+    }
+  }
+  throw lastError
 }
 
 async function verify(tag, wanted) {
