@@ -1,14 +1,16 @@
 # 跨平台支持说明
 
-> 对应版本：1.3.3 · 最后核对：2026-10-29 · 文档索引见 [README.md](./README.md)
+> 对应版本：1.3.9 · 最后核对：2026-10-30 · 文档索引见 [README.md](./README.md)
 
 ## 一、结论
 
 | 平台 | 是否支持 | 原因 |
 | --- | :---: | --- |
-| Windows 10 / 11（x64 / arm64） | 支持 | 主目标平台，已实机验证 |
-| macOS 12+（Intel / Apple Silicon） | 支持 | 已做红绿灯、应用菜单、置顶层级适配，需在 mac 上打包 |
-| Linux（X11） | 支持 | 自绘标题栏、AppImage / deb 打包，X11 下窗口行为完整 |
+| Windows 10 / 11（x64） | 支持 | 主目标平台，已实机验证；CI 产出 `-x64.exe` |
+| Windows arm64 | 未提供产物 | Electron 支持该架构，但 CI 的 `windows-latest` 只出 x64；需要时本地 `electron-builder --win --arm64` 自建，未实机验证 |
+| macOS 12+（Apple Silicon） | 支持 | CI 的 `macos-latest` 是 arm64，产出 `-arm64.dmg` / `.zip`；已做红绿灯、应用菜单、置顶层级适配 |
+| macOS（Intel） | 未提供产物 | 需要 `electron-builder --mac --x64` 自行构建，官方发布中暂无 Intel 包 |
+| Linux（X11，x64） | 支持 | 自绘标题栏，`-amd64.deb` / `-x86_64.AppImage`，X11 下窗口行为完整 |
 | Linux（Wayland） | 基本可用 | 桌面歌词的「鼠标穿透 / 置顶 / 透明」依赖合成器能力，见下方限制 |
 | Android | 不支持 | Electron 官方只支持桌面三平台，见第三节 |
 | iOS / iPadOS | 不支持 | 同上 |
@@ -28,6 +30,7 @@
 | 应用菜单 | 置空（不遮挡界面） | 保留 `appMenu/editMenu/viewMenu/windowMenu`，否则 Cmd+C/V/Q 失效 | 置空 |
 | 任务栏 / Dock | `setAppUserModelId` 保证分组与通知 | 默认 Dock 行为 | 默认 |
 | 桌面歌词置顶 | `setAlwaysOnTop(true)` | `screen-saver` 层级 + 全工作区可见 | `setAlwaysOnTop(true)`，穿透取决于合成器 |
+| 无边框窗缩放 | 可缩放会多出一圈约 8px 的**隐形缩放边框**：按上去事件进系统、窗口被越拖越大，所以歌词窗一律 `resizable:false`，尺寸只由右下角把手改 | 无此问题，同样用把手 | 无此问题，同样用把手 |
 | 路径 | `app.getPath('music')` → `%USERPROFILE%\Music` | `~/Music` | XDG 音乐目录，无则 `~/Music` |
 | 文件名 | 过滤 `\ / : * ? " < > \|` | 同（更保守，兼容外接 exFAT） | 同（多过滤不会出错） |
 | 字体 | 微软雅黑 / Segoe UI | 苹方 | Noto Sans CJK / Source Han Sans / Ubuntu |
@@ -105,6 +108,7 @@ npx electron-builder --linux    # Linux 本机，或 Windows + WSL/Docker
 > 最省事的做法是推送到 GitHub 后由 `.github/workflows/build.yml` 的三平台矩阵各出一份产物。
 
 **签名**：未配置证书时，Windows 会触发 SmartScreen 提示，macOS 需右键「打开」或执行
-`xattr -dr com.apple.quarantine /Applications/Aurora\ Music.app`。正式分发请补齐签名与公证。
+`xattr -dr com.apple.quarantine /Applications/Aurora\ Music.app`。正式分发请补齐签名与公证，
+Windows 的具体路线与 CI 接线见 [code-signing.md](./code-signing.md)。
 
 **图标**：把 `icon.ico`（Windows）、`icon.icns`（macOS）、`icon.png`（Linux，512×512）放进 `build/` 目录即可自动使用。

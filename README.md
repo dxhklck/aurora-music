@@ -17,13 +17,16 @@ Electron 40 + Vue 3.5 + TypeScript 5.9 + Vite 6，深色毛玻璃界面；内置
 | --- | --- |
 | **音源** | 20 个音源统一接口：5 个原生适配器 + 15 个进程内引擎音源，侧栏一键切换，无需重启 |
 | **搜索** | 关键词搜索、榜单浏览、增量出结果（慢音源解析一首显示一首）、搜索历史 |
-| **播放** | 四种播放模式（列表/单曲/随机/顺序）、队列抽屉、最近播放、停滞自愈（同源重取 → 跨源换源） |
-| **歌词** | 逐行 LRC / 逐字 YRC（网易云）与 QRC（QQ），桌面歌词窗口（迷你条 / 大字两态、可锁定穿透） |
-| **音效** | 五段均衡器（60/230/910/3600/14k，±12 dB）、实时频谱与黑胶动效 |
-| **下载** | 批量入队、并发与重试可配、断点续传、`.part` 原子落盘、写 ID3/Vorbis/MP4 标签与 `.lrc` |
-| **本地库** | 下载自动入库 + 手动导入目录，收藏与自建歌单跨音源混放，曲目信息可在应用内编辑 |
-| **桌面集成** | 系统托盘、全局快捷键（`Ctrl+Alt+P` 播放暂停、`Ctrl+Alt+←/→` 上下一首，macOS 为 `Control+Command`；另支持键盘媒体键）、任务栏媒体面板（SMTC + 封面）、关闭到托盘、自动更新 |
+| **播放** | 四种播放模式（列表 / 单曲 / 随机 / 顺序）、队列抽屉、最近播放、收听统计（本周最常听与累计时长）、睡眠定时（15 / 30 / 60 分钟或播完本曲）、停滞自愈（同源重取 → 跨源换源） |
+| **歌词** | 逐行 LRC / 逐字 YRC（网易云）与 QRC（QQ）、按歌手动对齐（±0.1 s，按歌记忆）、桌面歌词窗（迷你条 / 大字两态、锁定穿透、拖动与右下角把手缩放） |
+| **音效** | 五段均衡器（60/230/910/3600/14k，±12 dB）、夜间限幅器、实时频谱与黑胶动效 |
+| **下载** | 批量入队、并发与重试可配、断点续传、`.part` 原子落盘、写 ID3/Vorbis/MP4 标签，产物为音频 + `.lrc` + `.meta.json` |
+| **本地库** | 导入目录递归扫描、库内搜索与歌手 / 专辑 / 格式 / 文件夹 / 来源筛选、7 字段排序、多选批量与右键菜单；重复文件清理（size 分组 + sha256）、按模板复制导出、复制文件到剪贴板；缺失文件标记与重新定位；单条 / 批量改标签 |
+| **桌面集成** | 系统托盘、全局快捷键（`Ctrl+Alt+P` 播放暂停、`Ctrl+Alt+←/→` 上下一首，macOS 为 `Control+Command`；另支持键盘媒体键）、任务栏媒体面板（SMTC + 封面）、关闭到托盘、迷你播放器、诊断导出、自动更新（仅 Windows 安装版） |
 | **账号** | QQ / 网易云扫码或 Cookie 登录，解锁 VIP 与无损；凭据只存本机，可随时清除 |
+
+本地库的「删除」按来源分两档：**下载目录**内的文件真的删除（进系统回收站，连带同名 `.lrc` / `.meta.json`）；
+**导入目录**是你自己的原始文件，只允许「从库移除」，磁盘文件一个字节都不动。移除过的文件不会再被扫描重新加回来。
 
 | 五段均衡器 | 音源引擎与上游巡检 |
 | --- | --- |
@@ -80,7 +83,11 @@ git tag v1.4.0 && git push origin v1.4.0   # 打 tag 触发 CI 三平台构建�
   `typecheck → 单元测试 → 引擎测试 → build`。
 - 产物命名固定为 `Aurora-Music-<version>-<arch>.<ext>`（**不能含空格**）。
   早期版本用 `${productName}` 拼名字，空格被不同环节规范化成点号/连字符，导致更新器 404。
-- 自动更新走 `electron-updater` + `latest.yml`，「下载失败」时会给出可点的手动下载入口。
+- 自动更新走 `electron-updater` + `latest.yml`：主源 GitCode（国内直连），GitHub 与镜像兜底；
+  「下载失败」时会给出可点的手动下载入口。两个源的 `latest.yml` 不保证同时更新，
+  版本比较按数字逐段比，不会把旧版本提示成新版本。
+- 未配置证书时产物未签名，首次安装会被 SmartScreen 拦一次（「更多信息 → 仍要运行」）；
+  签名路线与 CI 接线见 [docs/code-signing.md](docs/code-signing.md)。
 
 **安装包约 105 MB 是 Electron 的固定开销**：`electron.exe`（Chromium）205 MB、`locales` 46 MB、
 图形后端与 ICU 资源约 70 MB，压缩后约 91 MB；本项目自身的代码压缩后不到 1 MB。
@@ -93,16 +100,17 @@ src/
   main/                 主进程：所有网络与磁盘操作
     providers/          20 个音源适配器（netease / qq / kuwo / demo / local + 15 个引擎源）
     engine/ts/          进程内音源引擎（签名、分页、HLS、标签写入）
-    services/           catalog（搜索/取址/换源）、download、library、playlists、cache、source-health…
+    services/           catalog（搜索/取址/换源）、download、library、playlists、cache、
+                        fileops（复制/导出/回收站）、clipboard（文件剪贴板）、diagnostics、source-health…
     windows.ts          主窗口 / 桌面歌词窗 / 迷你条 / 音量气泡
     protocol.ts         muse:// 媒体协议（封面代理、本地流式读取）
-    ipc.ts              81 个 IPC 通道的处理器
+    ipc.ts              100 个 IPC 通道的处理器
   preload/              contextBridge 暴露的 window.api
   shared/               IPC 常量、类型、歌词解析（主进程与渲染层共用）
   renderer/src/
     views/              路由页面 + 两个独立窗口（桌面歌词、音量气泡）
-    components/         18 个组件（播放条、歌词、均衡器、队列、歌曲表…）
-    stores/             6 个 Pinia store
+    components/         19 个组件（播放条、歌词、均衡器、队列、歌曲表…）
+    stores/             7 个 Pinia store（app / player / search / download / library / playlists / stats）
     core/               audio / wave（Web Audio 图）/ latest（异步门闩）/ plain（IPC 拷贝）
 scripts/
   shots.mjs             文档截图流水线
@@ -114,17 +122,19 @@ tests/                  单元测试
 
 | 内容 | 位置 |
 | --- | --- |
-| 设置、下载队列、本地库索引、歌单、巡检结果 | `%APPDATA%/aurora-music/`（macOS 为 `~/Library/Application Support/aurora-music`） |
-| 下载的音乐与 `.lrc` | 默认 `系统音乐目录/Aurora Music`，可在设置页改 |
+| 设置 / 本地库索引 / 歌单 / 下载队列 / 巡检结果 | `%APPDATA%\Aurora Music\`（安装版）或 `%APPDATA%\aurora-music\`（开发运行）；macOS 对应 `~/Library/Application Support/` 下的同名目录 |
+| 具体文件 | `settings.json`、`library.json`、`library-ignored.json`（移除黑名单）、`playlists.json`、`downloads.json`、`source-health.json`，日志在 `logs/` |
+| 下载的音乐、`.lrc`、`.meta.json` | 默认 `系统音乐目录/Aurora Music`，可在设置页改 |
 | 登录凭据（Cookie） | 同上设置文件，仅本机明文存储，可一键清除 |
+| 收听统计 | 渲染层 localStorage（`aurora.stats`），不写 userData |
 
 ## 平台支持
 
 | 平台 | 状态 |
 | --- | --- |
-| Windows 10/11 | 支持（NSIS 安装包，主目标平台） |
-| macOS 12+ | 支持（dmg / zip，保留原生红绿灯与菜单） |
-| Linux (X11) | 支持（AppImage / deb） |
+| Windows 10/11（x64） | 支持（NSIS 安装包，主目标平台） |
+| macOS 12+（Apple Silicon） | 支持（arm64 dmg / zip，保留原生红绿灯与菜单）；Intel Mac 需自行 `--mac --x64` 构建 |
+| Linux (X11, x64) | 支持（AppImage / deb） |
 | Android / iOS | 不支持（原因与改造路径见 [PLATFORM.md](docs/PLATFORM.md)） |
 
 HLS（m3u8）音源转封装依赖系统的 `ffmpeg`；缺失时会退回 TS 分片并用明确提示告知。
@@ -137,16 +147,19 @@ HLS（m3u8）音源转封装依赖系统的 `ffmpeg`；缺失时会退回 TS 分
 3. QQ 音乐未登录时绝大多数曲目没有播放权限，实际依赖跨源换源。
 4. 引擎音源只返回首屏约 10 条，无分页——分页并行会让耗时翻倍，是有意取舍。
 5. 自动更新的完整链路（下载 → 重启安装）需在真机安装版上验证，开发模式无法覆盖。
+6. 桌面歌词窗的位置与尺寸不跨重启记忆：每次打开回到屏幕默认位置与形态尺寸，需要的话用右下角把手重新拉到合适大小。
 
 ## 文档
 
 | 文档 | 内容 |
 | --- | --- |
 | [docs/README.md](docs/README.md) | 文档索引：哪些是现行、哪些是归档 |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 分层、音源接口、缓存与换源调度、下载状态机、Web Audio 图、关键流程 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 分层、音源接口、缓存与换源调度、下载状态机、本地库、Web Audio 图、关键流程 |
 | [PLATFORM.md](docs/PLATFORM.md) | 三平台差异与移动端不可行的原因 |
 | [mini-player.md](docs/mini-player.md) | 迷你播放窗的三态、悬停面板与尺寸记忆 |
-| [desktop-lyric.md](docs/desktop-lyric.md) | 桌面歌词的裸字/悬停两态与绘图取舍 |
+| [desktop-lyric.md](docs/desktop-lyric.md) | 桌面歌词的裸字/悬停两态、拖动与缩放、绘图取舍 |
+| [update-feed-setup.md](docs/update-feed-setup.md) | 国内更新源（GitCode 主源 + GitHub 后备）的接线、实测排坑与验证清单 |
+| [code-signing.md](docs/code-signing.md) | Windows 代码签名的三条路线与 CI 接线 |
 | [archive/](docs/archive/README.md) | 历史记录：Python 移除、引擎迁移对拍、Android 方案、2026-10-29 全量审计 |
 
 ## 说明

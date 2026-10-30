@@ -7,11 +7,12 @@
 | 文档 | 讲什么 | 什么时候看 |
 | --- | --- | --- |
 | [../README.md](../README.md) | 项目定位、功能、命令、发版、已知限制 | 第一次接触这个项目 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 分层与依赖、音源接口与错误模型、缓存与换源调度、下载状态机、`muse://` 协议、Web Audio 图、关键流程、扩展点 | 要改主进程逻辑、加音源、排查播放问题 |
-| [PLATFORM.md](PLATFORM.md) | Windows / macOS / Linux 的窗口、路径、托盘差异；为什么移动端不行 | 打包新平台、处理平台特有的窗口问题 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 分层与依赖、音源接口与错误模型、缓存与换源调度、下载状态机、本地库（扫描/删除/重复/导出）、`muse://` 协议、Web Audio 图、关键流程、扩展点 | 要改主进程逻辑、加音源、排查播放问题 |
+| [PLATFORM.md](PLATFORM.md) | Windows / macOS / Linux 的窗口、路径、托盘差异；各平台实际产物架构；为什么移动端不行 | 打包新平台、处理平台特有的窗口问题 |
 | [mini-player.md](mini-player.md) | 迷你播放窗的三态、悬停面板、尺寸与位置记忆 | 改 `MiniPlayer.vue` 或 `windows.ts` 的窗口形态 |
-| [desktop-lyric.md](desktop-lyric.md) | 桌面歌词的「裸字 / 悬停」两态、伪元素画面板、逐字高亮 | 改歌词窗口样式或穿透行为 |
+| [desktop-lyric.md](desktop-lyric.md) | 桌面歌词的「裸字 / 悬停」两态、伪元素画面板、逐字高亮、拖动与右下角把手缩放 | 改歌词窗口样式、拖动手势或穿透行为 |
 | [update-feed-setup.md](update-feed-setup.md) | 国内更新源：GitCode 主源（stable 指针）+ GitHub 后备，实测排坑实录、secrets 配置、验证清单 | 配置或排查自动更新 |
+| [code-signing.md](code-signing.md) | Windows 代码签名的三条路线、证书接入 CI 的步骤、签名相关的打包坑 | 处理 SmartScreen、配置 CSC_LINK |
 
 ## 归档（`archive/`）
 

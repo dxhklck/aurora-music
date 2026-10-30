@@ -1,7 +1,7 @@
 # Aurora Music 架构设计
 
 > 本文说明技术决策、分层边界、关键流程，以及从 `musicdl` 借鉴并改造的设计。
-> 对应版本：1.3.3 · 最后核对：2026-10-29 · 文档索引见 [README.md](./README.md)
+> 对应版本：1.3.9 · 最后核对：2026-10-30 · 文档索引见 [README.md](./README.md)
 
 ## 1. 设计目标
 
@@ -23,7 +23,7 @@
 | `SongInfo` 统一字段 + `with_valid_download_url` + `save_path` 冲突消解                               | 各平台返回被归一化，后续流程无需分支 | `Song` / `StreamInfo`（`shared/types.ts`）+ `uniqueFilePath()` + `sanitizeFileName()`         |
 | 每个平台多个 `_parsewithxxxapi` 依次尝试；`MUSIC_QUALITIES` 从高到低试；`AudioLinkTester` 实测 URL              | 单一接口不稳定时的容错        | `resolveStream` 音质阶梯 + `BaseProvider.probe()`（Range 请求校验状态码与 MIME）+ 跨平台换源                   |
 | `cleanlrc` / `extractdurationsecondsfromlrc` / `LyricSearchClient`（lrclib 兜底）                | 歌词清洗与多源回退          | `shared/lyric.ts`（清洗、多时间戳、offset、译文合并）+ `catalog.lyric()` 的 LRCLIB 兜底                       |
-| `ThreadPoolExecutor` + rich 双级进度（总任务 / 单曲）                                                   | 下载可控可观测            | `DownloadManager`：固定并发 2 + 每任务 `progress/speed/attempt`，批量推送到渲染层                            |
+| `ThreadPoolExecutor` + rich 双级进度（总任务 / 单曲）                                                   | 下载可控可观测            | `DownloadManager`：可配置并发（默认 2）+ 每任务 `progress/speed/attempt`，批量推送到渲染层                            |
 
 **没有照搬的部分**：musicdl 是 Python CLI + 命令行进度条；本项目把「进度」换成 IPC 事件，把「线程池」换成  
 `fetch` 流 + Node `stream.pipeline`（背压由流处理，不阻塞事件循环）。
@@ -175,7 +175,8 @@ queued ──▶ downloading ──▶ done
 - 完成：移动到最终文件名（同名自动加 `(1)`），写 `.lrc` 与 `.meta.json`，登记 `library.json`；
 - 落盘：队列写 `downloads.json`（600ms 防抖），重启后 `downloading/queued` 一律回到 `queued` 续跑；
 - 标签：`settings.writeTags` 开启时，下载完成把标题/歌手/专辑/封面/歌词写进容器
-  （MP3 → ID3v2，FLAC/OGG → Vorbis Comment，M4A → MP4 atom），复用引擎里的 mutagen，失败只告警不阻断。
+  （MP3 → ID3v2.3，FLAC/OGG → Vorbis Comment，M4A → MP4 atom），实现在 `engine/ts/tag*.ts`，
+  **纯 TypeScript 手写、不依赖外部运行时**，失败只告警不阻断。
 
 ### 5.3.1 下载地址的两条来源
 
@@ -196,9 +197,21 @@ interface StreamInfo {
 
 ### 5.4 本地库
 
-`library.json` 只存索引（文件路径、大小、来源平台、歌词/元数据路径）。  
-启动时 `prune()` 校验文件是否仍存在，避免出现「列表里有、点开 404」。  
-`LocalProvider` 把索引包装成音源，因此本地播放与在线播放走完全相同的链路。
+`library.json` 只存索引：`id`、`filePath`、`size`、`ext`、`lyricPath` / `metaPath`、`downloadedAt` 与歌曲元数据，音频本身始终留在用户目录。id 有两种：下载入库的是 `platform:songId`，导入的是 `local:<绝对路径>`（id 只是索引键，`relocate()` 重绑时保持不变，否则歌单引用会全失效）。`LocalProvider` 把索引包装成音源，所以本地播放与在线播放走完全相同的链路。
+
+**扫描**：`scanLocalDirs()` 递归遍历 `settings.musicDirs`（最多三层，`MAX_SCAN_DEPTH = 2`），跳过隐藏目录，只认 mp3 / flac / wav / m4a / ogg / aac / opus。元数据优先读下载服务写的 `.meta.json`，没有就按「歌手 - 歌名」解析文件名。
+
+**移除黑名单**：`library-ignored.json` 记 `{path, size, mtime}` 三元组。移除过的文件不会再被下一次刷新加回来；文件重新下载后 size/mtime 变了，会正常重新入库（上限 2000 条）。
+
+**缺失标记**：`prune()` 不丢弃条目，改为 `missing: true`。列表显示灰色角标与顶部横幅，可「重新定位」（选目录后按文件名批量重绑）或「清理条目」。外接盘没插时只是变灰，插回来自动恢复。
+
+**删除**：`deleteFiles(ids, allowedDir)` 只对落在下载目录内的文件动磁盘——`shell.trashItem` 进系统回收站，并把同名 `.lrc` / `.meta.json` 一起送去；导入目录的文件降级为 `removeMany()`（仅移除 + 写黑名单）。逐条返回结果：主文件删除失败保留索引（不能算删过），附属文件失败只进备注。
+
+**重复**：`duplicates()` 先按 `size` 分组（size 唯一的零 IO 排除），同组内算 sha256 定案；另按「歌名 + 歌手一致、时长差 ≤2 s」归「同曲不同音质」。界面默认预选「保留体积最大 + 最早添加」的一份，清理复用删除链路。
+
+**复制 / 导出**：`services/fileops.ts` 的 `copyTracks()` 同名不覆盖（`uniqueFilePath` 追加 `(1)`），附属文件跟着改名；导出支持 `{artist} {name} {album} {ext}` 模板并清洗平台非法字符。复制文件到系统剪贴板在 `services/clipboard.ts`，三平台各写各的（Windows CF_HDROP / macOS NSPasteboard / Linux text/uri-list）。
+
+**元数据编辑**：`updateMeta` / `updateMetaMany` 同时写索引、`.meta.json` 与音频容器标签；批量只改歌手/专辑（歌名逐首不同），索引只落盘一次。
 
 ### 5.5 音源引擎
 
@@ -307,11 +320,15 @@ muse://local/?p=<encoded file path>                    → 本地文件
 ### 6.3 桌面歌词窗口
 
 - `transparent + frame:false + alwaysOnTop('screen-saver') + skipTaskbar`；
-- 默认按设置决定是否 `setIgnoreMouseEvents`（锁定=穿透）；
+- 默认按设置决定是否 `setIgnoreMouseEvents`（锁定=穿透；`forward: true` 仍转发 `mousemove`，所以悬停能临时恢复交互、直接点解锁）；
 - **按需推送**：主进程在歌词窗创建/销毁时给主窗口发 `{open}` / `{closed}`，主窗口据此开关 250 ms 推送。
   窗口没开还每 250 ms 序列化整份歌词跨进程是纯白跑；
 - 子窗口用 `sentAt` 做 rAF 本地插值 → 60fps 平滑，不依赖 IPC 频率；
-- 双击窗口/点击关闭按钮之外的区域可拖动（`-webkit-app-region: drag`）。
+- **不用 `-webkit-app-region: drag`**：透明无边框窗上它在 Windows 会整块失效（拖拽区判不中），
+  改为渲染层上报 `screenX/Y` 位移、主进程 `setBounds` 移动，同时把尺寸钉回按下瞬间的值；
+- **窗口创建即 `resizable: false`**：Windows 会给可缩放的无边框窗加一圈约 8px 的隐形缩放边框，
+  按上去事件直接进系统（光标变成禁止符），系统还会把窗口一路拉大。尺寸只由右下角把手改
+  （`lyricResizeStart/Move/End` → `setBounds`，按形态最小尺寸与屏幕工作区夹取）。
 
 ### 6.4 发布链路与自动更新
 
@@ -323,11 +340,13 @@ git tag v1.3.x ──▶ CI（三平台矩阵）
                                      │
                      latest.yml + 安装包 ──▶ GitHub Release
                                      │
-应用 ── 启动 30 s 后静默检查 ──▶ 渠道探测（直连 → 镜像列表，选定后本会话固定）
+应用 ── 启动 30 s 后静默检查 ──▶ 渠道探测（GitCode → 对象存储 → GitHub → 镜像，选定后写回 settings）
      ── 有新版 → 自动下载 → 广播状态 → 设置页「重启并安装」
 ```
 
-三个踩过的坑，都写进了代码注释：
+渠道探测顺序与代理策略成对出现：GitCode 走 `direct`，其余走 `system`（理由见下方第 2 条）。
+
+四个踩过的坑，都写进了代码注释：
 
 1. **产物名不能含空格**。`productName` 是 `Aurora Music`，早期 `artifactName` 引用它，
    空格在「本地文件名 → latest.yml → GitHub 资产名 → 更新器拼 URL」这条链上被各环节规范化成
@@ -350,6 +369,19 @@ git tag v1.3.x ──▶ CI（三平台矩阵）
 Range；GitHub 直连与 ghproxy 镜像降为后备。上次验证可用的渠道跨启动记在
 `settings.updateChannel`，省掉每次启动 12s 的直连超时。差量更新（只下变化的字节）
 需要旧版本文件可达，只有对象存储渠道能满足——未启用，GitCode 上差量失败会自动退化为全量。
+
+三个容易忽略的细节：
+
+1. **版本比较按数字，不按字符串**。`isNewerVersion()` 逐段取值比较（缺位补 0，能处理 `v` 前缀与
+   `-beta` 后缀）。两个源的 `latest.yml` 不保证同时更新，用 `version !== app.getVersion()` 会把
+   已经最新的用户提示成「发现新版本 v1.3.9」，点下去等于降级；字符串比较还会把 `1.3.10` 判成小于 `1.3.9`。
+2. **按渠道切代理**。GitCode 国内直连最快，被系统代理绕到境外节点反而只有几十 KB/s。
+   `electron-updater` 用独立 partition（`NET_SESSION_NAME = 'electron-updater'`），
+   所以在该 session 上按渠道 `setProxy`：GitCode → `direct`，对象存储 / GitHub / 镜像 → `system`，
+   不影响主窗口与音源请求。
+3. **指针写入顺序**：先传带版本号的文件（每次换名，不冲突）→ 再替换固定名的 `latest.yml` →
+   两端校验通过 → 最后清上一版遗留附件。顺序反了会在上传中断时留下「旧包已删、新包没传」的空指针
+   （v1.3.8 发生过一次，两边都空，只能跳号重发 v1.3.9）。
 
 ---
 
@@ -417,12 +449,18 @@ source → b0 → b1 → b2 → b3 → b4 → gain → destination
 
 持久化在 `settings.equalizer`，`settings.ts` 的 `load()` 会做一次归一化：老配置缺字段、长度不足 5、含 `NaN` 都补成合法形态。长度不对时 `wave.setEqualizer` 会静默忽略参数——不归一化的话，用户看到滑块在动而声音不变。
 
+### 7.4 睡眠定时与夜间限幅
+
+睡眠定时在 `player` store 里：`15 / 30 / 60` 分钟用 `setInterval` 倒计时，`eof` 模式在本曲 `ended` 时触发。到点只 `pause()`，**不动队列与进度**，用户接着播就行。
+
+夜间限幅是音频图里常驻的 `DynamicsCompressorNode`（开启时 threshold −26 dB、knee 18、ratio 5；关闭时回到 threshold 0 / ratio 1 的透明状态）。和 EQ 一样**只改参数不拆链**——拆链重连在 Web Audio 里容易踩到「接了没通」的静音，而静音态排查成本极高。
+
 ---
 
 ## 8. UI 层
 
-- **App.vue** 负责外壳与全局副作用：启动装配、快捷键（空格/方向键）、歌词状态推送、Toast 监听；
-- **stores** 六个：`app`（音源+设置+Toast+歌词窗口开关）、`player`（队列+播放+歌词）、`search`、`download`、`library`、`playlists`；
+- **App.vue** 负责外壳与全局副作用：启动装配、全局键盘（空格播放暂停、`L` 歌词舞台、方向键快进/快退与调音量、`Shift+方向键` 切歌）、歌词状态推送、Toast 监听；
+- **stores** 七个：`app`（音源+设置+Toast+歌词窗口开关）、`player`（队列+播放+歌词+睡眠定时与歌词偏移）、`search`、`download`、`library`（索引+筛选/排序+批量操作）、`playlists`、`stats`（收听次数与每日时长，存 localStorage）；
 - **视觉**：`--accent` / `--accent-2` 由当前音源主题色注入，页面顶部有动态光斑；封面缺失时按 id 哈希生成渐变；
 - **动效**：路由 `fade + translate`、歌词舞台 `scale + fade`、黑胶 20s 匀速旋转（`animation-play-state` 随播放暂停）、播放条封面 hover 蒙层。
 
@@ -449,6 +487,26 @@ source → b0 → b1 → b2 → b3 → b4 → gain → destination
         → 取 StreamInfo.directUrl + headers（不是 muse:// 代理地址）
         → fetch(stream, Range) → .part 写入 + 进度节流推送
         → 完成：rename → .lrc + .meta.json → 可选写标签 → library.add
+```
+
+**本地库删除**
+
+```
+选中（行内菜单 / 多选批量）→ library.deleteFiles(ids, allowedDir)
+        → 逐条判断文件是否落在下载目录内
+            ├ 在   → shell.trashItem(音频 + .lrc + .meta.json) → 成功才 drop 索引
+            └ 不在 → forget（仅移除）+ 写 library-ignored.json
+        → 命中当前播放曲目时先停播、切下一首（Windows 上句柄占用会直接删失败）
+        → 清掉各歌单里的 local 死链（playlists.dropLocalTracks）
+        → 返回逐条结果，UI 只在有失败时弹明细
+```
+
+**重复扫描**
+
+```
+duplicates() → 按 size 分组（唯一的零 IO 排除）→ 同组算 sha256（并发 3）
+             → 另按「歌名+歌手一致、时长差 ≤2s」归「同曲不同音质」
+             → 默认保留体积最大 + 最早添加，其余预勾选 → 复用删除链路
 ```
 
 **引擎调用**
@@ -494,3 +552,5 @@ MusicdlProvider.search → musicdl.searchStream / resolve / lyric / tag
    这类时效性结论只写在巡检结果（`userData/source-health.json`）与 README 里。
 9. 本文 5.5 的行为描述以迁移后的 TS 实现为准；与旧 Python 版的逐源对拍基线见
    [`archive/engine-ts-parity-report.md`](./archive/engine-ts-parity-report.md)（历史记录，不再更新）。
+10. 桌面歌词窗的位置与尺寸不持久化：每次打开回到屏幕默认位置与形态尺寸；锁定（穿透）状态下没有手势，
+    无法拉伸，需先解锁。

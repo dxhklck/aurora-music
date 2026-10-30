@@ -16,6 +16,13 @@
 渠道失效（error 事件）时清掉记忆重新探测。
 ```
 
+每个渠道还会切一次更新器 session 的代理（`electron-updater` 是独立 partition，不碰主窗口与音源请求）：
+**GitCode → `direct`**，对象存储 / GitHub / 镜像 → `system`。GitCode 国内直连实测约 11 MB/s，
+挂上系统代理反而只剩几十 KB/s——「国内不用走代理」在这里是硬结论，不是偏好。
+
+「有没有新版本」按**数字**比较（`isNewerVersion`），不按字符串：两个源的 latest.yml 不保证同时更新，
+落后的一端不能把已经最新的用户提示成「发现新版本 v1.3.9」；字符串比较还会把 `1.3.10` 判成小于 `1.3.9`。
+
 CI（`build.yml` 的 publish-release job）每次发版做两件事：
 
 - **Sync update files to GitCode**：`scripts/publish-gitcode.mjs` 把
@@ -30,7 +37,7 @@ CI（`build.yml` 的 publish-release job）每次发版做两件事：
 | Range 请求 | **支持**（HTTP 206 + Content-Range），断点续传没问题 |
 | `releases/latest/download/<file>` 别名 | **不可用**：返回的是网页 HTML 而不是文件（只看状态码会误判，必须查内容） |
 | tag 名叫 `latest` | **不要用**：下载路由会把它解析成「当前 API latest」而不是固定 tag |
-| 同名附件重复上传 | **不生效**：PUT 返回成功但下载内容钉死在第一次（v1.3.6 实测：先传 0.0.0 再传 1.3.6，下载仍是 0.0.0）。必须先 `DELETE /releases/{tag}/attach_files/{id}` 删旧记录再传——publish-gitcode.mjs 已内置「先删后传 + sha256 内容校验」 |
+| 同名附件重复上传 | **不生效**：PUT 返回成功但下载内容钉死在第一次（v1.3.6 实测：先传 0.0.0 再传 1.3.6，下载仍是 0.0.0）。必须先 `DELETE /releases/{tag}/attach_files/{id}` 删旧记录再传 |
 | 删除 release | v5 API 无按 tag 删除端点（DELETE 返回 405），只能在网页上手动删 |
 | 创建 release | tag 不存在时会**自动创建 git tag**；`release_status: "pre"/"latest"` 可控制是否被 latest 选中 |
 | 附件上传 | `GET /releases/<tag>/upload_url?file_name=…` 拿预签名 OBS 地址，按返回 headers 原样 PUT |
@@ -39,14 +46,20 @@ CI（`build.yml` 的 publish-release job）每次发版做两件事：
 **指针设计**：更新器固定拉 `stable` tag；CI 每次发版把三件套覆盖上传到 `stable` 与版本 release
 两处。`stable` release 标记为 `pre`，永远不抢占「最新版本」的显示位。
 
+**写入顺序**（v1.3.8 事故之后定的）：先传带版本号的文件 → 再「删旧 `latest.yml` 并传新的」→
+两端校验 sha256 → 最后清上一版遗留附件。反过来的话，一次网络中断就会留下「旧包已删、新包没传」的
+空指针：v1.3.8 首跑把 `stable` 清得只剩源码包，第二遍重传又把 GitHub 同 tag 的资产清空，
+最后只能跳号发 v1.3.9。
+
 ## 三、一次性配置（已完成项打勾）
 
 - [x] GitCode 注册账号 `dxhklck`，建公开仓库 `aurora_music`
 - [x] 生成私人令牌（作用域 repo + api），本地存 `F:\aurora\.env.local`（已被 .gitignore 覆盖）
-- [ ] **把同一个令牌配到 GitHub 仓库 Secrets**：Settings → Secrets and variables → Actions →
-      New repository secret，名字 `GITCODE_TOKEN`。CI 的两个 GitCode 步骤都依赖它；
-      缺失时步骤会 `::error::` 失败（不影响 GitHub Release 本身）
-- [ ] 清理 GitCode 上的测试残留：网页上删除 `sync-test` 与 `latest` 两个 release（API 删不了）
+- [x] **把同一个令牌配到 GitHub 仓库 Secrets**（名字 `GITCODE_TOKEN`）：v1.3.9 的
+      「Sync update files to GitCode」步骤已跑通；CI 的两个 GitCode 步骤都依赖它，
+      缺失时会 `::error::` 失败（不影响 GitHub Release 本身）
+- [x] 清理 GitCode 上的测试残留：当前只剩 `v1.3.4 / v1.3.6 / v1.3.7 / v1.3.8 / v1.3.9 / stable`
+      六个 release，`sync-test` 与 `latest` 已删
 
 ## 四、验证清单
 
@@ -59,6 +72,9 @@ curl -sL "https://gitcode.com/dxhklck/aurora_music/releases/download/stable/late
 # 3. 应用端：settings.json 里出现 "updateChannel" 指向 stable 路径；
 #    设置页检查更新能发现新版本并完成下载
 # 4. 代码镜像：GitCode 仓库的 main 与 tags 与 GitHub 一致
+# 5. 两端版本一致：GitHub releases/latest 的 tag 与 stable/latest.yml 的 version 相同
+curl -s https://api.github.com/repos/dxhklck/aurora-music/releases/latest | grep '"tag_name"'
+# 6. 整包校验（别只看 HTTP 状态码）：下载后算 sha512，与 latest.yml 里的 key 逐字节比对
 ```
 
 ## 五、对象存储（可选的差量增强，未启用）

@@ -35,10 +35,14 @@
 
 仓库里已经做完的部分：
 
-- `electron-builder.yml` 的 `win` 段启用了 `signingHashAlgorithms: [sha256]` 与
-  `rfc3161TimeStampServer`（DigiCert 公共时间戳服务）；
-- `.github/workflows/build.yml` 的 `Detect signing certificate` 步骤会检查
-  `CSC_LINK`：有值才开启签名，没有就打一条 notice 并跳过，**CI 不会因此变红**。
+- `electron-builder.yml` 的 `win` 段**只留注释、不写签名选项**：`signingHashAlgorithms` /
+  `rfc3161TimeStampServer` / `timeStampServer` 放在 `win` 根级会让 26.x 的 schema 把整个 `win`
+  段判为非法（`Invalid configuration object`），三平台打包一起失败。这三项的默认值本来就是
+  RFC3161 + DigiCert + SHA-256，要换服务器时写到 **`win.signtoolOptions`** 下；
+- `.github/workflows/build.yml` 的 `Detect signing certificate` 步骤会检查 `CSC_LINK`：有值才开启签名，
+  没有就打一条 notice 并跳过，**CI 不会因此变红**；同时 `Package` 步骤在未启用签名时
+  `unset CSC_LINK / CSC_KEY_PASSWORD`——macOS 侧用 `cscLink == null` 判断，空串会被当成证书路径
+  去 base64 解码并抛错，导致 mac 打包失败。
 
 你需要做的只有两件事：
 
@@ -63,11 +67,11 @@ base64 -w0 aurora-signing.pfx > csc-link.txt      # Linux / Git Bash
 ### 2. 触发一次发版，验证签名
 
 ```bash
-# 下载产物后在本机检查（PowerShell）
-Get-AuthenticodeSignature .\Aurora-Music-1.3.8-x64.exe | Format-List Status, SignerCertificate
+# 下载产物后在本机检查（PowerShell，版本号按实际替换）
+Get-AuthenticodeSignature .\Aurora-Music-1.3.9-x64.exe | Format-List Status, SignerCertificate
 
 # Status 应为 Valid；再看时间戳
-(Get-AuthenticodeSignature .\Aurora-Music-1.3.8-x64.exe).TimeStamperCertificate
+(Get-AuthenticodeSignature .\Aurora-Music-1.3.9-x64.exe).TimeStamperCertificate
 ```
 
 `Status: NotSigned` = 证书没进去（检查 Secret 名字拼写与 base64 是否被换行截断）。
@@ -80,7 +84,11 @@ Get-AuthenticodeSignature .\Aurora-Music-1.3.8-x64.exe | Format-List Status, Sig
 3. **时间戳服务器要能通**：CI 走海外网络，DigiCert 的 `http://timestamp.digicert.com` 稳定；
    若换国内服务器务必确认支持 RFC3161，否则 sha256 签名会失败；
 4. **证书主体名称必须与 `productName` 对应的公司/个人一致**，否则 SmartScreen 仍会降级提示；
-5. 签名会让打包时间增加 1–3 分钟（每个可执行文件都要签），属正常现象。
+5. 签名会让打包时间增加 1–3 分钟（每个可执行文件都要签），属正常现象；
+6. **签名选项别放 `win` 根级**：`signingHashAlgorithms` / `rfc3161TimeStampServer` 在
+   electron-builder 26.x 的 schema 里不在这一层，写上去会让整个 `win` 段校验失败，
+   报 `Invalid configuration object` 并中止打包（本地 `electron-builder --dir` 即可复现）。
+   默认值已经是 RFC3161 + DigiCert + SHA-256，通常什么都不用写。
 
 ## 五、与自动更新的关系
 
