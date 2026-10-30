@@ -11,6 +11,7 @@
 | [PLATFORM.md](PLATFORM.md) | Windows / macOS / Linux 的窗口、路径、托盘差异；为什么移动端不行 | 打包新平台、处理平台特有的窗口问题 |
 | [mini-player.md](mini-player.md) | 迷你播放窗的三态、悬停面板、尺寸与位置记忆 | 改 `MiniPlayer.vue` 或 `windows.ts` 的窗口形态 |
 | [desktop-lyric.md](desktop-lyric.md) | 桌面歌词的「裸字 / 悬停」两态、伪元素画面板、逐字高亮 | 改歌词窗口样式或穿透行为 |
+| [update-feed-setup.md](update-feed-setup.md) | 国内更新源：为什么要自建对象存储、桶与 secrets 配置步骤、差量更新生效条件 | 配置国内自动更新加速 |
 
 ## 归档（`archive/`）
 

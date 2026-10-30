@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   downloadRetries: 3,
   writeTags: true,
   engineEnabled: true,
+  updateChannel: '',
   equalizer: { enabled: false, gains: [0, 0, 0, 0, 0] },
   closeToTray: true,
   qqCookie: '',
@@ -71,6 +72,7 @@ class SettingsService {
     if (!this.cache.downloadDir) this.cache.downloadDir = defaultDownloadDir
     // 老版本 settings.json 没有这个字段，或者只存了一半：统一补成合法形态
     this.cache.equalizer = normalizeEqualizer(this.cache.equalizer)
+    if (typeof this.cache.updateChannel !== 'string') this.cache.updateChannel = ''
     return this.get()
   }
 

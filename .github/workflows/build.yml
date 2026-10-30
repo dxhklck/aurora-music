@@ -154,3 +154,33 @@ jobs:
             exit 1
           fi
           echo "已发布：https://github.com/$REPO/releases/tag/$TAG"
+
+      # 双源发布：把 Windows 更新资产同步到国内对象存储（COS/OSS 均兼容 S3 协议）。
+      # 应用端 STORAGE_FEED（src/main/updater.ts）填上桶地址后，国内用户优先走这里：
+      # 自建可信、速度快，且桶里保留全部历史版本文件，差量更新（blockmap）才能生效——
+      # GitHub 镜像的 releases/latest/download 只指向最新版，差量必然退化为全量 105MB。
+      # 四个 secrets 未配置时跳过：没有桶也照样发布，只是没有国内加速。
+      - name: Sync update files to COS
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+          COS_BUCKET: ${{ secrets.COS_BUCKET }}
+          COS_REGION: ${{ secrets.COS_REGION }}
+        run: |
+          if [ -z "$COS_SECRET_ID" ] || [ -z "$COS_SECRET_KEY" ] || [ -z "$COS_BUCKET" ] || [ -z "$COS_REGION" ]; then
+            echo "::notice::未配置 COS_* secrets，跳过国内对象存储同步（不影响 GitHub Release）"
+            exit 0
+          fi
+          # aws cli 预装在 ubuntu runner；COS 完全兼容 S3 协议，直接用即可，不引额外依赖
+          ENDPOINT="https://cos.$COS_REGION.myqcloud.com"
+          aws configure set aws_access_key_id "$COS_SECRET_ID"
+          aws configure set aws_secret_access_key "$COS_SECRET_KEY"
+          cd artifacts
+          # 只同步 Windows 更新链路需要的三个文件；桶必须保持「只增不删」——
+          # 旧版本的 exe 与 blockmap 是差量下载的来源，删了差量就退化成全量
+          for f in Aurora-Music-*-x64.exe Aurora-Music-*-x64.exe.blockmap latest.yml; do
+            echo "上传 $f"
+            aws s3 cp --endpoint-url "$ENDPOINT" --region "$COS_REGION" \
+              "$f" "s3://$COS_BUCKET/$f"
+          done
+          echo "已同步到 s3://$COS_BUCKET/"

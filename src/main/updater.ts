@@ -3,29 +3,46 @@ import { autoUpdater } from 'electron-updater'
 import { IPC } from '@shared/ipc'
 import type { UpdateStatusView } from '@shared/api'
 import { markQuitting } from './tray'
+import { settings } from './services/settings'
 
 /**
- * 自动更新（electron-updater + GitHub Releases）。
+ * 自动更新（electron-updater + GitHub Releases + 可选国内对象存储）。
  *
- * 渠道策略：国内直连 api.github.com / objects.githubusercontent.com 经常超时，
- * 这里维护一个镜像前缀列表（ghproxy 系列的反代服务），检查更新时依次探测：
- * 直连成功就用直连，否则落到第一个能拉到 latest.yml 的镜像；选定后本会话固定，
- * 出错（比如镜像失效）时清空记忆让下次重新探测。
+ * 渠道策略：按 STORAGE_FEED → GitHub 直连 → ghproxy 系镜像 的顺序探测，
+ * 第一个能拉到 latest.yml 的胜出，并跨启动记在 settings.updateChannel——
+ * 国内直连通常被墙，不记忆的话每次启动都要白等直连超时。渠道中途失效时
+ * 清掉记忆重新探测。
  * 镜像走 `releases/latest/download/<asset>` 稳定重定向，发新版无需改任何配置。
+ * 对象存储源（STORAGE_FEED）配置后优先级最高：自建可信、速度快，且旧版本文件
+ * 保留在桶里，差量更新（blockmap）只有在这个渠道才能真正生效。
  *
  * 范围刻意做小：
  *  - 只有 Windows 开启（NSIS 目标支持自动更新；mac 未签名装不了更新包，Linux 无统一更新渠道）；
  *  - 启动后半分钟静默检查一次，失败（无网络等）静默，不打扰用户；
  *  - 检查到新版本自动下载，下载完成后广播状态，由设置页提示「重启并安装」；
- *  - 更新元数据 latest.yml 由 CI 打包时生成并随 Release 分发（见 build.yml）。
+ *  - 更新元数据 latest.yml 由 CI 打包时生成并随 Release 分发（见 build.yml），
+ *    配置了 COS secrets 时同步一份到对象存储（见「Sync update files to COS」步骤）。
  */
 
 const REPO = 'dxhklck/aurora-music'
 const MANUAL_URL = `https://github.com/${REPO}/releases/latest`
 
+/**
+ * 国内对象存储源（可选）。
+ *
+ * 填上桶的公开读地址后自动成为第一优先渠道，例如：
+ *   https://aurora-1250000000.cos.ap-guangzhou.myqcloud.com
+ * 桶里是 CI 同步的 Windows 更新资产（latest.yml + exe + blockmap），扁平结构、旧版本不删——
+ * 差量更新要拿「上一个版本」的 blockmap 和安装包按 Range 取旧字节，GitHub 镜像
+ * （releases/latest/download/）只指向最新版，差量必然失败，桶是唯一能让差量生效的渠道。
+ * 对应的 CI 同步步骤见 build.yml 的「Sync update files to COS」。
+ */
+const STORAGE_FEED = ''
+
 /** 更新渠道：空串 = GitHub 直连；其余为反代镜像前缀（代理完整 GitHub URL）。
  *  渠道可用性实测会变（mirror.ghproxy.com 已下线），失效的直接删行即可 */
-const CHANNELS = [
+const CHANNELS: string[] = [
+  ...(STORAGE_FEED ? [STORAGE_FEED] : []),
   '',
   'https://ghfast.top/',
   'https://gh-proxy.com/'
@@ -64,7 +81,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   })
 }
 
-/** 切换到指定渠道。直连用 electron-builder 配置的 github provider；镜像走 generic + 稳定重定向 */
+/** 切换到指定渠道。三种形态：对象存储 = 静态目录；直连 = github provider；镜像 = 前缀代理 */
 function applyChannel(channel: string): void {
   if (channel === '') {
     // setFeedURL 传 github provider 需要完整配置，等于 electron-builder.yml 的 publish 段
@@ -75,8 +92,17 @@ function applyChannel(channel: string): void {
     })
     return
   }
+  if (channel === STORAGE_FEED) {
+    // 桶是普通静态目录：latest.yml 与安装包就在 URL 根下
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: channel.endsWith('/') ? channel : `${channel}/`
+    })
+    return
+  }
   autoUpdater.setFeedURL({
     provider: 'generic',
+    // 镜像是前缀代理：完整 GitHub URL 拼在前缀后面；
     // releases/latest/download 会被 GitHub 302 到最新 release 的资产，镜像原样跟随
     url: `${channel}https://github.com/${REPO}/releases/latest/download`
   })
@@ -84,11 +110,16 @@ function applyChannel(channel: string): void {
 
 /**
  * 确保选定可用渠道并切到位。
- * - 已有记忆且未失效：直接应用（不重复探测）；
- * - 无记忆：按 CHANNELS 顺序探测，第一个能拉到 latest.yml 的胜出；
+ * - 上次验证过的渠道记在 settings.updateChannel 里（跨启动生效）：直接应用，不重复探测。
+ *   国内直连 GitHub 通常被墙，不记忆的话每次启动都要白等直连超时 12s；
+ * - 无记忆：按 CHANNELS 顺序探测，第一个能拉到 latest.yml 的胜出，并写回设置；
  * - 全部失败：抛错，调用方决定提示方式。
  */
 async function ensureChannel(): Promise<void> {
+  if (activeChannel === null) {
+    const saved = settings.get().updateChannel
+    activeChannel = CHANNELS.includes(saved) ? saved : null
+  }
   if (activeChannel !== null) {
     applyChannel(activeChannel)
     return
@@ -99,6 +130,8 @@ async function ensureChannel(): Promise<void> {
       applyChannel(channel)
       await withTimeout(autoUpdater.checkForUpdates(), PROBE_TIMEOUT)
       activeChannel = channel
+      // 渠道验证成本高（坏渠道要等满超时才换下一个），必须跨启动记住
+      void settings.set({ updateChannel: channel }).catch(() => undefined)
       return
     } catch (error) {
       failures.push(`${channel || '直连'}：${(error as Error).message?.slice(0, 80) ?? '未知错误'}`)
@@ -128,8 +161,10 @@ function bindEvents(): void {
   )
   autoUpdater.on('update-downloaded', (info) => broadcast(currentStatus('ready', { version: info.version })))
   autoUpdater.on('error', (error) => {
-    // 渠道中途失效（镜像挂了/直连被断）：忘掉当前选择，下次检查重新探测
+    // 渠道中途失效（镜像挂了/直连被断/桶被清）：忘掉当前选择——内存与设置一起清，
+    // 否则下次启动还会「记住」这个死渠道，每次都失败在同一个地方
     activeChannel = null
+    void settings.set({ updateChannel: '' }).catch(() => undefined)
     broadcast(failureStatus(error))
   })
 }

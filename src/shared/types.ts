@@ -227,6 +227,12 @@ export interface AppSettings {
   equalizer: { enabled: boolean; gains: number[] }
   /** 点关闭按钮时最小化到系统托盘（关掉 = 隐藏后台播放）；为 false 时关闭即退出。托盘不可用时始终退出 */
   closeToTray: boolean
+  /**
+   * 上次验证可用的更新渠道（updater.ts 的 CHANNELS 成员）。
+   * 记在设置里而不是内存：国内直连 GitHub 通常被墙，不记忆的话每次启动
+   * 都要白等直连超时才轮到镜像。空串 = 尚未探测，按默认顺序来。
+   */
+  updateChannel: string
   /** QQ 音乐登录 Cookie（浏览器登录后复制粘贴；解锁逐字歌词与播放权限） */
   qqCookie: string
   /** 网易云音乐登录 Cookie（解锁无损音质与 VIP 曲目） */
