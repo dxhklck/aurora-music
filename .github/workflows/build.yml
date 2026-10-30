@@ -70,6 +70,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 主更新源：同步到 GitCode。checkout（全量，含 tags）供脚本与代码镜像两步使用。
+      - name: Checkout for GitCode sync
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -184,12 +190,6 @@ jobs:
               "$f" "s3://$COS_BUCKET/$f"
           done
           echo "已同步到 s3://$COS_BUCKET/"
-
-      # 主更新源：同步到 GitCode。checkout（全量，含 tags）供脚本与代码镜像两步使用。
-      - name: Checkout for GitCode sync
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       # 主更新源：同步到 GitCode。
       # 版本 release（tag=vX.Y.Z）放三件套供人下载；指针 release（tag=stable）
