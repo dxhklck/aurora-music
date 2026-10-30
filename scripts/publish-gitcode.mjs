@@ -107,16 +107,22 @@ const assets = fsSync.readdirSync(DIR).filter((name) => SYNC_FILES.some((re) => 
 if (!assets.length) fail(`::error::${DIR} 下没有匹配的更新资产`)
 console.log('待同步:', assets.join(', '))
 
-await ensureRelease(TAG)
-await ensureRelease(POINTER_TAG, { pointer: true })
+// 顶层统一兜底：任何异常都必须带着原因进 ::error:: 注解——发布 job 没有日志权限，
+// 注解是排障的唯一通道（v1.3.5 首跑就因未捕获 401 静默退化为 exit 1 而无法定位）。
+try {
+  await ensureRelease(TAG)
+  await ensureRelease(POINTER_TAG, { pointer: true })
 
-// 版本 release 与指针 release 各放一份；同名重复上传是覆盖，重跑安全
-for (const name of assets) {
-  const absPath = path.join(DIR, name)
-  await upload(TAG, name, absPath)
-  await upload(POINTER_TAG, name, absPath)
+  // 版本 release 与指针 release 各放一份；同名重复上传是覆盖，重跑安全
+  for (const name of assets) {
+    const absPath = path.join(DIR, name)
+    await upload(TAG, name, absPath)
+    await upload(POINTER_TAG, name, absPath)
+  }
+
+  await verify(TAG, assets)
+  await verify(POINTER_TAG, assets)
+  console.log('GitCode 同步完成')
+} catch (error) {
+  fail(`::error::GitCode 同步失败：${String(error).slice(0, 500)}`)
 }
-
-await verify(TAG, assets)
-await verify(POINTER_TAG, assets)
-console.log('GitCode 同步完成')
