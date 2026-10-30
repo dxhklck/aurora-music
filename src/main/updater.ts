@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, session } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { IPC } from '@shared/ipc'
 import type { UpdateStatusView } from '@shared/api'
@@ -128,6 +128,34 @@ function applyChannel(channel: Channel): void {
 }
 
 /**
+ * 更新器的请求走独立 partition（electron-updater 内部固定用 'electron-updater' 这个
+ * session，见 ElectronHttpExecutor.NET_SESSION_NAME），所以在这里设代理不会波及
+ * 主窗口与音源请求。
+ *
+ * 分渠道设代理的原因：
+ *  - GitCode 是国内源，直连最快（2026-10-30 实测 11 MB/s）。而国内用户装 Clash 之类
+ *    的常见状态是「系统代理开着 + 全局模式」，请求被绕到境外节点后只剩几十 KB/s、
+ *    甚至直接超时——这条路本来就不该经过代理。
+ *  - GitHub 与镜像兜底相反：需要代理才能访问的用户，必须让它继续走系统代理。
+ * 探测时逐个渠道切换，失败就换下一个，与渠道顺序天然对齐。
+ */
+async function setChannelProxy(channelId: string): Promise<void> {
+  const direct = channelId.startsWith(GITCODE_FEED)
+  try {
+    const net = session.fromPartition('electron-updater', { cache: false })
+    await net.setProxy({ mode: direct ? 'direct' : 'system' })
+  } catch {
+    // 代理设不上不该阻断更新：退回 Electron 默认行为（跟随系统）
+  }
+}
+
+/** 应用渠道：先定代理策略，再切 feed */
+async function useChannel(channel: Channel): Promise<void> {
+  await setChannelProxy(channel.id)
+  applyChannel(channel)
+}
+
+/**
  * 确保选定可用渠道并切到位。
  * - 上次验证过的渠道记在 settings.updateChannel 里（跨启动生效）：直接应用，不重复探测。
  *   国内直连 GitHub 通常被墙，不记忆的话每次启动都要白等直连超时 12s；
@@ -140,13 +168,13 @@ async function ensureChannel(): Promise<void> {
     activeChannel = CHANNELS.find((c) => c.id === saved) ?? null
   }
   if (activeChannel !== null) {
-    applyChannel(activeChannel)
+    await useChannel(activeChannel)
     return
   }
   const failures: string[] = []
   for (const channel of CHANNELS) {
     try {
-      applyChannel(channel)
+      await useChannel(channel)
       await withTimeout(autoUpdater.checkForUpdates(), PROBE_TIMEOUT)
       activeChannel = channel
       // 渠道验证成本高（坏渠道要等满超时才换下一个），必须跨启动记住
