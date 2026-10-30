@@ -6,46 +6,88 @@ import { markQuitting } from './tray'
 import { settings } from './services/settings'
 
 /**
- * 自动更新（electron-updater + GitHub Releases + 可选国内对象存储）。
+ * 自动更新（electron-updater）。
  *
- * 渠道策略：按 STORAGE_FEED → GitHub 直连 → ghproxy 系镜像 的顺序探测，
- * 第一个能拉到 latest.yml 的胜出，并跨启动记在 settings.updateChannel——
- * 国内直连通常被墙，不记忆的话每次启动都要白等直连超时。渠道中途失效时
- * 清掉记忆重新探测。
- * 镜像走 `releases/latest/download/<asset>` 稳定重定向，发新版无需改任何配置。
- * 对象存储源（STORAGE_FEED）配置后优先级最高：自建可信、速度快，且旧版本文件
- * 保留在桶里，差量更新（blockmap）只有在这个渠道才能真正生效。
+ * 渠道策略：GitCode 主源（2026-10-30 实测通过，国内可达、免费）→ 对象存储（可选）
+ * → GitHub 直连 → ghproxy 系镜像。第一个能拉到 latest.yml 的胜出，并跨启动记在
+ * settings.updateChannel——国内直连通常被墙，不记忆的话每次启动都要白等直连超时。
+ * 渠道中途失效时清掉记忆重新探测。
  *
  * 范围刻意做小：
  *  - 只有 Windows 开启（NSIS 目标支持自动更新；mac 未签名装不了更新包，Linux 无统一更新渠道）；
  *  - 启动后半分钟静默检查一次，失败（无网络等）静默，不打扰用户；
  *  - 检查到新版本自动下载，下载完成后广播状态，由设置页提示「重启并安装」；
- *  - 更新元数据 latest.yml 由 CI 打包时生成并随 Release 分发（见 build.yml），
- *    配置了 COS secrets 时同步一份到对象存储（见「Sync update files to COS」步骤）。
+ *  - 更新元数据 latest.yml 由 CI 打包时生成并随 GitHub Release 分发，
+ *    同时同步一份到 GitCode 的同名 release（见「Sync update files to GitCode」步骤）。
  */
 
 const REPO = 'dxhklck/aurora-music'
 const MANUAL_URL = `https://github.com/${REPO}/releases/latest`
 
+/** GitCode 主源。指向固定 tag `stable` 的资产目录（CI 每次发版覆盖其中的
+ *  latest.yml + exe + blockmap，2026-10-30 实测：tag 路径匿名可下、Range 206）。
+ *  不能用 /releases/latest/download/ 别名——GitCode 对该路径返回的是网页 HTML 而非文件，
+ *  也不能把 tag 叫做 latest——它会被解析成「当前 API latest」而不是固定 tag。 */
+const GITCODE_FEED = `https://gitcode.com/dxhklck/aurora_music/releases/download/stable`
+
 /**
- * 国内对象存储源（可选）。
+ * 国内对象存储源（可选，备胎）。
  *
- * 填上桶的公开读地址后自动成为第一优先渠道，例如：
+ * 填上桶的公开读地址后排在 GitCode 之后，例如：
  *   https://aurora-1250000000.cos.ap-guangzhou.myqcloud.com
- * 桶里是 CI 同步的 Windows 更新资产（latest.yml + exe + blockmap），扁平结构、旧版本不删——
- * 差量更新要拿「上一个版本」的 blockmap 和安装包按 Range 取旧字节，GitHub 镜像
- * （releases/latest/download/）只指向最新版，差量必然失败，桶是唯一能让差量生效的渠道。
+ * 桶是扁平结构且旧版本不删，是唯一能让**差量更新**真正生效的渠道——
+ * 差量要按 Range 取「上一个版本」的 exe 与 blockmap，而 latest/ 路径
+ * （GitCode 与镜像 alike）只指向最新版，拿不到旧文件，差量失败时
+ * electron-updater 会自动退化为全量下载（GitCode 上全量也快，可接受）。
  * 对应的 CI 同步步骤见 build.yml 的「Sync update files to COS」。
  */
-const STORAGE_FEED = ''
+const STORAGE_FEED: string = ''
 
-/** 更新渠道：空串 = GitHub 直连；其余为反代镜像前缀（代理完整 GitHub URL）。
- *  渠道可用性实测会变（mirror.ghproxy.com 已下线），失效的直接删行即可 */
-const CHANNELS: string[] = [
-  ...(STORAGE_FEED ? [STORAGE_FEED] : []),
-  '',
-  'https://ghfast.top/',
-  'https://gh-proxy.com/'
+interface Channel {
+  /** 写进 settings.updateChannel 的标识，跨启动恢复用 */
+  id: string
+  apply: () => void
+}
+
+/** 更新渠道，按探测顺序排列。失效的直接删行即可 */
+const CHANNELS: Channel[] = [
+  // 1) GitCode 主源：固定 tag `stable` 的资产目录，CI 每次发版覆盖（2026-10-30 实测匿名可下 + Range 206）
+  {
+    id: GITCODE_FEED,
+    apply: () => autoUpdater.setFeedURL({ provider: 'generic', url: `${GITCODE_FEED}/` })
+  },
+  // 2) 对象存储（可选）：扁平目录且旧版本不删，是唯一能让差量更新真正生效的渠道
+  ...(STORAGE_FEED
+    ? [
+        {
+          id: STORAGE_FEED,
+          apply: () =>
+            autoUpdater.setFeedURL({
+              provider: 'generic',
+              url: STORAGE_FEED.endsWith('/') ? STORAGE_FEED : `${STORAGE_FEED}/`
+            })
+        }
+      ]
+    : []),
+  // 3) GitHub 直连：墙外或有代理时最优（差量更新可用，旧版本资产按 tag 可达）
+  {
+    id: '',
+    apply: () =>
+      autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: REPO.split('/')[0],
+        repo: REPO.split('/')[1]
+      })
+  },
+  // 4) 镜像兜底：前缀代理完整 GitHub URL，releases/latest/download 被 302 到最新资产
+  ...['https://ghfast.top/', 'https://gh-proxy.com/'].map((prefix) => ({
+    id: prefix,
+    apply: () =>
+      autoUpdater.setFeedURL({
+        provider: 'generic',
+        url: `${prefix}https://github.com/${REPO}/releases/latest/download`
+      })
+  }))
 ]
 
 /** 渠道探测超时：国内对被墙端点通常是快速重置或长时间挂起，12s 足够分辨 */
@@ -53,7 +95,7 @@ const PROBE_TIMEOUT = 12_000
 
 let initialized = false
 /** 已验证可用的渠道；null = 尚未选定（下次检查时重新探测） */
-let activeChannel: string | null = null
+let activeChannel: Channel | null = null
 
 function currentStatus(state: UpdateStatusView['state'], extra: Partial<UpdateStatusView> = {}): UpdateStatusView {
   return { supported: initialized, state, currentVersion: app.getVersion(), ...extra }
@@ -81,31 +123,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   })
 }
 
-/** 切换到指定渠道。三种形态：对象存储 = 静态目录；直连 = github provider；镜像 = 前缀代理 */
-function applyChannel(channel: string): void {
-  if (channel === '') {
-    // setFeedURL 传 github provider 需要完整配置，等于 electron-builder.yml 的 publish 段
-    autoUpdater.setFeedURL({
-      provider: 'github',
-      owner: REPO.split('/')[0],
-      repo: REPO.split('/')[1]
-    })
-    return
-  }
-  if (channel === STORAGE_FEED) {
-    // 桶是普通静态目录：latest.yml 与安装包就在 URL 根下
-    autoUpdater.setFeedURL({
-      provider: 'generic',
-      url: channel.endsWith('/') ? channel : `${channel}/`
-    })
-    return
-  }
-  autoUpdater.setFeedURL({
-    provider: 'generic',
-    // 镜像是前缀代理：完整 GitHub URL 拼在前缀后面；
-    // releases/latest/download 会被 GitHub 302 到最新 release 的资产，镜像原样跟随
-    url: `${channel}https://github.com/${REPO}/releases/latest/download`
-  })
+function applyChannel(channel: Channel): void {
+  channel.apply()
 }
 
 /**
@@ -118,7 +137,7 @@ function applyChannel(channel: string): void {
 async function ensureChannel(): Promise<void> {
   if (activeChannel === null) {
     const saved = settings.get().updateChannel
-    activeChannel = CHANNELS.includes(saved) ? saved : null
+    activeChannel = CHANNELS.find((c) => c.id === saved) ?? null
   }
   if (activeChannel !== null) {
     applyChannel(activeChannel)
@@ -131,10 +150,10 @@ async function ensureChannel(): Promise<void> {
       await withTimeout(autoUpdater.checkForUpdates(), PROBE_TIMEOUT)
       activeChannel = channel
       // 渠道验证成本高（坏渠道要等满超时才换下一个），必须跨启动记住
-      void settings.set({ updateChannel: channel }).catch(() => undefined)
+      void settings.set({ updateChannel: channel.id }).catch(() => undefined)
       return
     } catch (error) {
-      failures.push(`${channel || '直连'}：${(error as Error).message?.slice(0, 80) ?? '未知错误'}`)
+      failures.push(`${channel.id || '直连'}：${(error as Error).message?.slice(0, 80) ?? '未知错误'}`)
     }
   }
   throw new Error(`所有更新渠道均不可达。${failures.join('；')}`)

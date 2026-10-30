@@ -1,92 +1,70 @@
 # 国内更新源配置指南
 
-> 目标：国内用户自动更新不超时、速度快，且差量更新（只下 5~15MB 而不是全量 105MB）真正生效。
-> 代码侧已全部就绪（`src/main/updater.ts` 的 `STORAGE_FEED` + `.github/workflows/build.yml` 的
-> 「Sync update files to COS」步骤），缺的只是一个对象存储桶和四个 secrets。
+> 目标：国内用户自动更新不超时、速度快。**主源 = GitCode（免费，已实测接线）**，
+> GitHub 直连与镜像作后备；对象存储是可选的差量更新增强（未配置）。
 
-## 一、为什么需要自建源
-
-| 渠道 | 直连 | 镜像（ghfast.top 等） | 对象存储 |
-| --- | --- | --- | --- |
-| 可用性 | 国内基本被墙 | 第三方公益反代，随时下线（`mirror.ghproxy.com` 已死） | 你自己的桶，SLA 由云厂商保证 |
-| 速度 | — | 不稳定 | CDN 级 |
-| 信任 | — | 可篡改 `latest.yml` 与安装包（sha512 校验拦不住一起改） | 自己的桶，无第三方 |
-| 差量更新 | ✓（能按版本取旧 blockmap） | **✗ 必然失败**，每次全量 105MB | **✓ 只下变化的字节** |
-
-差量失效的原因：electron-updater 要拿「上一个版本」的 blockmap 和安装包按 Range 请求旧字节。
-镜像渠道的基础 URL 是 `releases/latest/download/`，只指向最新版，旧文件 404 → 退化为全量。
-
-## 一点五、有没有免费的桶
-
-| 方案 | 免费额度 | 代价 | 国内可用性 |
-| --- | --- | --- | --- |
-| **Cloudflare R2** | 10GB 存储 + **出口流量免费** | 必须绑自定义域名才有稳定的公开读（域名一年约 ¥10~60）；`r2.dev` 测试域名有速率限制且国内常不可达 | 一般——CF 无国内节点、未备案，速度波动大；差量后只下 5~15MB，可接受 |
-| Cloudflare Workers 反代 | 10 万请求/天，零存储（流式转发 GitHub） | 同样要自定义域名；旧版本路径需要 Worker 做版本重写才能让差量生效 | 同上 |
-| 七牛 / 又拍云 | 七牛 10GB 存储 + 10GB 流量/月 | **自定义域名必须 ICP 备案**；测试域名会过期 | 快 |
-| 腾讯 COS / 阿里 OSS | 无长期免费，仅新用户试用 3~6 个月 | 差量生效后每次发布约 ¥5~15 流量费 | 最快、免域名（直接用桶默认域名） |
-
-**建议**：已经差量化之后，每次更新的流量只有 5~15MB，COS 一年成本大概率不到一顿饭钱；
-为省这点钱上 R2 反而要买域名、忍受 CF 的国内速度。**除非你本来就有域名**——那 R2 全免费，
-直接用。没有域名就选 COS，把「域名」这笔隐性成本省下来。
-
-### 为什么不用 Gitee 这类国内代码托管平台
-
-查证于 2026-10-30（Gitee 官方配额页）：release 附件**单文件上限 100MB**（GVP 项目 200MB），
-**单仓库附件总容量 1GB**（GVP 20GB）。本项目的 exe 是 110,343,945 B ≈ 110MB（105MiB）——
-超过单文件上限，免费版连一个安装包都放不下；就算项目评上 GVP（平台授予，不可申请），
-20GB 也只够放 100+ 个版本，且附件下载是否支持 Range（差量更新的前提）没有承诺。
-
-GitCode / 云效 Codeup / 华为 CodeArts 这类平台的「制品库」能存大文件，
-但那本质上就是对象存储套了个企业壳：要实名/企业账号、配置门槛更高，
-底层同样是云厂商的桶——不如直接用对象存储。**大文件分发在国内的事实标准就是对象存储**，
-这也是 electron、各 npm 二进制包都走镜像桶而不是代码托管平台的原因。
-
-## 二、你需要做的（一次性）
-
-1. **开通对象存储**（三选一）：
-   - 腾讯云 COS：`cos.<region>.myqcloud.com`，流量约 ¥0.5/GB，1000 用户一次更新约 ¥5~15；
-   - 阿里云 OSS：`<bucket>.oss-<region>.aliyuncs.com`，价格相近；
-   - Cloudflare R2：出口流量免费（10GB/月免费额度），需绑自定义域名。
-2. **创建桶**：
-   - 名称随意（如 `aurora-updates`），**地域选国内用户多的**（如上海/广州）；
-   - 读写权限设为「公有读、私有写」（electron-updater 不带凭据下载）；
-   - **只增不删**：CI 只上传，永不覆盖删除旧版本——旧版本的 exe 与 blockmap 是差量下载的数据源。
-3. **在 GitHub 仓库 Settings → Secrets and variables → Actions 配四个 secrets**：
-
-   | Secret 名 | 值 |
-   | --- | --- |
-   | `COS_SECRET_ID` | 云 API 密钥 SecretId（只授予该桶的读写权限） |
-   | `COS_SECRET_KEY` | 对应 SecretKey |
-   | `COS_BUCKET` | 桶全名（如 `aurora-updates-1250000000`） |
-   | `COS_REGION` | 地域（如 `ap-guangzhou`） |
-
-   **不要把密钥贴到对话或代码里。** 用子账号（CAM/ram）最小权限：只给这个桶的 `PutObject`/`GetObject`。
-4. **把桶的公开读地址告诉我**（如 `https://aurora-updates-1250000000.cos.ap-guangzhou.myqcloud.com`），
-   我把它填进 `src/main/updater.ts` 的 `STORAGE_FEED` 并发版——这一步之后国内用户自动优先走桶。
-
-## 三、生效后的行为
+## 一、当前架构（2026-10-30 落地）
 
 ```
-启动 30s 后静默检查：
-  1. settings.updateChannel 记着上次可用的渠道 → 直接用它，不探测（国内直连被墙时省 12s）
-  2. 没有记忆 → 按顺序探测：对象存储 → GitHub 直连 → 镜像 ×2
-  3. 第一个能拉到 latest.yml 的胜出，写回 settings
-  4. 渠道中途失效（error 事件）→ 清掉内存与 settings 里的记忆，下次重新探测
+探测顺序（src/main/updater.ts 的 CHANNELS）：
+  1. GitCode 主源  → gitcode.com/dxhklck/aurora_music/releases/download/stable/
+  2. 对象存储（可选，STORAGE_FEED 为空串时不启用）
+  3. GitHub 直连
+  4. ghfast.top / gh-proxy.com 镜像兜底
+
+首个能拉到 latest.yml 的胜出，跨启动记在 settings.updateChannel；
+渠道失效（error 事件）时清掉记忆重新探测。
 ```
 
-- 探测和下载走同一渠道：桶在但某个文件缺失时，错误会触发渠道重选。
-- CI 在 secrets 未配置时自动跳过同步步骤，GitHub Release 照常发布——可以先上代码后配桶。
-- 成本估算（差量生效后）：每次更新每用户约 5~15MB；1000 用户 ≈ 5~15GB ≈ COS ¥5~15 / R2 ¥0。
+CI（`build.yml` 的 publish-release job）每次发版做两件事：
+
+- **Sync update files to GitCode**：`scripts/publish-gitcode.mjs` 把
+  `latest.yml + exe + blockmap` 传到版本 release（tag=vX.Y.Z）与指针 release（tag=stable）；
+- **Mirror code to GitCode**：把 `origin/main` 与全部 tags 推到 GitCode 仓库作镜像。
+
+## 二、GitCode 上的实测结论（排坑实录，2026-10-30）
+
+| 事项 | 结论 |
+| --- | --- |
+| 附件下载 | `releases/download/<tag>/<file>` **可用**，匿名、无需登录 |
+| Range 请求 | **支持**（HTTP 206 + Content-Range），断点续传没问题 |
+| `releases/latest/download/<file>` 别名 | **不可用**：返回的是网页 HTML 而不是文件（只看状态码会误判，必须查内容） |
+| tag 名叫 `latest` | **不要用**：下载路由会把它解析成「当前 API latest」而不是固定 tag |
+| 同名附件重复上传 | **覆盖**而非新增（副本数不变），所以指针 release 可以安全地反复覆盖，无需删除重建 |
+| 删除 release | v5 API 无按 tag 删除端点（DELETE 返回 405），只能在网页上手动删 |
+| 创建 release | tag 不存在时会**自动创建 git tag**；`release_status: "pre"/"latest"` 可控制是否被 latest 选中 |
+| 附件上传 | `GET /releases/<tag>/upload_url?file_name=…` 拿预签名 OBS 地址，按返回 headers 原样 PUT |
+| 令牌 | git 推送用 `https://oauth2:<token>@gitcode.com/...`；API 用 `PRIVATE-TOKEN` 头 |
+
+**指针设计**：更新器固定拉 `stable` tag；CI 每次发版把三件套覆盖上传到 `stable` 与版本 release
+两处。`stable` release 标记为 `pre`，永远不抢占「最新版本」的显示位。
+
+## 三、一次性配置（已完成项打勾）
+
+- [x] GitCode 注册账号 `dxhklck`，建公开仓库 `aurora_music`
+- [x] 生成私人令牌（作用域 repo + api），本地存 `F:\aurora\.env.local`（已被 .gitignore 覆盖）
+- [ ] **把同一个令牌配到 GitHub 仓库 Secrets**：Settings → Secrets and variables → Actions →
+      New repository secret，名字 `GITCODE_TOKEN`。CI 的两个 GitCode 步骤都依赖它；
+      缺失时步骤会 `::error::` 失败（不影响 GitHub Release 本身）
+- [ ] 清理 GitCode 上的测试残留：网页上删除 `sync-test` 与 `latest` 两个 release（API 删不了）
 
 ## 四、验证清单
 
-配好桶并发版后，按顺序确认：
+下次发版（`v*` tag）后按序确认：
 
 ```bash
-# 1. CI 的「Sync update files to COS」步骤成功（或输出 notice 表示跳过）
-# 2. 桶里能看到 latest.yml / Aurora-Music-<v>-x64.exe / .blockmap
-curl -sL "https://<桶地址>/latest.yml" | head -3
-# 3. 应用端：设置页检查更新，首次会探测并记住渠道；settings.json 里出现
-#    "updateChannel": "https://<桶地址>"
-# 4. 差量验证：连发两个相邻版本后看第二次更新的下载量（应远小于安装包体积）
+# 1. CI「Sync update files to GitCode」步骤成功，输出「GitCode 同步完成」
+# 2. 指针内容已更新为新版本：
+curl -sL "https://gitcode.com/dxhklck/aurora_music/releases/download/stable/latest.yml" | head -3
+# 3. 应用端：settings.json 里出现 "updateChannel" 指向 stable 路径；
+#    设置页检查更新能发现新版本并完成下载
+# 4. 代码镜像：GitCode 仓库的 main 与 tags 与 GitHub 一致
 ```
+
+## 五、对象存储（可选的差量增强，未启用）
+
+差量更新（每次只下 5~15MB）只有「旧版本文件可达」的渠道才能生效。GitCode 指针与镜像
+的 URL 都只指向最新版，差量失败时 electron-updater 自动退化为全量（GitCode 全量也快，可接受）。
+若以后想启用差量：开一个公有读的 COS/OSS/R2 桶（只增不删），把桶地址填进
+`src/main/updater.ts` 的 `STORAGE_FEED`，再配四个 `COS_*` secrets——CI 的
+「Sync update files to COS」步骤会自动开始同步。详见 git 历史（`1e32d48`）中的完整说明。

@@ -184,3 +184,36 @@ jobs:
               "$f" "s3://$COS_BUCKET/$f"
           done
           echo "已同步到 s3://$COS_BUCKET/"
+
+      # 主更新源：同步到 GitCode。checkout（全量，含 tags）供脚本与代码镜像两步使用。
+      - name: Checkout for GitCode sync
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 主更新源：同步到 GitCode。
+      # 版本 release（tag=vX.Y.Z）放三件套供人下载；指针 release（tag=stable）
+      # 的同名附件每次被覆盖，应用更新器固定拉 releases/download/stable/<file>。
+      # 2026-10-30 实测：tag 路径匿名可下、Range 206；latest/download 别名返回 HTML 不可用。
+      - name: Sync update files to GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$GITCODE_TOKEN" ]; then
+            echo "::error::缺 GITCODE_TOKEN secret（GitCode 私人令牌），无法同步主更新源"
+            exit 1
+          fi
+          node scripts/publish-gitcode.mjs
+
+      # 代码镜像：main 与标签推到 GitCode（GitHub 仍是 CI 与主开发仓库，GitCode 为镜像备份）
+      - name: Mirror code to GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          if [ -z "$GITCODE_TOKEN" ]; then
+            echo "::error::缺 GITCODE_TOKEN secret，无法镜像代码"
+            exit 1
+          fi
+          git push "https://oauth2:$GITCODE_TOKEN@gitcode.com/dxhklck/aurora_music.git" "origin/main:main" --follow-tags
+          git push "https://oauth2:$GITCODE_TOKEN@gitcode.com/dxhklck/aurora_music.git" --tags

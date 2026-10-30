@@ -345,11 +345,11 @@ git tag v1.3.x ──▶ CI（三平台矩阵）
 范围刻意做小：仅 Windows 开启自动更新（NSIS 支持；macOS 未签名装不了更新包），
 失败静默；下载失败会附 `manualUrl`，设置页给「手动下载新版」入口。
 
-**国内加速与差量**：渠道列表最前面预留了对象存储源（`STORAGE_FEED`，见
-[update-feed-setup.md](./update-feed-setup.md)），桶是自建的静态目录，且 CI 只增不删地
-同步全部历史版本的 exe 与 blockmap——差量更新（每次只下 5~15MB）只有在这个渠道才能生效，
-镜像渠道的 `releases/latest/download` 拿不到旧版本文件，必然退化为全量。
-上次验证可用的渠道跨启动记在 `settings.updateChannel`，省掉每次启动 12s 的直连超时。
+**国内加速**：主源是 GitCode 指针 release（`releases/download/stable/`，CI 每次发版
+覆盖其中的三件套，见 [update-feed-setup.md](./update-feed-setup.md)），实测匿名可下且支持
+Range；GitHub 直连与 ghproxy 镜像降为后备。上次验证可用的渠道跨启动记在
+`settings.updateChannel`，省掉每次启动 12s 的直连超时。差量更新（只下变化的字节）
+需要旧版本文件可达，只有对象存储渠道能满足——未启用，GitCode 上差量失败会自动退化为全量。
 
 ---
 

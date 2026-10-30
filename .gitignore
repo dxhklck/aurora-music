@@ -19,3 +19,6 @@ build/android/
 
 # TS 引擎验证脚本的临时产物
 scripts/engine-ts/.build/
+
+# 本地密钥（GitCode 私人令牌等），永不入库
+.env*
