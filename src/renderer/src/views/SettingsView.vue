@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import { useAppStore } from '../stores/app'
 import { useDownloadStore } from '../stores/download'
@@ -13,6 +14,7 @@ import type { Quality } from '@shared/types'
 const app = useAppStore()
 const download = useDownloadStore()
 const library = useLibraryStore()
+const router = useRouter()
 
 const engine = ref<EngineStatusView | null>(null)
 const probing = ref(false)
@@ -875,6 +877,9 @@ onBeforeUnmount(() => {
         <div class="author-actions">
           <button class="btn" @click="openBilibili">
             <Icon name="play_circle" :size="14" /> 去 B 站找我
+          </button>
+          <button class="btn" @click="router.push('/guide')">
+            <Icon name="info" :size="14" /> 使用指南
           </button>
           <button class="btn" :disabled="checkingUpdate" @click="checkUpdate">
             <Icon name="download" :size="14" /> {{ checkingUpdate ? '检查中…' : '检查更新' }}

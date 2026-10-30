@@ -462,7 +462,8 @@ source → b0 → b1 → b2 → b3 → b4 → gain → destination
 - **App.vue** 负责外壳与全局副作用：启动装配、全局键盘（空格播放暂停、`L` 歌词舞台、方向键快进/快退与调音量、`Shift+方向键` 切歌）、歌词状态推送、Toast 监听；
 - **stores** 七个：`app`（音源+设置+Toast+歌词窗口开关）、`player`（队列+播放+歌词+睡眠定时与歌词偏移）、`search`、`download`、`library`（索引+筛选/排序+批量操作）、`playlists`、`stats`（收听次数与每日时长，存 localStorage）；
 - **视觉**：`--accent` / `--accent-2` 由当前音源主题色注入，页面顶部有动态光斑；封面缺失时按 id 哈希生成渐变；
-- **动效**：路由 `fade + translate`、歌词舞台 `scale + fade`、黑胶 20s 匀速旋转（`animation-play-state` 随播放暂停）、播放条封面 hover 蒙层。
+- **动效**：路由 `fade + translate`、歌词舞台 `scale + fade`、黑胶 20s 匀速旋转（`animation-play-state` 随播放暂停）、播放条封面 hover 蒙层；
+- **应用内指南**：`data/guide.ts` 是纯数据（分节 + 问答 / 步骤 / 快捷键），`GuideView.vue` 只负责前端过滤、`<mark>` 高亮、目录滚动联动与 `?s=` 深链；入口在标题栏、设置「关于」与 `F1`，不联网。`F1` 会先收起歌词舞台、退出迷你态，否则页面被浮层挡住。
 
 ---
 

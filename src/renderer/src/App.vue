@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import TitleBar from './components/TitleBar.vue'
 import SideBar from './components/SideBar.vue'
 import PlayerBar from './components/PlayerBar.vue'
@@ -23,6 +24,7 @@ const player = usePlayerStore()
 const download = useDownloadStore()
 const library = useLibraryStore()
 const playlists = usePlaylistStore()
+const router = useRouter()
 
 let lyricTimer = 0
 let offSettings: (() => void) | null = null
@@ -89,8 +91,21 @@ function pushTrayState(): void {
   window.api.pushTrayState(state)
 }
 
+/** 打开使用指南：先收掉会盖住页面的东西——歌词舞台是全屏浮层，迷你态没有路由容器 */
+function openGuide(): void {
+  if (player.showNowPlaying) player.showNowPlaying = false
+  if (app.settings?.miniMode) void app.patchSettings({ miniMode: false })
+  void router.push('/guide')
+}
+
 function onKey(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null
+  // F1 在输入框里也响应：查指南时不该先让用户点一下空白处
+  if (event.key === 'F1') {
+    event.preventDefault()
+    openGuide()
+    return
+  }
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
   if (event.code === 'Space') {
     // 焦点在按钮上时把空格留给按钮自身激活：否则点了「收起」再按空格，

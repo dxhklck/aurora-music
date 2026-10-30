@@ -21,6 +21,7 @@ export const router = createRouter({
       props: true
     },
     { path: '/downloads', name: 'downloads', component: () => import('./views/DownloadsView.vue') },
+    { path: '/guide', name: 'guide', component: () => import('./views/GuideView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') }
   ]
 })

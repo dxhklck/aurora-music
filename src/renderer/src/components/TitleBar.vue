@@ -61,6 +61,10 @@ async function toggleDesktopLyric(): Promise<void> {
   // 静默开关：不弹任何提示（歌词窗口自身的开启/关闭就是反馈）
   await window.api.toggleLyricWindow()
 }
+
+function openGuide(): void {
+  void router.push('/guide')
+}
 </script>
 
 <template>
@@ -103,6 +107,10 @@ async function toggleDesktopLyric(): Promise<void> {
 
     <button class="icon-btn no-drag" title="迷你播放器" @click="app.patchSettings({ miniMode: true })">
       <Icon name="expand" :size="17" />
+    </button>
+
+    <button class="icon-btn no-drag" title="使用指南（F1）" @click="openGuide">
+      <Icon name="info" :size="17" />
     </button>
 
     <div class="win-controls no-drag">

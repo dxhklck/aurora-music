@@ -71,6 +71,7 @@ const ICONS: Record<string, IconDef> = {
   equalizer: { paths: ['M6 4v16M12 4v16M18 4v16', 'M4 9h4M10 15h4M16 7h4'], fill: false },
   lock: { paths: ['M6 10.5h12V20H6z', 'M9 10.5V7.5a3 3 0 0 1 6 0v3'], fill: false },
   unlock: { paths: ['M6 10.5h12V20H6z', 'M9 10.5V7.5a3 3 0 0 1 5.6-1.6'], fill: false },
+  info: { paths: ['M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z', 'M12 11v5', 'M12 8.1v.01'], fill: false },
   settings: { paths: ['M4 7.5h7M15.5 7.5H20', 'M4 16.5h4.5M13 16.5h7', 'M13.2 5.2v4.6', 'M10.8 14.2v4.6'], fill: false }
 }
 
