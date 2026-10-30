@@ -24,7 +24,11 @@ import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 
-const API = 'https://api.gitcode.com/api/v5'
+// 双域名：api.gitcode.com 与 api.atomgit.com 同后端（官方说明数据互通）。
+// GitHub Actions 的美国 runner 实测连不上 api.gitcode.com（fetch failed，疑似屏蔽海外云 IP），
+// 备用域名多一条路；两个都失败时报错要带全原因。
+const API_HOSTS = ['https://api.gitcode.com/api/v5', 'https://api.atomgit.com/api/v5']
+const API = API_HOSTS[0]
 const REPO = process.env.REPO || 'dxhklck/aurora_music'
 const TAG = process.env.TAG
 const TOKEN = process.env.GITCODE_TOKEN
@@ -47,7 +51,7 @@ function fail(message) {
   process.exit(1)
 }
 
-async function api(pathname, init = {}) {
+async function apiOnce(pathname, init = {}) {
   const res = await fetch(`${API}${pathname}`, {
     ...init,
     headers: { 'PRIVATE-TOKEN': TOKEN, ...(init.headers ?? {}) }
@@ -55,6 +59,23 @@ async function api(pathname, init = {}) {
   const text = await res.text()
   if (!res.ok) throw new Error(`HTTP ${res.status} ${pathname}: ${text.slice(0, 200)}`)
   return text ? JSON.parse(text) : null
+}
+
+/** API 调用：双域名各试一轮 + 每域名重试 2 次。网络层失败（fetch failed）与 5xx 都值得重试 */
+async function api(pathname, init = {}) {
+  let lastError
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    if (attempt > 1) await new Promise((r) => setTimeout(r, 4000))
+    const host = API_HOSTS[(attempt - 1) % API_HOSTS.length]
+    try {
+      return await apiOnce(pathname, init)
+    } catch (error) {
+      lastError = error
+      const cause = error.cause ? `（${error.cause.code || error.cause.message}）` : ''
+      console.log(`API 第 ${attempt} 次失败 [${host}]: ${String(error.message).slice(0, 100)}${cause}`)
+    }
+  }
+  throw new Error(`API 连续 6 次失败 ${pathname}: ${lastError}`)
 }
 
 async function ensureRelease(tag, { pointer = false } = {}) {
@@ -88,10 +109,12 @@ async function ensureRelease(tag, { pointer = false } = {}) {
 /** 删除旧附件记录：同 (tag, 文件名) 重复上传时，平台只会保留【第一次】的对象——
  *  后续 PUT 返回成功但下载内容不变（2026-10-30 实测：v1.3.6/latest.yml 传了 0.0.0
  *  再传 1.3.6，下载仍是 0.0.0）。所以「覆盖」必须先 DELETE 附件再重新上传。 */
-async function deleteStaleAssets(tag, names) {
+async function deleteStaleAssets(tag, names, purgeAllAttach = false) {
   const rel = await api(`/repos/${REPO}/releases/tags/${tag}`)
   for (const asset of rel.assets ?? []) {
-    if (!names.includes(asset.name) || asset.type !== 'attach') continue
+    if (asset.type !== 'attach') continue
+    // 指针 release：清掉所有历史版本附件，只留本轮要传的三个
+    if (!purgeAllAttach && !names.includes(asset.name)) continue
     const res = await fetch(`${API}/repos/${REPO}/releases/${tag}/attach_files/${asset.id}`, {
       method: 'DELETE',
       headers: { 'PRIVATE-TOKEN': TOKEN }
@@ -166,8 +189,10 @@ try {
 
   // 版本 release 与指针 release 各放一份；同名附件必须先删旧记录再传
   // （直接重复 PUT 不会更新内容，见 deleteStaleAssets 的注释）
+  // 指针 release 额外清掉旧版本命名的附件（1.3.6 的 exe 不会匹配 1.3.7 的文件名清单，
+  // 不清就会逐版堆积——v1.3.7 首跑后 stable 里就同时躺着 1.3.6 与 1.3.7 两套）
   for (const tag of [TAG, POINTER_TAG]) {
-    await deleteStaleAssets(tag, assets)
+    await deleteStaleAssets(tag, assets, tag === POINTER_TAG)
   }
   for (const name of assets) {
     const absPath = path.join(DIR, name)

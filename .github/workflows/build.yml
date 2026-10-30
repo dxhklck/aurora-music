@@ -195,7 +195,11 @@ jobs:
       # 版本 release（tag=vX.Y.Z）放三件套供人下载；指针 release（tag=stable）
       # 的同名附件每次被覆盖，应用更新器固定拉 releases/download/stable/<file>。
       # 2026-10-30 实测：tag 路径匿名可下、Range 206；latest/download 别名返回 HTML 不可用。
+      # continue-on-error：GitHub 美国 runner 到 GitCode 的连通性不可控（实测 fetch failed），
+      # 同步失败只告警不红——发布主体（GitHub Release）已在前面完成，GitCode 侧可由
+      # 本机手动补跑 scripts/publish-gitcode.mjs 兜底（见 docs/update-feed-setup.md）。
       - name: Sync update files to GitCode
+        continue-on-error: true
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -208,6 +212,7 @@ jobs:
 
       # 代码镜像：main 与标签推到 GitCode（GitHub 仍是 CI 与主开发仓库，GitCode 为镜像备份）
       - name: Mirror code to GitCode
+        continue-on-error: true
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
