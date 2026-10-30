@@ -184,9 +184,12 @@ onMounted(async () => {
   onBeforeUnmount(() => window.removeEventListener('click', onWinClick))
   window.addEventListener('mousemove', onDragMove)
   window.addEventListener('mouseup', onDragEnd)
+  // mouseup 丢在窗口外时不会再派发，失焦作为兜底结束拖动（主进程另有超时保护）
+  window.addEventListener('blur', onDragEnd)
   onBeforeUnmount(() => {
     window.removeEventListener('mousemove', onDragMove)
     window.removeEventListener('mouseup', onDragEnd)
+    window.removeEventListener('blur', onDragEnd)
   })
   raf = requestAnimationFrame(tick)
   document.body.classList.add('lyric-body')
