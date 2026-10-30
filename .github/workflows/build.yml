@@ -57,9 +57,19 @@ jobs:
           # 有证书就签名，没有就跳过（CI 不因此失败）
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.signing.outputs.enabled }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx --yes electron-builder --publish never
+        shell: bash
+        run: |
+          # 未配置证书时 secrets 会求值成空串，而 electron-builder 只在 Windows 侧判断
+          # `cscLink === ""`，macOS 会拿空串当证书路径去解析并直接失败。
+          # 这里必须把变量彻底 unset，不能只是留空。
+          if [ "$SIGNING_ENABLED" != "true" ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+            echo "未配置签名证书，本次产物不做签名"
+          fi
+          npx --yes electron-builder --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
