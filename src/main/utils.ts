@@ -9,6 +9,34 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
+/**
+ * remote 是否比 current 新（自动更新用）。
+ *
+ * 为什么不写 `remote !== current`：两个更新源（GitCode / GitHub）的 latest.yml
+ * 不保证同时更新。若当前源还停在旧版本，字符串不等会判成「发现新版本 v1.3.9」，
+ * 用户点下去等于降级。必须按版本号逐段比大小。
+ *
+ * 不追求 semver 全语义（本项目不发预发布版）：逐段取数字，缺位按 0，
+ * `1.3.10` 要大于 `1.3.9`（字符串比较会判反）。`-beta.1` 这类后缀按同版本处理。
+ */
+export function isNewerVersion(remote: string, current: string): boolean {
+  const parse = (value: string): number[] =>
+    value
+      .trim()
+      .replace(/^v/i, '')
+      .split(/[.+-]/)
+      .slice(0, 3)
+      .map((part) => Number.parseInt(part, 10) || 0)
+  const next = parse(remote)
+  const now = parse(current)
+  for (let i = 0; i < 3; i += 1) {
+    const left = next[i] ?? 0
+    const right = now[i] ?? 0
+    if (left !== right) return left > right
+  }
+  return false
+}
+
 /** 文件名非法字符（跨平台）+ 保留名 */
 const ILLEGAL = /[\\/:*?"<>|\u0000-\u001f]/g
 

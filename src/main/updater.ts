@@ -4,6 +4,7 @@ import { IPC } from '@shared/ipc'
 import type { UpdateStatusView } from '@shared/api'
 import { markQuitting } from './tray'
 import { settings } from './services/settings'
+import { isNewerVersion } from './utils'
 
 /**
  * 自动更新（electron-updater）。
@@ -237,7 +238,12 @@ export async function checkForUpdate(): Promise<UpdateStatusView> {
     await ensureChannel()
     const result = await autoUpdater.checkForUpdates()
     const version = result?.updateInfo?.version
-    if (version && version !== app.getVersion()) return currentStatus('available', { version })
+    // 必须用版本号比较，不能写 `version !== app.getVersion()`：
+    // GitCode 与 GitHub 的 latest.yml 不保证同时更新，落后的一端会让本来
+    // 「已是最新」的用户看到「发现新版本 v1.3.9」，点下去等于降级。
+    if (version && isNewerVersion(version, app.getVersion())) {
+      return currentStatus('available', { version })
+    }
     return currentStatus('none')
   } catch (error) {
     return failureStatus(error)
