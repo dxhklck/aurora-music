@@ -118,6 +118,11 @@ export const IPC = {
   lyricWindowDragStart: 'lyric-window:drag-start',
   lyricWindowDragMove: 'lyric-window:drag-move',
   lyricWindowDragEnd: 'lyric-window:drag-end',
+  // 右下角专用拉伸把手：窗口本身不可缩放（否则按下会被系统判成边缘缩放，
+  // 表现为「按住不动窗口一直变大」），尺寸只能从这里改
+  lyricWindowResizeStart: 'lyric-window:resize-start',
+  lyricWindowResizeMove: 'lyric-window:resize-move',
+  lyricWindowResizeEnd: 'lyric-window:resize-end',
   // 锁定态悬停：穿透窗口只转发 mousemove，渲染层据此通知主进程临时恢复交互
   lyricWindowHover: 'lyric-window:hover',
 

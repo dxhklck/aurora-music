@@ -225,6 +225,10 @@ export interface AuroraApi {
   dragLyricWindow(): void
   moveLyricWindow(dx: number, dy: number): void
   endLyricWindowDrag(): void
+  /** 右下角拉伸把手：dw/dh 为光标位移，主进程按最小尺寸与工作区夹取 */
+  startLyricResize(): void
+  resizeLyricWindow(dw: number, dh: number): void
+  endLyricResize(): void
   pushLyricState(state: unknown): void
   /** 读取当前桌面歌词形态 */
   getLyricMode(): Promise<'mini' | 'full'>

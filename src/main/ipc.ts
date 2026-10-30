@@ -44,7 +44,10 @@ import {
   emitVolumeChanged,
   lyricDragStart,
   lyricDragMove,
-  lyricDragEnd
+  lyricDragEnd,
+  lyricResizeStart,
+  lyricResizeMove,
+  lyricResizeEnd
 } from './windows'
 
 function handle(channel: string, fn: (...args: any[]) => unknown): void {
@@ -407,6 +410,10 @@ export function registerIpc(): void {
   on(IPC.lyricWindowDragStart, () => lyricDragStart())
   on(IPC.lyricWindowDragMove, (dx: number, dy: number) => lyricDragMove(dx, dy))
   on(IPC.lyricWindowDragEnd, () => lyricDragEnd())
+  // 右下角把手拉伸：窗口不可缩放，尺寸只从这里改
+  on(IPC.lyricWindowResizeStart, () => lyricResizeStart())
+  on(IPC.lyricWindowResizeMove, (dw: number, dh: number) => lyricResizeMove(dw, dh))
+  on(IPC.lyricWindowResizeEnd, () => lyricResizeEnd())
 }
 
 function broadcastSettings(next: AppSettings): void {

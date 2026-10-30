@@ -98,20 +98,46 @@ let dragStartY = 0
 function onDragStart(e: MouseEvent): void {
   if (e.button !== 0) return
   if (locked.value) return
-  // 按钮和右键菜单上按下不触发拖拽
-  if ((e.target as HTMLElement | null)?.closest('button, .ctx-menu')) return
+  // 按钮、右键菜单、拉伸把手上按下不触发拖拽
+  if ((e.target as HTMLElement | null)?.closest('button, .ctx-menu, .resize-grip')) return
   dragging = true
   dragStartX = e.screenX
   dragStartY = e.screenY
   window.api.dragLyricWindow()
 }
 
+/* ---------------- 右下角拉伸 ----------------
+   窗口在拖动期间是 resizable:false（否则按下会被系统判成边缘缩放），
+   尺寸只能从这个显式把手改，避免误触。 */
+let resizing = false
+let resizeStartX = 0
+let resizeStartY = 0
+
+function onResizeStart(e: MouseEvent): void {
+  if (e.button !== 0) return
+  if (locked.value) return
+  e.preventDefault()
+  resizing = true
+  resizeStartX = e.screenX
+  resizeStartY = e.screenY
+  window.api.startLyricResize()
+}
+
 function onDragMove(e: MouseEvent): void {
+  if (resizing) {
+    window.api.resizeLyricWindow(e.screenX - resizeStartX, e.screenY - resizeStartY)
+    return
+  }
   if (!dragging) return
   window.api.moveLyricWindow(e.screenX - dragStartX, e.screenY - dragStartY)
 }
 
 function onDragEnd(): void {
+  if (resizing) {
+    resizing = false
+    window.api.endLyricResize()
+    return
+  }
   if (!dragging) return
   dragging = false
   window.api.endLyricWindowDrag()
@@ -229,6 +255,14 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
     <button class="close-float" title="关闭桌面歌词" @click="close">
       <Icon name="close" :size="13" />
     </button>
+
+    <!-- 右下角拉伸把手：窗口本身不可缩放，尺寸只能从这里改（悬停才出现） -->
+    <div
+      class="resize-grip"
+      title="拖动调整歌词窗大小"
+      @mousedown.stop="onResizeStart"
+      @click.stop
+    />
 
     <div class="content">
       <p v-if="!current" class="placeholder">
@@ -416,6 +450,39 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   opacity: 1;
   background: var(--ly-tool-hover-bg);
   color: var(--ly-ctrl-hover-fg);
+}
+
+/* 右下角拉伸把手：平时隐形（也不吃点击），悬停时浮出两道斜线示意可拉伸。
+   窗口本身不可缩放，尺寸只能从这里改，避免「按住窗口就被系统拉大」。 */
+.resize-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--ly-fg-3);
+  cursor: nwse-resize;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.resize-grip::before {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 9px;
+  height: 9px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  border-radius: 0 0 3px 0;
+}
+.lyric-window:hover .resize-grip {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+.resize-grip:hover {
+  opacity: 1;
 }
 
 .content {

@@ -5,6 +5,7 @@ import { IPC } from '@shared/ipc'
 import type { MiniVolumeState } from '@shared/types'
 import { trayReady, isQuitting } from './tray'
 import { settings } from './services/settings'
+import { clamp } from './utils'
 
 let mainWindow: BrowserWindow | null = null
 let lyricWindow: BrowserWindow | null = null
@@ -509,7 +510,12 @@ export function createLyricWindow(mode: LyricMode = lyricMode): BrowserWindow {
     transparent: true,
     backgroundColor: '#00000000',
     hasShadow: false,
-    resizable: true,
+    // 故意不可缩放：Windows 会给可缩放的无边框窗加一圈约 8px 的隐形缩放边框，
+    // 按在那圈上事件直接进系统（光标变成禁止符），我们既收不到 mousedown，
+    // 系统还会把窗口一路拉大。尺寸改由右下角把手调（见 lyricResizeMove）。
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
@@ -617,9 +623,9 @@ export function setLyricLocked(locked: boolean): void {
 export function setLyricHover(hover: boolean): void {
   if (!lyricWindow || lyricWindow.isDestroyed()) return
   if (!settings.get().desktopLyricLocked) return
-  // 拖动中不动穿透状态：一旦切回穿透，mousemove/mouseup 会被掐断，
-  // 拖动会卡在半路（按钮按着但收不到松手），个别系统还会把按下判成窗口拖拽
-  if (dragOrigin) return
+  // 拖动/拉伸中不动穿透状态：一旦切回穿透，mousemove/mouseup 会被掐断，
+  // 手势会卡在半路（按钮按着但收不到松手），个别系统还会把按下判成窗口拖拽
+  if (dragOrigin || resizeOrigin) return
   try {
     lyricWindow.setIgnoreMouseEvents(!hover, { forward: true })
   } catch {
@@ -677,14 +683,8 @@ export function lyricDragStart(): void {
   const { x, y, width, height } = lyricWindow.getBounds()
   const point = screen.getCursorScreenPoint()
   dragOrigin = { winX: x, winY: y, width, height, cursorX: point.x, cursorY: point.y }
-  // 按住期间直接没收「可缩放」：透明无边框窗口在部分 Windows 组合下，按下会被
-  // 判成边缘拉伸（光标显示为禁止符），宽高一路变大。先关掉缩放能力最稳妥，
-  // 松手再打开——正常拉伸不受影响。
-  try {
-    lyricWindow.setResizable(false)
-  } catch {
-    /* 平台不支持时忽略，靠 pinDragSize 兜底 */
-  }
+  // 窗口本身不可缩放，按下不会再被系统判成边缘拉伸；这里再钉一道尺寸，
+  // 防止将来有人把 resizable 打开后旧问题复现。
   // 兜底：mouseup 若丢在窗口外（拖到别处松手），尺寸锁会一直生效，
   // 后续手动拉伸就会被反复掰回。给个超时自己失效。
   if (dragWatchdog) clearTimeout(dragWatchdog)
@@ -696,16 +696,9 @@ export function lyricDragStart(): void {
 
 let dragWatchdog: NodeJS.Timeout | null = null
 
-/** 收尾：解除尺寸锁与缩放限制。正常松手和超时兜底共用同一条出口 */
+/** 收尾：解除尺寸锁。正常松手和超时兜底共用同一条出口 */
 function finishDrag(): void {
   dragOrigin = null
-  if (lyricWindow && !lyricWindow.isDestroyed()) {
-    try {
-      lyricWindow.setResizable(true)
-    } catch {
-      /* 忽略 */
-    }
-  }
 }
 
 export function lyricDragMove(dx: number, dy: number): void {
@@ -726,6 +719,44 @@ export function lyricDragEnd(): void {
     dragWatchdog = null
   }
   finishDrag()
+}
+
+/* ---------------- 右下角专用拉伸把手 ----------------
+   窗口创建时就设了 resizable:false（否则按下会被系统判成边缘缩放，表现为
+   「按住不动窗口一直变大」）。尺寸因此只能从这个显式把手改：
+   起点记窗口矩形，移动时按光标位移算新宽高，再按当前形态的最小尺寸与屏幕工作区夹取。 */
+let resizeOrigin: { x: number; y: number; width: number; height: number } | null = null
+
+export function lyricResizeStart(): void {
+  if (!lyricWindow || lyricWindow.isDestroyed()) return
+  // 两套手势互斥：开始拉伸就丢掉移动起点，避免同一帧里既移动又改尺寸
+  dragOrigin = null
+  const b = lyricWindow.getBounds()
+  resizeOrigin = { x: b.x, y: b.y, width: b.width, height: b.height }
+}
+
+export function lyricResizeMove(dw: number, dh: number): void {
+  if (!lyricWindow || lyricWindow.isDestroyed() || !resizeOrigin) return
+  const box = LYRIC_BOUNDS[lyricMode]
+  const area = screen.getDisplayMatching({
+    x: resizeOrigin.x,
+    y: resizeOrigin.y,
+    width: resizeOrigin.width,
+    height: resizeOrigin.height
+  }).workArea
+  // 迷你条是单行布局，高度锁死；大字模式可自由拉高，上限不超过工作区
+  const maxHeight = lyricMode === 'mini' ? box.minHeight : area.height
+  const width = clamp(resizeOrigin.width + dw, box.minWidth, area.width)
+  const height = clamp(resizeOrigin.height + dh, box.minHeight, maxHeight)
+  try {
+    lyricWindow.setBounds({ x: resizeOrigin.x, y: resizeOrigin.y, width, height })
+  } catch {
+    /* 个别平台不支持运行时改尺寸，忽略 */
+  }
+}
+
+export function lyricResizeEnd(): void {
+  resizeOrigin = null
 }
 
 export const platformFlags = { isMac, isLinux }
