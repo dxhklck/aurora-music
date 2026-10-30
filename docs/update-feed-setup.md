@@ -30,7 +30,7 @@ CI（`build.yml` 的 publish-release job）每次发版做两件事：
 | Range 请求 | **支持**（HTTP 206 + Content-Range），断点续传没问题 |
 | `releases/latest/download/<file>` 别名 | **不可用**：返回的是网页 HTML 而不是文件（只看状态码会误判，必须查内容） |
 | tag 名叫 `latest` | **不要用**：下载路由会把它解析成「当前 API latest」而不是固定 tag |
-| 同名附件重复上传 | **覆盖**而非新增（副本数不变），所以指针 release 可以安全地反复覆盖，无需删除重建 |
+| 同名附件重复上传 | **不生效**：PUT 返回成功但下载内容钉死在第一次（v1.3.6 实测：先传 0.0.0 再传 1.3.6，下载仍是 0.0.0）。必须先 `DELETE /releases/{tag}/attach_files/{id}` 删旧记录再传——publish-gitcode.mjs 已内置「先删后传 + sha256 内容校验」 |
 | 删除 release | v5 API 无按 tag 删除端点（DELETE 返回 405），只能在网页上手动删 |
 | 创建 release | tag 不存在时会**自动创建 git tag**；`release_status: "pre"/"latest"` 可控制是否被 latest 选中 |
 | 附件上传 | `GET /releases/<tag>/upload_url?file_name=…` 拿预签名 OBS 地址，按返回 headers 原样 PUT |

@@ -22,6 +22,7 @@
 import fsSync from 'node:fs'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 
 const API = 'https://api.gitcode.com/api/v5'
 const REPO = process.env.REPO || 'dxhklck/aurora_music'
@@ -84,6 +85,24 @@ async function ensureRelease(tag, { pointer = false } = {}) {
   }
 }
 
+/** 删除旧附件记录：同 (tag, 文件名) 重复上传时，平台只会保留【第一次】的对象——
+ *  后续 PUT 返回成功但下载内容不变（2026-10-30 实测：v1.3.6/latest.yml 传了 0.0.0
+ *  再传 1.3.6，下载仍是 0.0.0）。所以「覆盖」必须先 DELETE 附件再重新上传。 */
+async function deleteStaleAssets(tag, names) {
+  const rel = await api(`/repos/${REPO}/releases/tags/${tag}`)
+  for (const asset of rel.assets ?? []) {
+    if (!names.includes(asset.name) || asset.type !== 'attach') continue
+    const res = await fetch(`${API}/repos/${REPO}/releases/${tag}/attach_files/${asset.id}`, {
+      method: 'DELETE',
+      headers: { 'PRIVATE-TOKEN': TOKEN }
+    })
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`DELETE ${tag}/${asset.name}（id=${asset.id}）: HTTP ${res.status}`)
+    }
+    console.log(`已删除旧附件 ${tag}/${asset.name}（id=${asset.id}）`)
+  }
+}
+
 async function uploadOnce(tag, file, absPath) {
   const up = await api(`/repos/${REPO}/releases/${tag}/upload_url?file_name=${encodeURIComponent(file)}`)
   const body = new Uint8Array(await readFile(absPath))
@@ -111,34 +130,54 @@ async function upload(tag, file, absPath) {
   throw lastError
 }
 
-async function verify(tag, wanted) {
+async function verify(tag, wanted, localFiles) {
   const rel = await api(`/repos/${REPO}/releases/tags/${tag}`)
   const names = (rel.assets ?? []).map((a) => a.name)
   const missing = wanted.filter((a) => !names.includes(a))
   if (missing.length) {
     fail(`::error::${tag} 回查缺失: ${missing.join(', ')}（资产列表: ${names.join(', ')}）`)
   }
+  // 内容级校验：平台记录的 sha256 必须与本地文件一致——「同名覆盖」不生效的教训
+  // 就是记录对但内容旧，只对名字发现不了
+  for (const asset of rel.assets ?? []) {
+    const absPath = localFiles.get(asset.name)
+    if (!absPath || asset.type !== 'attach' || !asset.digest) continue
+    const expect = 'sha256:' + createHash('sha256').update(await readFile(absPath)).digest('hex')
+    if (asset.digest !== expect) {
+      fail(`::error::${tag}/${asset.name} 内容校验失败：平台 ${asset.digest.slice(0, 20)}… ≠ 本地 ${expect.slice(0, 20)}…`)
+    }
+  }
 }
 
-const assets = fsSync.readdirSync(DIR).filter((name) => SYNC_FILES.some((re) => re.test(name)))
+// 顶层统一兜底：任何异常都必须带着原因进 ::error:: 注解——发布 job 没有日志权限，
+// 注解是排障的唯一通道（v1.3.5 首跑就因未捕获异常静默退化为 exit 1 而无法定位）。
+let assets
+try {
+  assets = fsSync.readdirSync(DIR).filter((name) => SYNC_FILES.some((re) => re.test(name)))
+} catch (error) {
+  fail(`::error::读取资产目录 ${DIR} 失败：${String(error).slice(0, 200)}`)
+}
 if (!assets.length) fail(`::error::${DIR} 下没有匹配的更新资产`)
 console.log('待同步:', assets.join(', '))
 
-// 顶层统一兜底：任何异常都必须带着原因进 ::error:: 注解——发布 job 没有日志权限，
-// 注解是排障的唯一通道（v1.3.5 首跑就因未捕获 401 静默退化为 exit 1 而无法定位）。
 try {
   await ensureRelease(TAG)
   await ensureRelease(POINTER_TAG, { pointer: true })
 
-  // 版本 release 与指针 release 各放一份；同名重复上传是覆盖，重跑安全
+  // 版本 release 与指针 release 各放一份；同名附件必须先删旧记录再传
+  // （直接重复 PUT 不会更新内容，见 deleteStaleAssets 的注释）
+  for (const tag of [TAG, POINTER_TAG]) {
+    await deleteStaleAssets(tag, assets)
+  }
   for (const name of assets) {
     const absPath = path.join(DIR, name)
     await upload(TAG, name, absPath)
     await upload(POINTER_TAG, name, absPath)
   }
 
-  await verify(TAG, assets)
-  await verify(POINTER_TAG, assets)
+  const localFiles = new Map(assets.map((name) => [name, path.join(DIR, name)]))
+  await verify(TAG, assets, localFiles)
+  await verify(POINTER_TAG, assets, localFiles)
   console.log('GitCode 同步完成')
 } catch (error) {
   fail(`::error::GitCode 同步失败：${String(error).slice(0, 500)}`)
