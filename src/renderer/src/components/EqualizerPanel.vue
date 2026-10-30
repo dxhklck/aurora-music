@@ -4,13 +4,22 @@ import { useAppStore } from '../stores/app'
 import { EQ_BANDS, EQ_MAX_GAIN, wave } from '../core/wave'
 
 /**
- * 五段图形均衡器。
+ * 五段图形均衡器 + 内置预设。
  *
  * 数据流很直白：拖动 → 立刻改音频图（要听见）→ 松手才落盘（别每像素写一次 settings.json）。
  * 参数在音频图未挂接时也能设置：wave 内部会缓存，等第一次打开播放舞台时一起生效。
  */
 
 const app = useAppStore()
+
+/** 内置预设（dB，按 EQ_BANDS 顺序 60/230/910/3600/14000）。夜间档附带动态压缩 */
+const PRESETS: Array<{ name: string; gains: number[] }> = [
+  { name: '流行', gains: [2, 0, -1.5, 1.5, 2.5] },
+  { name: '摇滚', gains: [4.5, 2, -2, 3, 3.5] },
+  { name: '人声', gains: [-2.5, -1, 4, 2.5, -1.5] },
+  { name: '低音', gains: [6.5, 4.5, 0.5, -1, -2] },
+  { name: '夜间', gains: [2, 1.5, -0.5, -2, -4.5] }
+]
 
 function initialGains(): number[] {
   const saved = app.settings?.equalizer?.gains
@@ -22,7 +31,14 @@ function initialGains(): number[] {
 
 const gains = ref<number[]>(initialGains())
 const enabled = ref(app.settings?.equalizer?.enabled === true)
+/** 夜间限幅（动态压缩）。跟「夜间」预设绑定，也随设置持久化 */
+const night = ref(app.settings?.equalizer?.night === true)
 const flat = computed(() => gains.value.every((value) => value === 0))
+
+/** 当前增益是否命中某个预设（容差 0.25，浮点/滑杆步进损耗下也能认出来） */
+const activePreset = computed(() =>
+  PRESETS.find((preset) => preset.gains.every((value, index) => Math.abs(value - gains.value[index]) <= 0.25))
+)
 
 function label(freq: number): string {
   if (freq < 1000) return String(freq)
@@ -37,7 +53,7 @@ function onInput(index: number, event: Event): void {
 }
 
 function commit(): void {
-  void app.patchSettings({ equalizer: { enabled: enabled.value, gains: [...gains.value] } })
+  void app.patchSettings({ equalizer: { enabled: enabled.value, gains: [...gains.value], night: night.value } })
 }
 
 function toggle(): void {
@@ -46,9 +62,21 @@ function toggle(): void {
   commit()
 }
 
+function applyPreset(preset: (typeof PRESETS)[number]): void {
+  gains.value = [...preset.gains]
+  enabled.value = true
+  // 只有「夜间」档带限幅；切到任何别的预设都把它收掉
+  night.value = preset.name === '夜间'
+  wave.setEqualizer(gains.value, enabled.value)
+  wave.setNightLimiter(night.value)
+  commit()
+}
+
 function reset(): void {
   gains.value = EQ_BANDS.map(() => 0)
+  night.value = false
   wave.setEqualizer(gains.value, enabled.value)
+  wave.setNightLimiter(false)
   commit()
 }
 </script>
@@ -59,6 +87,18 @@ function reset(): void {
       <strong>均衡器</strong>
       <button class="switch" :class="{ on: enabled }" title="开关均衡器" @click="toggle">
         <i />
+      </button>
+    </div>
+
+    <div class="presets">
+      <button
+        v-for="preset in PRESETS"
+        :key="preset.name"
+        :class="{ active: activePreset === preset }"
+        :title="preset.name === '夜间' ? '压低动态、收敛高频，深夜听不吵人' : undefined"
+        @click="applyPreset(preset)"
+      >
+        {{ preset.name }}
       </button>
     </div>
 
@@ -81,8 +121,8 @@ function reset(): void {
     </div>
 
     <div class="eq-foot">
-      <span class="hint">{{ flat ? '当前为平坦响应' : '松手后保存' }}</span>
-      <button class="reset" :disabled="flat" @click="reset">重置</button>
+      <span class="hint">{{ night ? '夜间限幅中 · 动态已压低' : flat ? '当前为平坦响应' : '松手后保存' }}</span>
+      <button class="reset" :disabled="flat && !night" @click="reset">重置</button>
     </div>
   </div>
 </template>
@@ -112,6 +152,33 @@ function reset(): void {
   font-size: 12.5px;
   color: var(--text-1);
   font-weight: 600;
+}
+.presets {
+  display: flex;
+  gap: 4px;
+}
+.presets button {
+  flex: 1;
+  padding: 4.5px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+.presets button:hover {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.1);
+}
+.presets button.active {
+  color: #6ee7ff;
+  border-color: rgba(110, 231, 255, 0.5);
+  background: rgba(110, 231, 255, 0.14);
+}
+.off .presets {
+  opacity: 0.45;
 }
 .switch {
   width: 34px;

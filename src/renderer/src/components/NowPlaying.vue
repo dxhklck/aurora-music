@@ -6,6 +6,7 @@ import LyricPane from './LyricPane.vue'
 import ProgressBar from './ProgressBar.vue'
 import { usePlayerStore } from '../stores/player'
 import { useAppStore } from '../stores/app'
+import { usePlaylistStore } from '../stores/playlists'
 import { audio } from '../core/audio'
 import { wave } from '../core/wave'
 import AudioWave from './AudioWave.vue'
@@ -16,6 +17,7 @@ type NowPlayingStyle = 'vinyl' | 'lyrics' | 'cover'
 
 const player = usePlayerStore()
 const app = useAppStore()
+const playlists = usePlaylistStore()
 
 const song = computed(() => player.displaySong)
 const seed = computed(() => (song.value ? `${song.value.platform}:${song.value.id}` : 'aurora'))
@@ -28,10 +30,50 @@ const style = computed<NowPlayingStyle>(() => app.settings?.nowPlayingStyle ?? '
 const stylePanel = ref(false)
 /** 均衡器面板与样式面板共用右上角的位置，同时只开一个 */
 const eqPanel = ref(false)
+/** 睡眠定时面板，与上面两个面板互斥 */
+const sleepPanel = ref(false)
 
 function toggleEqualizer(): void {
   eqPanel.value = !eqPanel.value
-  if (eqPanel.value) stylePanel.value = false
+  if (eqPanel.value) {
+    stylePanel.value = false
+    sleepPanel.value = false
+  }
+}
+
+/* ---------------- 睡眠定时 ---------------- */
+const sleepOptions: { id: 'off' | '15' | '30' | '60' | 'eof'; name: string; desc: string }[] = [
+  { id: '15', name: '15 分钟', desc: '听一会儿就停' },
+  { id: '30', name: '30 分钟', desc: '午休 / 小憩' },
+  { id: '60', name: '60 分钟', desc: '一整晚的大段' },
+  { id: 'eof', name: '播完这首就停', desc: '当前曲目结束后暂停' }
+]
+
+/** 按钮角标文案：倒计时显示 mm:ss，播完停显示「播完」 */
+const sleepLabel = computed(() => {
+  if (player.sleepMode === 'off') return ''
+  if (player.sleepMode === 'eof') return '播完'
+  const m = Math.floor(player.sleepRemain / 60)
+  const s = player.sleepRemain % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+})
+
+function pickSleep(id: 'off' | '15' | '30' | '60' | 'eof'): void {
+  player.setSleep(id)
+  sleepPanel.value = false
+  app.toast(
+    id === 'off'
+      ? '睡眠定时已关闭'
+      : id === 'eof'
+        ? '播完当前这首就停'
+        : `将在 ${id} 分钟后暂停`,
+    'info'
+  )
+}
+
+async function toggleFav(): Promise<void> {
+  if (!song.value) return
+  await playlists.toggleFavorite(song.value)
 }
 
 const styleOptions: { id: NowPlayingStyle; name: string; desc: string }[] = [
@@ -88,6 +130,10 @@ function onKey(event: KeyboardEvent): void {
     }
     if (stylePanel.value) {
       stylePanel.value = false
+      return
+    }
+    if (sleepPanel.value) {
+      sleepPanel.value = false
       return
     }
     close()
@@ -155,7 +201,32 @@ onBeforeUnmount(() => {
         <em v-if="player.streamLabel">{{ player.streamLabel }}</em>
       </div>
       <div class="head-actions">
-        <button class="icon-btn" title="播放器样式" @click.stop="stylePanel = !stylePanel">
+        <button
+          class="icon-btn fav"
+          :class="{ active: song && playlists.isFavorite(song) }"
+          :disabled="!song"
+          :title="song && playlists.isFavorite(song) ? '取消收藏' : '收藏到我喜欢'"
+          @click.stop="toggleFav"
+        >
+          <Icon :name="song && playlists.isFavorite(song) ? 'heart-filled' : 'heart'" :size="18" />
+        </button>
+        <button class="icon-btn" title="加入歌单" :disabled="!song" @click.stop="song && playlists.openPicker(song)">
+          <Icon name="playlist-add" :size="18" />
+        </button>
+        <button
+          class="icon-btn sleep"
+          :class="{ active: player.sleepMode !== 'off' }"
+          title="睡眠定时"
+          @click.stop="
+            sleepPanel = !sleepPanel;
+            stylePanel = false;
+            eqPanel = false
+          "
+        >
+          <Icon name="clock" :size="18" />
+          <em v-if="sleepLabel" class="sleep-badge">{{ sleepLabel }}</em>
+        </button>
+        <button class="icon-btn" title="播放器样式" @click.stop="stylePanel = !stylePanel; sleepPanel = false">
           <Icon name="settings" :size="18" />
         </button>
         <button class="icon-btn" :class="{ active: eqPanel }" title="均衡器" @click.stop="toggleEqualizer">
@@ -163,6 +234,26 @@ onBeforeUnmount(() => {
         </button>
         <button class="icon-btn" title="桌面歌词" @click="openDesktopLyric">
           <Icon name="monitor" :size="18" />
+        </button>
+      </div>
+      <div v-if="sleepPanel" class="style-panel sleep-panel" @click.stop>
+        <div class="panel-sec">睡眠定时</div>
+        <button
+          v-for="opt in sleepOptions"
+          :key="opt.id"
+          class="style-opt"
+          :class="{ active: player.sleepMode === opt.id }"
+          @click="pickSleep(opt.id)"
+        >
+          <strong>{{ opt.name }}</strong>
+          <span>{{ opt.desc }}</span>
+        </button>
+        <button
+          v-if="player.sleepMode !== 'off'"
+          class="sleep-off"
+          @click="pickSleep('off')"
+        >
+          关闭定时
         </button>
       </div>
       <div v-if="stylePanel" class="style-panel" @click.stop>
@@ -568,6 +659,42 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* 睡眠定时：按钮上挂剩余时间角标，激活时跟随强调色 */
+.head-actions .icon-btn {
+  position: relative;
+}
+.sleep-badge {
+  position: absolute;
+  bottom: -3px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-style: normal;
+  font-size: 8.5px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.sleep-panel {
+  padding-bottom: 6px;
+}
+.sleep-off {
+  margin: 4px 4px 2px;
+  height: 32px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.06);
+}
+.sleep-off:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
 }
 
 .style-panel {

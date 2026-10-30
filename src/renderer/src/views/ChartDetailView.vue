@@ -2,15 +2,18 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { ChartSummary, Song } from '@shared/types'
+import { FAVORITES_ID } from '@shared/types'
 import SongTable from '../components/SongTable.vue'
 import Icon from '../components/Icon.vue'
 import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
+import { usePlaylistStore } from '../stores/playlists'
 
 const props = defineProps<{ platform: string; id: string }>()
 
 const app = useAppStore()
 const player = usePlayerStore()
+const playlists = usePlaylistStore()
 const router = useRouter()
 
 const chart = ref<ChartSummary | null>(null)
@@ -76,6 +79,12 @@ function playAll(): void {
   app.toast(`开始播放《${chart.value?.name ?? '榜单'}》`, 'success')
 }
 
+/** 整张榜单一键收进「我喜欢」；已存在的歌由 addSongs 去重，不产生重复项 */
+async function favAll(): Promise<void> {
+  if (!songs.value.length) return
+  await playlists.addSongs(FAVORITES_ID, songs.value)
+}
+
 onMounted(load)
 </script>
 
@@ -105,6 +114,9 @@ onMounted(load)
         <div class="banner-actions">
           <button class="btn primary" :disabled="!songs.length" @click="playAll">
             <Icon name="play" :size="15" /> 播放全部
+          </button>
+          <button class="btn ghost" :disabled="!songs.length" @click="favAll">
+            <Icon name="heart" :size="15" /> 全部收藏
           </button>
         </div>
       </div>
@@ -246,11 +258,22 @@ onMounted(load)
 }
 .banner-actions {
   margin-top: 18px;
+  display: flex;
+  gap: 10px;
 }
 .banner-actions .btn.primary {
   background: rgba(255, 255, 255, 0.94);
   color: #101018;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+}
+/* 次按钮：半透明白描边，压在渐变横幅上仍可读 */
+.banner-actions .btn.ghost {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  color: #fff;
+}
+.banner-actions .btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.24);
 }
 
 .more {

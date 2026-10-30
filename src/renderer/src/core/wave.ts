@@ -34,6 +34,9 @@ class WaveEngine {
   private gain: GainNode | null = null
   /** 五段滤波器，按 EQ_BANDS 顺序串联在 source 与 gain 之间 */
   private bands: BiquadFilterNode[] = []
+  /** 夜间限幅器（压缩动态）；关闭时参数置中性，常驻链路但不改声音 */
+  private limiter: DynamicsCompressorNode | null = null
+  private limiterOn = false
   /** 均衡器参数的缓存：挂接可能晚于用户调参，创建节点时要按当前值初始化 */
   private eqGains: number[] = EQ_BANDS.map(() => 0)
   private eqEnabled = false
@@ -81,14 +84,23 @@ class WaveEngine {
       })
       source.connect(bands[0])
       for (let i = 0; i < bands.length - 1; i += 1) bands[i].connect(bands[i + 1])
-      bands[bands.length - 1].connect(gain)
+      const limiter = ctx.createDynamicsCompressor()
+      limiter.threshold.value = 0
+      limiter.knee.value = 0
+      limiter.ratio.value = 1
+      limiter.attack.value = 0.003
+      limiter.release.value = 0.25
+      bands[bands.length - 1].connect(limiter)
+      limiter.connect(gain)
       gain.connect(ctx.destination)
       this.ctx = ctx
       this.source = source
       this.analyser = analyser
       this.gain = gain
       this.bands = bands
+      this.limiter = limiter
       this.applyEqualizer()
+      this.applyLimiter()
       this.freqData = new Uint8Array(analyser.frequencyBinCount)
       this.timeData = new Uint8Array(analyser.fftSize)
       if (!el.paused) this.resume()
@@ -148,9 +160,42 @@ class WaveEngine {
     })
   }
 
+  /**
+   * 夜间限幅：压动态、压爆音，深夜外放不吵人。
+   * 不拆链，只改参数——ratio=1 + threshold=0 时压缩器完全透明，
+   * 所以平时挂着也不影响声音（和 EQ 关闭不拆链是同一个思路）。
+   */
+  setNightLimiter(on: boolean): void {
+    this.limiterOn = Boolean(on)
+    this.applyLimiter()
+  }
+
+  private applyLimiter(): void {
+    const node = this.limiter
+    if (!node) return
+    if (this.limiterOn) {
+      node.threshold.value = -26
+      node.knee.value = 18
+      node.ratio.value = 5
+      node.attack.value = 0.008
+      node.release.value = 0.3
+    } else {
+      node.threshold.value = 0
+      node.knee.value = 0
+      node.ratio.value = 1
+      node.attack.value = 0.003
+      node.release.value = 0.25
+    }
+  }
+
   /** 诊断/测试用：当前均衡器参数与是否已挂接 */
-  get eq(): { attached: boolean; enabled: boolean; gains: number[] } {
-    return { attached: this.bands.length > 0, enabled: this.eqEnabled, gains: [...this.eqGains] }
+  get eq(): { attached: boolean; enabled: boolean; gains: number[]; limiter: boolean } {
+    return {
+      attached: this.bands.length > 0,
+      enabled: this.eqEnabled,
+      gains: [...this.eqGains],
+      limiter: this.limiterOn
+    }
   }
 
   /** 诊断/测试用：当前增益值与是否已挂接 */

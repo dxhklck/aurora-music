@@ -9,12 +9,14 @@ import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
 import { useLibraryStore } from '../stores/library'
 import { useSearchStore } from '../stores/search'
+import { useStatsStore } from '../stores/stats'
 import type { ChartSummary } from '@shared/types'
 
 const app = useAppStore()
 const player = usePlayerStore()
 const library = useLibraryStore()
 const search = useSearchStore()
+const stats = useStatsStore()
 const router = useRouter()
 
 const charts = ref<ChartSummary[]>([])
@@ -210,6 +212,14 @@ watch(() => app.platform, loadCharts)
         <!-- 首页只精选前 4 个榜单（榜单全量在「排行榜」页） -->
         <ChartDotItem v-for="chart in featuredCharts" :key="chart.id" :chart="chart" />
       </div>
+    </template>
+
+    <template v-if="stats.weeklyTop.length">
+      <h2 class="section-title">
+        本周最常听
+        <span class="tag">{{ Math.round(stats.totalListenMs / 60000) }} 分钟收听</span>
+      </h2>
+      <SongTable :songs="stats.weeklyTop" :show-album="false" empty-title="还没有播放记录" />
     </template>
 
     <template v-if="recent.length">

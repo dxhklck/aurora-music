@@ -1,6 +1,7 @@
 import { mkdir, rename, stat, unlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { dirname, join, extname, basename } from 'node:path'
+import { dirname, join, extname, basename, resolve, relative, isAbsolute } from 'node:path'
+import type { LibraryTrack } from '@shared/types'
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -105,4 +106,26 @@ export function extOf(path: string, fallback = 'mp3'): string {
 
 export function stemOf(path: string): string {
   return basename(path, extname(path))
+}
+
+/** child 是否落在 parent 目录内（parent 自身不算）。win32 下盘符大小写由 path.relative 归一 */
+export function isInsideDir(child: string, parent: string): boolean {
+  if (!child || !parent) return false
+  const rel = relative(resolve(parent), resolve(child))
+  return !!rel && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/** 导出命名模板：{artist} {name} {album} {ext} */
+export function renderNameTemplate(template: string, track: LibraryTrack): string {
+  const fallback = basename(track.fileName, extname(track.fileName))
+  const raw = (template || '{name}')
+    .replace(/\{artist\}/gi, track.song.artists.join(', ') || '未知歌手')
+    .replace(/\{name\}/gi, track.song.name || fallback)
+    .replace(/\{album\}/gi, track.song.album || '')
+    .replace(/\{ext\}/gi, track.ext)
+    // 模板里某个字段为空时会留下「A -  - B」这种残渣，顺手收一下
+    .replace(/(\s*-\s*){2,}/g, ' - ')
+    .replace(/^[\s-]+|[\s-]+$/g, '')
+  // 模板整条渲染为空（例如只写了 {album} 而专辑缺失）时优先回退歌名
+  return sanitizeFileName(raw || track.song.name || fallback, 80)
 }

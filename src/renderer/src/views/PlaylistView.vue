@@ -20,10 +20,18 @@ const playlist = computed(() => playlists.find(playlistId.value))
 const songs = computed<Song[]>(() => playlist.value?.songs ?? [])
 const isFavorites = computed(() => playlistId.value === FAVORITES_ID)
 const totalDuration = computed(() => songs.value.reduce((sum, song) => sum + (song.duration || 0), 0))
+/** 歌单封面：用首曲封面兜底，没有封面或空歌单时回落到图标 */
+const cover = computed(() => (isFavorites.value ? '' : songs.value[0]?.coverUrl ?? ''))
 
 const renaming = ref(false)
 const draft = ref('')
 const nameInput = ref<HTMLInputElement | null>(null)
+
+/** 排序模式：开启后列表行显示上移/下移按钮 */
+const sorting = ref(false)
+async function move(song: Song, direction: 'up' | 'down'): Promise<void> {
+  await playlists.moveSong(playlistId.value, song, direction)
+}
 
 function playAll(): void {
   if (songs.value.length) player.setQueue(songs.value, 0)
@@ -59,7 +67,8 @@ async function removePlaylist(): Promise<void> {
   <div class="playlist">
     <header class="head">
       <div class="art" :class="{ fav: isFavorites }">
-        <Icon :name="isFavorites ? 'heart-filled' : 'list'" :size="34" />
+        <img v-if="cover" :src="cover" class="art-cover" alt="" />
+        <Icon v-else :name="isFavorites ? 'heart-filled' : 'list'" :size="34" />
       </div>
       <div class="info">
         <p class="kind">{{ isFavorites ? '收藏夹' : '自建歌单' }}</p>
@@ -90,6 +99,14 @@ async function removePlaylist(): Promise<void> {
       <button class="btn primary" :disabled="!songs.length" @click="playAll">
         <Icon name="play" :size="15" /> 播放全部
       </button>
+      <button
+        class="btn"
+        :class="{ active: sorting }"
+        :disabled="!songs.length"
+        @click="sorting = !sorting"
+      >
+        <Icon name="list" :size="15" /> {{ sorting ? '完成排序' : '排序' }}
+      </button>
       <button v-if="!isFavorites && playlist" class="btn" @click="removePlaylist">
         <Icon name="trash" :size="15" /> 删除歌单
       </button>
@@ -97,11 +114,13 @@ async function removePlaylist(): Promise<void> {
 
     <SongTable
       :songs="songs"
-      removable
+      :removable="!sorting"
+      :moveable="sorting"
       show-size
       :empty-title="isFavorites ? '还没有收藏的歌曲' : '这个歌单还是空的'"
       empty-hint="在任意列表点红心收藏，或用「加入歌单」按钮把歌放进来"
       @remove="remove"
+      @move="move"
     />
   </div>
 </template>
@@ -129,6 +148,14 @@ async function removePlaylist(): Promise<void> {
 .art.fav {
   background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 62%, transparent), color-mix(in srgb, var(--accent-2) 42%, transparent));
   border-color: transparent;
+}
+/* 首曲封面铺满方形封面框 */
+.art-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
 }
 
 .info {
@@ -188,5 +215,10 @@ async function removePlaylist(): Promise<void> {
   display: flex;
   gap: 10px;
   margin-bottom: 22px;
+}
+.actions .btn.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 </style>

@@ -32,6 +32,8 @@ const ICONS: Record<string, IconDef> = {
   chart: { paths: ['M4 20h16', 'M7 20V11', 'M12 20V5', 'M17 20v-6'], fill: false },
   folder: { paths: ['M4 7h5l2 2.4h9V19H4z'], fill: false },
   'folder-plus': { paths: ['M4 7h5l2 2.4h9V19H4z', 'M13 12v6M10 15h6'], fill: false },
+  copy: { paths: ['M9 9.5h9.5V19H9z', 'M15.5 9.5V5H5v10.5h4'], fill: false },
+  export: { paths: ['M12 15V4', 'M8 8l4-4 4 4', 'M5 15v4h14v-4'], fill: false },
   qrcode: {
     paths: [
       'M4 4h6v6H4z',

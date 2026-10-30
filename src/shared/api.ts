@@ -5,6 +5,8 @@ import type {
   CellphoneLoginResult,
   ChartSummary,
   DownloadTask,
+  DuplicateGroup,
+  LibraryOpReport,
   LibraryTrack,
   Lyric,
   MiniVolumeState,
@@ -114,12 +116,19 @@ export interface AuroraApi {
   sourceHealthRefresh(): Promise<SourceHealthView>
 
   listLibrary(): Promise<LibraryTrack[]>
-  removeLibrary(id: string): Promise<void>
+  removeLibrary(id: string): Promise<LibraryTrack[]>
   /** 改本地曲目的元数据；歌手指多个时用 `/` 分隔。返回更新后的条目，找不到返回 null */
   updateLibraryMeta(
     id: string,
     patch: { name?: string; artists?: string; album?: string }
   ): Promise<LibraryTrack | null>
+  /** 批量改标签：只支持歌手/专辑，缺省或空串表示该字段不动（歌名逐首不同，不参与批量） */
+  updateLibraryMetaMany(
+    ids: string[],
+    patch: { artists?: string; album?: string }
+  ): Promise<LibraryOpReport>
+  /** 把文件本身放进系统剪贴板（CF_HDROP / NSPasteboard），可粘贴到资源管理器或聊天窗口 */
+  copyLibraryFiles(ids: string[]): Promise<{ ok: boolean; message?: string }>
   refreshLibrary(): Promise<LibraryTrack[]>
   revealLibrary(id: string): Promise<void>
   /** 导入本地音乐目录：对话框选目录，追加到 musicDirs 并立即扫描，返回当前目录列表 */
@@ -128,16 +137,53 @@ export interface AuroraApi {
   removeMusicDir(dir: string): Promise<string[]>
   listMusicDirs(): Promise<string[]>
 
+  /** 删除磁盘文件：下载目录进系统回收站；导入目录只从库移除（保守策略） */
+  deleteLibraryFiles(ids: string[]): Promise<LibraryOpReport>
+  /** 批量仅从库移除，磁盘文件保留；同一路径不会在下次扫描时复活 */
+  removeLibraryMany(ids: string[]): Promise<LibraryOpReport>
+  /** 重复文件扫描。identical=内容完全一致，similar=同曲不同音质 */
+  findDuplicateTracks(): Promise<DuplicateGroup[]>
+  /** 复制到目录：主进程弹目录选择器并复制（含 .lrc / .meta.json），取消返回 null */
+  copyLibraryTracks(ids: string[]): Promise<LibraryOpReport | null>
+  /** 按命名模板导出：{artist} {name} {album} {ext}；取消返回 null */
+  exportLibraryTracks(ids: string[], template: string): Promise<LibraryOpReport | null>
+  /** 重新定位缺失文件：选目录后按文件名批量重新绑定，返回恢复的条目数 */
+  relocateLibraryTracks(): Promise<number>
+  /** 清理所有标记为缺失的条目，返回清理数量 */
+  purgeMissingTracks(): Promise<number>
+  /** 打开系统回收站（应用内不做还原，还原在系统里完成） */
+  openTrash(): Promise<void>
+  /** 用系统文件管理器打开目录 */
+  openFolder(dir: string): Promise<void>
+  /** 订阅复制/导出进度 */
+  onLibraryOpProgress(
+    cb: (payload: { done: number; total: number; current: string }) => void
+  ): () => void
+
   listPlaylists(): Promise<Playlist[]>
   createPlaylist(name: string, songs?: Song[]): Promise<Playlist[]>
   renamePlaylist(id: string, name: string): Promise<Playlist[]>
   removePlaylist(id: string): Promise<Playlist[]>
   addPlaylistSongs(id: string, songs: Song[]): Promise<Playlist[]>
   removePlaylistSong(id: string, platform: string, songId: string): Promise<Playlist[]>
+  /** 歌单内换位：越界（已在顶/底）时原样返回 */
+  movePlaylistSong(
+    id: string,
+    platform: string,
+    songId: string,
+    direction: 'up' | 'down'
+  ): Promise<Playlist[]>
   toggleFavorite(song: Song): Promise<{ list: Playlist[]; favorited: boolean }>
 
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+
+  /** 写系统剪贴板（复制文件路径） */
+  copyText(text: string): Promise<void>
+  /** 上报一条运行日志到 userData/logs（渲染层未捕获错误走这里） */
+  logWrite(level: 'info' | 'warn' | 'error', scope: string, message: string): Promise<void>
+  /** 导出诊断报告；返回保存路径，用户取消时为 null */
+  exportDiagnostics(): Promise<string | null>
 
   /** 检查更新（仅打包后的 Windows 有效，其余环境返回 supported=false） */
   checkForUpdate(): Promise<UpdateStatusView>

@@ -95,7 +95,13 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           class="nav-item as-button"
           :class="{ active: route.path === `/playlist/${item.id}` }"
         >
-          <Icon name="list" :size="16" />
+          <img
+            v-if="item.songs[0]?.coverUrl"
+            class="pl-thumb"
+            :src="item.songs[0].coverUrl"
+            alt=""
+          />
+          <Icon v-else name="list" :size="16" />
           <span class="truncate">{{ item.name }}</span>
           <em class="count">{{ item.songs.length }}</em>
         </router-link>
@@ -265,6 +271,14 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   height: 32px;
   font-size: 12.5px;
   color: var(--text-2);
+}
+/* 歌单缩略图：与图标同宽，首曲封面便于在侧栏一眼认出 */
+.pl-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex: none;
 }
 
 .divider {

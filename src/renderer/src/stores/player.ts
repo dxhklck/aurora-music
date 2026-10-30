@@ -6,11 +6,14 @@ import { audio } from '../core/audio'
 import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
+import { useStatsStore } from './stats'
 import { createLatestGate } from '../core/latest'
 
 const HISTORY_KEY = 'aurora.recent'
 /** 榜单队列断点：记录「哪份榜单 + 第几首 + 播到几毫秒」，跨重启续播 */
 const RESUME_KEY = 'aurora.hero.resume'
+/** 歌词手动对齐记忆：{ "platform:id": 毫秒偏移 }，只记用户调过的歌 */
+const LYRIC_OFFSET_KEY = 'aurora.lyric-offsets'
 
 interface ResumeSnapshot {
   tag: string
@@ -53,6 +56,8 @@ export const usePlayerStore = defineStore('player', () => {
   const mode = ref<PlayMode>('loop')
   const lyric = ref<Lyric | null>(null)
   const lyricLoading = ref(false)
+  /** 用户微调的歌词偏移（毫秒），按歌记忆，见 LYRIC_OFFSET_KEY */
+  const lyricOffsetAdj = ref(0)
   const streamLabel = ref('')
   /** 实际播放的曲目（可能与队列里的原平台不同：换源后） */
   const resolvedSong = ref<Song | null>(null)
@@ -61,6 +66,14 @@ export const usePlayerStore = defineStore('player', () => {
   const recent = ref<Song[]>(loadRecent())
   /** 当前队列的来源标签（如 hero:qq:榜id）；空 = 普通队列，不记断点 */
   const queueTag = ref('')
+
+  /* ---------------- 睡眠定时 ----------------
+     15/30/60 分钟倒计时，或「播完当前这首」。
+     到点只暂停不 stop：队列与进度保留，第二天点播放能接着听。 */
+  const sleepMode = ref<'off' | '15' | '30' | '60' | 'eof'>('off')
+  /** 剩余秒数；eof 模式恒为 -1（表示按曲目结束触发） */
+  const sleepRemain = ref(0)
+  let sleepTick: number | null = null
 
   let engineBound = false
   let volumeTimer: number | null = null
@@ -86,7 +99,11 @@ export const usePlayerStore = defineStore('player', () => {
   const hasNext = computed(() => queue.value.length > 1)
   const progress = computed(() => (duration.value ? Math.min(time.value / duration.value, 1) : 0))
   const activeLyricIndex = computed(() =>
-    lyric.value ? findLyricIndex(lyric.value.lines, time.value + lyric.value.offset) : -1
+    lyric.value ? findLyricIndex(lyric.value.lines, time.value + totalLyricOffset.value) : -1
+  )
+  /** 源偏移 + 用户微调的合成偏移（毫秒）；LyricPane 与这里共用，保证两处节奏一致 */
+  const totalLyricOffset = computed(
+    () => (lyric.value?.offset ?? 0) + lyricOffsetAdj.value
   )
 
   function loadRecent(): Song[] {
@@ -207,6 +224,8 @@ export const usePlayerStore = defineStore('player', () => {
       audio.load(resolved.stream.url, { autoplay: true })
       failureStreak = 0
       pushRecent(song)
+      // 收听统计：与最近播放同一个成功点（拿到流并开始播放才记）
+      useStatsStore().recordPlay(song)
       void loadLyric(resolved.song)
       updateMediaSession(song)
     } catch (err) {
@@ -227,8 +246,49 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  /* ---------------- 歌词手动对齐 ----------------
+     源给的歌词整体偏早/偏晚时 ±0.5s 微调，按 platform:id 记住。
+     与 lyric.offset 相加后统一生效，正数 = 歌词提前。 */
+
+  function loadLyricOffsetAdj(song: Song): number {
+    try {
+      const map = JSON.parse(localStorage.getItem(LYRIC_OFFSET_KEY) ?? '{}') as Record<string, number>
+      return map[`${song.platform}:${song.id}`] ?? 0
+    } catch {
+      return 0
+    }
+  }
+
+  /** 微调当前歌的歌词偏移（毫秒），范围 ±5s，落盘记忆 */
+  function nudgeLyric(delta: number): void {
+    const song = current.value
+    if (!song) return
+    setLyricOffset(lyricOffsetAdj.value + delta)
+  }
+
+  /** 复位当前歌的歌词偏移（回到源偏移） */
+  function resetLyricOffset(): void {
+    setLyricOffset(0)
+  }
+
+  function setLyricOffset(ms: number): void {
+    const song = current.value
+    if (!song) return
+    lyricOffsetAdj.value = Math.min(5000, Math.max(-5000, Math.round(ms)))
+    try {
+      const map = JSON.parse(localStorage.getItem(LYRIC_OFFSET_KEY) ?? '{}') as Record<string, number>
+      const key = `${song.platform}:${song.id}`
+      if (lyricOffsetAdj.value === 0) delete map[key]
+      else map[key] = lyricOffsetAdj.value
+      localStorage.setItem(LYRIC_OFFSET_KEY, JSON.stringify(map))
+    } catch {
+      /* localStorage 满 / 被禁用：微调仅本次生效 */
+    }
+  }
+
   async function loadLyric(song: Song): Promise<void> {
     lyricLoading.value = true
+    lyricOffsetAdj.value = loadLyricOffsetAdj(song)
     try {
       lyric.value = await window.api.lyric(plain(song))
     } catch {
@@ -373,7 +433,44 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   async function handleEnded(): Promise<void> {
+    // 「播完这首就停」：自然结束时不进下一首，停在原位等用户
+    if (sleepMode.value === 'eof') {
+      stopSleep()
+      audio.pause()
+      playing.value = false
+      useAppStore().toast('睡眠定时：本曲已播完，已暂停播放', 'info')
+      return
+    }
     await next(true)
+  }
+
+  /** 清空睡眠定时（含计时器），不改播放状态 */
+  function stopSleep(): void {
+    if (sleepTick !== null) {
+      window.clearInterval(sleepTick)
+      sleepTick = null
+    }
+    sleepMode.value = 'off'
+    sleepRemain.value = 0
+  }
+
+  function setSleep(next: 'off' | '15' | '30' | '60' | 'eof'): void {
+    stopSleep()
+    if (next === 'off') return
+    sleepMode.value = next
+    if (next === 'eof') {
+      sleepRemain.value = -1
+      return
+    }
+    sleepRemain.value = Number(next) * 60
+    sleepTick = window.setInterval(() => {
+      sleepRemain.value -= 1
+      if (sleepRemain.value > 0) return
+      stopSleep()
+      audio.pause()
+      playing.value = false
+      useAppStore().toast('睡眠时间到，已暂停播放', 'info')
+    }, 1000)
   }
 
   function seekTo(ms: number): void {
@@ -487,6 +584,10 @@ export const usePlayerStore = defineStore('player', () => {
     mode,
     lyric,
     lyricLoading,
+    lyricOffsetAdj,
+    totalLyricOffset,
+    nudgeLyric,
+    resetLyricOffset,
     streamLabel,
     resolvedSong,
     showNowPlaying,
@@ -498,6 +599,10 @@ export const usePlayerStore = defineStore('player', () => {
     progress,
     activeLyricIndex,
     queueTag,
+    sleepMode,
+    sleepRemain,
+    setSleep,
+    stopSleep,
     setQueue,
     startHero,
     playAt,

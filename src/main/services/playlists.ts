@@ -129,6 +129,48 @@ class PlaylistService {
     return this.list()
   }
 
+  /**
+   * 本地文件被真删后，把各歌单里指向它的条目一起清掉。
+   * 不清就会留下永远播不了的死条目（local 音源找不到记录直接报错）。
+   * 返回实际清掉的条目数。
+   */
+  async dropLocalTracks(libraryIds: string[]): Promise<number> {
+    const keys = new Set(libraryIds.map((id) => `local:${id}`))
+    let removed = 0
+    for (const playlist of this.items) {
+      const next = playlist.songs.filter((song) => !keys.has(keyOf(song)))
+      if (next.length === playlist.songs.length) continue
+      removed += playlist.songs.length - next.length
+      playlist.songs = next
+      playlist.updatedAt = Date.now()
+    }
+    if (removed) await this.persist()
+    return removed
+  }
+
+  /**
+   * 歌单内换位（手动排序）。
+   * 边界不越界：已在顶/底时原样返回，避免 splice 出负索引或越界插入。
+   */
+  async moveSong(
+    id: string,
+    platform: string,
+    songId: string,
+    direction: 'up' | 'down'
+  ): Promise<Playlist[]> {
+    const target = this.find(id)
+    if (!target) return this.list()
+    const key = `${platform}:${songId}`
+    const from = target.songs.findIndex((song) => keyOf(song) === key)
+    const to = direction === 'up' ? from - 1 : from + 1
+    if (from < 0 || to < 0 || to >= target.songs.length) return this.list()
+    const [moved] = target.songs.splice(from, 1)
+    target.songs.splice(to, 0, moved)
+    // 不改 updatedAt：手动调序不应该让歌单在侧栏里跳到最前面
+    await this.persist()
+    return this.list()
+  }
+
   /** 返回操作后是否处于「已收藏」状态 */
   async toggleFavorite(song: Song): Promise<{ list: Playlist[]; favorited: boolean }> {
     const favorites = this.find(FAVORITES_ID) ?? this.items[0]

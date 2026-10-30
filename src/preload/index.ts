@@ -38,11 +38,27 @@ const api: AuroraApi = {
   listLibrary: () => ipcRenderer.invoke(IPC.libraryList),
   removeLibrary: (id) => ipcRenderer.invoke(IPC.libraryRemove, id),
   updateLibraryMeta: (id, patch) => ipcRenderer.invoke(IPC.libraryUpdateMeta, id, patch),
+  updateLibraryMetaMany: (ids, patch) => ipcRenderer.invoke(IPC.libraryUpdateMetaMany, ids, patch),
+  copyLibraryFiles: (ids) => ipcRenderer.invoke(IPC.libraryCopyFiles, ids),
   refreshLibrary: () => ipcRenderer.invoke(IPC.libraryRefresh),
   revealLibrary: (id) => ipcRenderer.invoke(IPC.libraryReveal, id),
   importMusicDir: () => ipcRenderer.invoke(IPC.libraryImportDir),
   removeMusicDir: (dir) => ipcRenderer.invoke(IPC.libraryRemoveDir, dir),
   listMusicDirs: () => ipcRenderer.invoke(IPC.libraryDirs),
+  deleteLibraryFiles: (ids) => ipcRenderer.invoke(IPC.libraryDeleteFiles, ids),
+  removeLibraryMany: (ids) => ipcRenderer.invoke(IPC.libraryRemoveMany, ids),
+  findDuplicateTracks: () => ipcRenderer.invoke(IPC.libraryDuplicates),
+  copyLibraryTracks: (ids) => ipcRenderer.invoke(IPC.libraryCopyTo, ids),
+  exportLibraryTracks: (ids, template) => ipcRenderer.invoke(IPC.libraryExportTo, ids, template),
+  relocateLibraryTracks: () => ipcRenderer.invoke(IPC.libraryRelocate),
+  purgeMissingTracks: () => ipcRenderer.invoke(IPC.libraryPurgeMissing),
+  openTrash: () => ipcRenderer.invoke(IPC.libraryOpenTrash),
+  openFolder: (dir) => ipcRenderer.invoke(IPC.libraryOpenDir, dir),
+  onLibraryOpProgress: (cb) => {
+    const listener = (_event: unknown, payload: any): void => cb(payload)
+    ipcRenderer.on(IPC.libraryOpProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.libraryOpProgress, listener)
+  },
 
   listPlaylists: () => ipcRenderer.invoke(IPC.playlistList),
   createPlaylist: (name, songs) => ipcRenderer.invoke(IPC.playlistCreate, { name, songs }),
@@ -51,10 +67,16 @@ const api: AuroraApi = {
   addPlaylistSongs: (id, songs) => ipcRenderer.invoke(IPC.playlistAddSongs, { id, songs }),
   removePlaylistSong: (id, platform, songId) =>
     ipcRenderer.invoke(IPC.playlistRemoveSong, { id, platform, songId }),
+  movePlaylistSong: (id, platform, songId, direction) =>
+    ipcRenderer.invoke(IPC.playlistMoveSong, { id, platform, songId, direction }),
   toggleFavorite: (song) => ipcRenderer.invoke(IPC.playlistToggleFavorite, song),
 
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),
+
+  logWrite: (level, scope, message) => ipcRenderer.invoke(IPC.logWrite, { level, scope, message }),
+  copyText: (text) => ipcRenderer.invoke(IPC.clipboardWrite, text),
+  exportDiagnostics: () => ipcRenderer.invoke(IPC.diagExport),
 
   checkForUpdate: () => ipcRenderer.invoke(IPC.updateCheck),
   installUpdate: () => ipcRenderer.send(IPC.updateInstall),

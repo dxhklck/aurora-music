@@ -7,6 +7,8 @@ import { formatBytes, formatDuration } from '@shared/lyric'
 import { usePlayerStore } from '../stores/player'
 import { useDownloadStore } from '../stores/download'
 import { usePlaylistStore } from '../stores/playlists'
+import { useLibraryStore } from '../stores/library'
+import { useAppStore } from '../stores/app'
 
 const props = withDefaults(
   defineProps<{
@@ -17,10 +19,20 @@ const props = withDefaults(
     /** 显示文件大小列；平台不返回 fileSize 时显示 — */
     showSize?: boolean
     removable?: boolean
+    /** 移除按钮的提示文案（本地库里它是「删除文件」，歌单里是「移出歌单」） */
+    removeTitle?: string
     /** 显示「编辑信息」按钮（只给本地库用） */
     editable?: boolean
     /** 显示多选列与批量下载工具条 */
     selectable?: boolean
+    /** 列头可点击排序（排序本身由父组件做，这里只发事件） */
+    sortable?: boolean
+    sortKey?: string
+    sortDir?: 'asc' | 'desc'
+    /** 显示「更多操作」按钮（本地库用它挂复制/导出/删除） */
+    menuable?: boolean
+    /** 歌单排序模式：每行显示上移/下移按钮，隐藏收藏等操作避免挤爆 */
+    moveable?: boolean
     emptyTitle?: string
     emptyHint?: string
   }>(),
@@ -30,20 +42,54 @@ const props = withDefaults(
     showPlatform: false,
     showSize: false,
     removable: false,
+    removeTitle: '从列表中移除',
     editable: false,
     selectable: false,
+    sortable: false,
+    sortKey: '',
+    sortDir: 'desc',
+    menuable: false,
+    moveable: false,
     emptyTitle: '暂无歌曲',
     emptyHint: '换个关键词或切换音源试试'
   }
 )
 
-const emit = defineEmits<{ remove: [song: Song]; edit: [song: Song] }>()
+const emit = defineEmits<{
+  remove: [song: Song]
+  edit: [song: Song]
+  move: [song: Song, direction: 'up' | 'down']
+  sort: [key: string]
+  /** 打开行菜单：第三项是这次要操作的对象（右键多选时是整批） */
+  menu: [song: Song, event: MouseEvent, selection: Song[]]
+}>()
 
 const player = usePlayerStore()
 const download = useDownloadStore()
 const playlists = usePlaylistStore()
+const library = useLibraryStore()
+const app = useAppStore()
+
+/** 已下载集合：搜索/榜单里标出哪些歌已在本地库，避免重复下载 */
+const downloadedKeys = computed(
+  () => new Set(library.items.map((item) => `${item.song.platform}:${item.song.id}`))
+)
+
+function isDownloaded(song: Song): boolean {
+  return downloadedKeys.value.has(keyOf(song))
+}
+
+function onDownloadClick(song: Song): void {
+  if (isDownloaded(song)) {
+    app.toast('这首歌已在音乐库里', 'info')
+    return
+  }
+  void download.enqueue(song)
+}
 
 const selected = ref<Set<string>>(new Set())
+/** Shift 范围选：记住上一次点击的行号 */
+const lastIndex = ref(-1)
 
 const currentKey = computed(() =>
   player.current ? `${player.current.platform}:${player.current.id}` : ''
@@ -58,16 +104,50 @@ function keyOf(song: Song): string {
   return `${song.platform}:${song.id}`
 }
 
-function toggleSelect(song: Song): void {
+function toggleSelect(song: Song, index: number, event?: MouseEvent): void {
   const key = keyOf(song)
   const next = new Set(selected.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
+  if (event?.shiftKey && lastIndex.value >= 0) {
+    const from = Math.min(lastIndex.value, index)
+    const to = Math.max(lastIndex.value, index)
+    const shouldSelect = !selected.value.has(key)
+    for (let i = from; i <= to; i += 1) {
+      const current = props.songs[i]
+      if (!current) continue
+      if (shouldSelect) next.add(keyOf(current))
+      else next.delete(keyOf(current))
+    }
+  } else if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
   selected.value = next
+  lastIndex.value = index
+}
+
+function clearSelection(): void {
+  selected.value = new Set()
+  lastIndex.value = -1
 }
 
 function toggleAll(): void {
   selected.value = allSelected.value ? new Set() : new Set(props.songs.map(keyOf))
+}
+
+defineExpose({ clearSelection })
+
+/**
+ * 菜单入口：右键行，或点行尾「更多」。
+ * 右键已选中的行 → 对整批操作；右键未选中的行 → 先清掉旧选择，只对这一行，
+ * 避免「看着选中 3 首、菜单却只删 1 首」这种歧义。
+ */
+function openRowMenu(song: Song, event: MouseEvent): void {
+  const key = keyOf(song)
+  if (props.selectable && selected.value.size && !selected.value.has(key)) clearSelection()
+  const selection =
+    props.selectable && selected.value.has(key) && selected.value.size > 1 ? selectedSongs.value : [song]
+  emit('menu', song, event, selection)
 }
 
 function downloadSelected(): void {
@@ -105,29 +185,49 @@ function qualityBadge(song: Song): string {
 </script>
 
 <template>
-  <div class="table" :class="{ selectable }">
+  <div class="table" :class="{ selectable, moveable }">
     <div v-if="selectable" class="bulk">
       <button class="btn" @click="toggleAll">
         <Icon :name="allSelected ? 'close' : 'check'" :size="13" />
         {{ allSelected ? '取消全选' : '全选' }}
       </button>
       <span class="bulk-count">{{ selectedSongs.length }} / {{ songs.length }} 首</span>
-      <button class="btn primary" :disabled="!selectedSongs.length" @click="downloadSelected">
-        <Icon name="download" :size="13" /> 下载选中
-      </button>
-      <button class="btn" :disabled="!songs.length" @click="downloadAll">
-        <Icon name="download" :size="13" /> 全部下载
-      </button>
+      <!-- 默认是搜索页的批量下载；本地库用自己的操作条覆盖这个插槽 -->
+      <slot name="bulk" :selected="selectedSongs" :clear="clearSelection">
+        <button class="btn primary" :disabled="!selectedSongs.length" @click="downloadSelected">
+          <Icon name="download" :size="13" /> 下载选中
+        </button>
+        <button class="btn" :disabled="!songs.length" @click="downloadAll">
+          <Icon name="download" :size="13" /> 全部下载
+        </button>
+      </slot>
     </div>
 
     <div class="head">
       <span v-if="selectable" class="c-check" />
       <span class="c-index">#</span>
-      <span class="c-title">标题</span>
-      <span v-if="showAlbum" class="c-album">专辑</span>
+      <span class="c-title" :class="{ 'sort-cell': sortable }" @click="sortable && emit('sort', 'name')">
+        标题
+        <em v-if="sortable && sortKey === 'name'" class="arrow">{{ sortDir === 'asc' ? '↑' : '↓' }}</em>
+      </span>
+      <span
+        v-if="showAlbum"
+        class="c-album"
+        :class="{ 'sort-cell': sortable }"
+        @click="sortable && emit('sort', 'album')"
+      >
+        专辑
+        <em v-if="sortable && sortKey === 'album'" class="arrow">{{ sortDir === 'asc' ? '↑' : '↓' }}</em>
+      </span>
       <span v-if="showPlatform" class="c-platform">音源</span>
-      <span class="c-dur">时长</span>
-      <span v-if="showSize" class="c-size">大小</span>
+      <span class="c-dur" :class="{ 'sort-cell': sortable }" @click="sortable && emit('sort', 'duration')">
+        时长
+        <em v-if="sortable && sortKey === 'duration'" class="arrow">{{ sortDir === 'asc' ? '↑' : '↓' }}</em>
+      </span>
+      <span v-if="showSize" class="c-size" :class="{ 'sort-cell': sortable }" @click="sortable && emit('sort', 'size')">
+        大小
+        <em v-if="sortable && sortKey === 'size'" class="arrow">{{ sortDir === 'asc' ? '↑' : '↓' }}</em>
+      </span>
       <span class="c-actions" />
     </div>
 
@@ -146,15 +246,20 @@ function qualityBadge(song: Song): string {
         v-for="(song, index) in songs"
         :key="keyOf(song) + index"
         class="row"
-        :class="{ playing: keyOf(song) === currentKey, picked: selected.has(keyOf(song)) }"
+        :class="{
+          playing: keyOf(song) === currentKey,
+          picked: selected.has(keyOf(song)),
+          missing: !!song.extra?.missing
+        }"
         @dblclick="play(index)"
+        @contextmenu.prevent="openRowMenu(song, $event)"
       >
         <span v-if="selectable" class="c-check">
           <button
             class="pick"
             :class="{ on: selected.has(keyOf(song)) }"
-            :title="selected.has(keyOf(song)) ? '取消选择' : '选择'"
-            @click.stop="toggleSelect(song)"
+            :title="selected.has(keyOf(song)) ? '取消选择' : '选择（Shift 可连选）'"
+            @click.stop="toggleSelect(song, index, $event)"
           >
             <Icon v-if="selected.has(keyOf(song))" name="check" :size="11" />
           </button>
@@ -183,6 +288,7 @@ function qualityBadge(song: Song): string {
           <div class="title-text">
             <div class="t-line">
               <strong class="truncate">{{ song.name }}</strong>
+              <em v-if="song.extra?.missing" class="badge miss" title="文件已不在磁盘上，可用「重新定位」找回">缺失</em>
               <em v-if="isVip(song)" class="badge vip" title="VIP 曲目：登录后可播放完整版本">VIP</em>
               <em v-if="qualityBadge(song)" class="badge q-badge" :class="{ sq: song.qualityMax === 'lossless' }">
                 {{ qualityBadge(song) }}
@@ -207,6 +313,7 @@ function qualityBadge(song: Song): string {
 
         <span class="c-actions">
           <button
+            v-if="!moveable"
             class="fav"
             :class="{ active: playlists.isFavorite(song) }"
             :title="playlists.isFavorite(song) ? '取消收藏' : '收藏到我喜欢'"
@@ -214,20 +321,34 @@ function qualityBadge(song: Song): string {
           >
             <Icon :name="playlists.isFavorite(song) ? 'heart-filled' : 'heart'" :size="15" />
           </button>
-          <button title="加入歌单" @click.stop="playlists.openPicker(song)">
+          <button v-if="moveable" class="mv" title="上移" @click.stop="emit('move', song, 'up')">
+            ↑
+          </button>
+          <button v-if="moveable" class="mv" title="下移" @click.stop="emit('move', song, 'down')">
+            ↓
+          </button>
+          <button v-if="!moveable" title="加入歌单" @click.stop="playlists.openPicker(song)">
             <Icon name="playlist-add" :size="15" />
           </button>
-          <button title="下一首播放" @click.stop="addNext(song)">
+          <button v-if="!moveable" title="下一首播放" @click.stop="addNext(song)">
             <Icon name="plus" :size="15" />
           </button>
           <button v-if="editable" title="编辑歌曲信息" @click.stop="emit('edit', song)">
             <Icon name="pencil" :size="15" />
           </button>
-          <button v-else title="下载" @click.stop="download.enqueue(song)">
-            <Icon name="download" :size="15" />
+          <button
+            v-else-if="!moveable"
+            :class="{ done: isDownloaded(song) }"
+            :title="isDownloaded(song) ? '已在音乐库' : '下载'"
+            @click.stop="onDownloadClick(song)"
+          >
+            <Icon :name="isDownloaded(song) ? 'check' : 'download'" :size="15" />
           </button>
-          <button v-if="removable" title="从音乐库移除" @click.stop="emit('remove', song)">
+          <button v-if="removable" :title="removeTitle" @click.stop="emit('remove', song)">
             <Icon name="trash" :size="15" />
+          </button>
+          <button v-if="menuable" title="更多操作" @click.stop="openRowMenu(song, $event)">
+            <Icon name="more" :size="15" />
           </button>
         </span>
       </div>
@@ -285,7 +406,9 @@ function qualityBadge(song: Song): string {
 .bulk {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+  row-gap: 8px;
   padding: 0 12px 10px;
 }
 .bulk-count {
@@ -470,6 +593,33 @@ function qualityBadge(song: Song): string {
   border-color: rgba(230, 194, 104, 0.65);
   color: #e6c268;
 }
+/* 缺失：灰底，提醒这行播不了 */
+.badge.miss {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-3);
+}
+.row.missing .title-text strong,
+.row.missing .c-album,
+.row.missing .c-dur,
+.row.missing .c-size {
+  opacity: 0.55;
+}
+
+/* 可排序的列头 */
+.sort-cell {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+.sort-cell:hover {
+  color: var(--text);
+}
+.sort-cell .arrow {
+  margin-left: 3px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--accent);
+}
 
 .c-album {
   font-size: 11.5px;
@@ -511,6 +661,10 @@ function qualityBadge(song: Song): string {
 .row:hover .c-actions {
   opacity: 1;
 }
+/* 排序模式：↑↓ 是主要操作，不能等 hover 才出现 */
+.table.moveable .c-actions {
+  opacity: 1;
+}
 .c-actions button {
   width: 26px;
   height: 26px;
@@ -529,6 +683,20 @@ function qualityBadge(song: Song): string {
 }
 .c-actions .fav.active :deep(svg) {
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+
+/* 已下载：用绿色对勾替代下载图标，一眼看出哪些不用再下 */
+.c-actions button.done {
+  color: #3ddc97;
+}
+/* 歌单排序模式的 ↑↓ 按钮 */
+.c-actions .mv {
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-2);
+}
+.c-actions .mv:hover {
+  color: var(--accent);
 }
 
 .skeleton-row {

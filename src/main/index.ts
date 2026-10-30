@@ -16,6 +16,22 @@ import { settings } from './services/settings'
 import { downloads } from './services/download'
 import { runSelfTest } from './selftest'
 import { initUpdater } from './updater'
+import { logger } from './services/logger'
+
+/**
+ * 全局异常兜底：先落盘再决定怎么办。
+ *
+ * 为什么要拦：Electron 主进程一个未捕获异常直接断进程，用户看到的是「闪退」，
+ * 而消息框和日志一个都不剩。这里记录到 userData/logs/aurora.log 后保持运行——
+ * 音乐播放器崩在后台是小事，把用户正在播的队列一起带走才是大事。
+ * 代价是异常后进程状态可能不一致，所以每条都标 FATAL，导出诊断时一眼能看到。
+ */
+process.on('uncaughtException', (error) => {
+  logger.crash('main:uncaughtException', error)
+})
+process.on('unhandledRejection', (reason) => {
+  logger.crash('main:unhandledRejection', reason)
+})
 
 // 自定义协议必须在 app ready 之前登记
 registerMediaScheme()
@@ -146,6 +162,15 @@ if (!app.requestSingleInstanceLock()) {
         : null
     )
     await bootstrapRuntime()
+
+    // 渲染/GPU 子进程崩溃：白屏、画面冻结最常见的两种真因，必须留痕
+    app.on('render-process-gone', (_event, _contents, details) => {
+      logger.crash('render-process-gone', `${details.reason} (exitCode=${details.exitCode})`)
+    })
+    app.on('child-process-gone', (_event, details) => {
+      logger.crash('child-process-gone', `${details.type}/${details.reason} (exitCode=${details.exitCode})`)
+    })
+    logger.info('boot', `version=${app.getVersion()} packaged=${app.isPackaged}`)
 
     // 无界面自检模式（开发辅助）
     if (process.env.AURORA_SELFTEST) {

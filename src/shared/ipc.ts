@@ -40,12 +40,36 @@ export const IPC = {
   libraryRemove: 'library:remove',
   /** 改本地曲目的歌名/歌手/专辑（同时写 sidecar 与音频标签） */
   libraryUpdateMeta: 'library:update-meta',
+  /** 批量改歌手/专辑：留空的字段保持不变 */
+  libraryUpdateMetaMany: 'library:update-meta-many',
+  /** 把曲目文件放进系统剪贴板，可直接在资源管理器/聊天窗口粘贴 */
+  libraryCopyFiles: 'library:copy-files',
   libraryRefresh: 'library:refresh',
   libraryReveal: 'library:reveal',
   /** 导入本地音乐目录（对话框选目录 → 追加到 settings.musicDirs → 重新扫描） */
   libraryImportDir: 'library:import-dir',
   libraryRemoveDir: 'library:remove-dir',
   libraryDirs: 'library:dirs',
+  /** 真删：下载目录里的文件进系统回收站，导入目录的降级为「仅从库移除」 */
+  libraryDeleteFiles: 'library:delete-files',
+  /** 批量仅移除（不动磁盘文件），返回操作结果 */
+  libraryRemoveMany: 'library:remove-many',
+  /** 重复文件扫描（size 分组 + sha256） */
+  libraryDuplicates: 'library:duplicates',
+  /** 复制到指定目录（主进程弹目录选择器） */
+  libraryCopyTo: 'library:copy-to',
+  /** 按命名模板导出到指定目录 */
+  libraryExportTo: 'library:export-to',
+  /** 重新定位缺失文件（选目录后按文件名重新绑定） */
+  libraryRelocate: 'library:relocate',
+  /** 清理所有标记为缺失的条目 */
+  libraryPurgeMissing: 'library:purge-missing',
+  /** 打开系统回收站 */
+  libraryOpenTrash: 'library:open-trash',
+  /** 用系统文件管理器打开一个目录（复制/导出的目标目录） */
+  libraryOpenDir: 'library:open-dir',
+  /** 复制/导出进度（主 → 渲染）：done/total/current */
+  libraryOpProgress: 'library:op-progress',
 
   // 收藏 / 歌单
   playlistList: 'playlist:list',
@@ -54,6 +78,7 @@ export const IPC = {
   playlistRemove: 'playlist:remove',
   playlistAddSongs: 'playlist:add-songs',
   playlistRemoveSong: 'playlist:remove-song',
+  playlistMoveSong: 'playlist:move-song',
   playlistToggleFavorite: 'playlist:toggle-favorite',
 
   // 设置
@@ -116,6 +141,12 @@ export const IPC = {
 
   // 通知
   toast: 'app:toast',
+  /** 写系统剪贴板（复制文件路径用；渲染层的 navigator.clipboard 在部分环境不可靠） */
+  clipboardWrite: 'app:clipboard-write',
+  /** 渲染层未捕获错误 / 手动上报日志（写 userData/logs） */
+  logWrite: 'log:write',
+  /** 导出诊断报告（系统信息 + 设置摘要 + 音源健康 + 最近日志） */
+  diagExport: 'diag:export',
 
   // 自动更新（Windows）
   updateCheck: 'update:check',

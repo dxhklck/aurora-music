@@ -126,7 +126,10 @@ onMounted(async () => {
     player.hydrate({ volume: app.settings.volume, playMode: app.settings.playMode })
     // 均衡器：音频图是懒创建的，这里先灌一次参数，等第一次打开播放舞台时按它初始化
     const eq = app.settings.equalizer
-    if (eq) wave.setEqualizer(eq.gains, eq.enabled)
+    if (eq) {
+      wave.setEqualizer(eq.gains, eq.enabled)
+      wave.setNightLimiter(eq.night === true)
+    }
   }
   player.bindEngine()
   await Promise.all([download.init(), library.load(), playlists.load()])

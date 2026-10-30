@@ -1,6 +1,6 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { AppSettings, MiniVolumeState, Song } from '@shared/types'
+import type { AppSettings, LibraryTrack, MiniVolumeState, Song } from '@shared/types'
 import { setProviderCookies } from './providers/cookies'
 import type { TrayState } from '@shared/api'
 import { updateTrayState } from './tray'
@@ -9,8 +9,12 @@ import { catalog } from './services/catalog'
 import { resolveCover } from './services/cover'
 import { downloads } from './services/download'
 import { library } from './services/library'
+import { copyTracks, openTrash } from './services/fileops'
+import { copyFilesToClipboard } from './services/clipboard'
 import { playlists } from './services/playlists'
 import { settings } from './services/settings'
+import { logger } from './services/logger'
+import { exportDiagnostics } from './services/diagnostics'
 import {
   cancelQrLogin,
   onLoginSuccess,
@@ -54,6 +58,35 @@ function on(channel: string, fn: (...args: any[]) => void): void {
       fn(...args)
     } catch (error) {
       process.stdout.write(`[ipc:${channel}] ${String(error)}\n`)
+    }
+  })
+}
+
+async function chooseTargetDir(title: string): Promise<string | null> {
+  const win = BrowserWindow.getFocusedWindow() ?? undefined
+  const options: Electron.OpenDialogOptions = { title, properties: ['openDirectory', 'createDirectory'] }
+  const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+  return picked.canceled || !picked.filePaths.length ? null : picked.filePaths[0]
+}
+
+/**
+ * 复制 / 导出共用一条链路：选目录 → 逐个复制 → 推进度。
+ * template 为空就是原样复制，有模板就是按模板改名导出。
+ */
+async function copyToDir(ids: string[], template?: string) {
+  const tracks = ids
+    .map((id) => library.findById(id))
+    .filter((item): item is LibraryTrack => !!item)
+  if (!tracks.length) return null
+  const dir = await chooseTargetDir(template ? '导出到文件夹' : '复制到文件夹')
+  if (!dir) return null
+  const win = getMainWindow()
+  return copyTracks(tracks, dir, {
+    template,
+    onProgress: (done, total, current) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(IPC.libraryOpProgress, { done, total, current })
+      }
     }
   })
 }
@@ -145,6 +178,44 @@ export function registerIpc(): void {
     const record = library.findById(id)
     if (record) shell.showItemInFolder(record.filePath)
   })
+  handle(
+    IPC.libraryUpdateMetaMany,
+    (ids: string[], patch: { artists?: string; album?: string }) => library.updateMetaMany(ids, patch)
+  )
+  handle(IPC.libraryCopyFiles, async (ids: string[]) => {
+    const paths = ids
+      .map((id) => library.findById(id)?.filePath)
+      .filter((path): path is string => !!path)
+    return copyFilesToClipboard(paths)
+  })
+  handle(IPC.libraryDeleteFiles, async (ids: string[]) => {
+    const report = await library.deleteFiles(ids, settings.get().downloadDir)
+    // 真删之后歌单里的 local 条目就成了死链，跟着清掉（「仅移除」的条目同样失效）
+    const gone = report.items.filter((item) => item.ok).map((item) => item.id)
+    report.playlistsRemoved = await playlists.dropLocalTracks(gone)
+    return report
+  })
+  handle(IPC.libraryRemoveMany, async (ids: string[]) => {
+    const report = await library.removeMany(ids)
+    report.playlistsRemoved = await playlists.dropLocalTracks(ids)
+    return report
+  })
+  handle(IPC.libraryDuplicates, () => library.duplicates())
+  handle(IPC.libraryCopyTo, (ids: string[]) => copyToDir(ids))
+  handle(IPC.libraryExportTo, (ids: string[], template: string) => copyToDir(ids, template))
+  handle(IPC.libraryRelocate, async () => {
+    const dir = await chooseTargetDir('选择音乐文件的新位置')
+    if (!dir) return 0
+    const fixed = await library.relocate(dir)
+    library.setScanDirs([settings.get().downloadDir, ...settings.get().musicDirs])
+    await library.scanLocalDirs()
+    return fixed
+  })
+  handle(IPC.libraryPurgeMissing, () => library.purgeMissing())
+  handle(IPC.libraryOpenTrash, () => openTrash())
+  handle(IPC.libraryOpenDir, (dir: string) => {
+    if (dir) void shell.openPath(dir)
+  })
 
   // ---------- 本地音乐导入 ----------
   handle(IPC.libraryImportDir, async () => {
@@ -187,7 +258,23 @@ export function registerIpc(): void {
   handle(IPC.playlistRemoveSong, (args: { id: string; platform: string; songId: string }) =>
     playlists.removeSong(args.id, args.platform, args.songId)
   )
+  handle(
+    IPC.playlistMoveSong,
+    (args: { id: string; platform: string; songId: string; direction: 'up' | 'down' }) =>
+      playlists.moveSong(args.id, args.platform, args.songId, args.direction)
+  )
   handle(IPC.playlistToggleFavorite, (song: Song) => playlists.toggleFavorite(song))
+
+  // ---------- 日志与诊断 ----------
+  handle(IPC.logWrite, (args: { level: 'info' | 'warn' | 'error'; scope: string; message: string }) => {
+    const scope = String(args?.scope ?? 'renderer').slice(0, 40)
+    const message = String(args?.message ?? '').slice(0, 8000)
+    if (args?.level === 'error') logger.error(scope, message)
+    else if (args?.level === 'warn') logger.warn(scope, message)
+    else logger.info(scope, message)
+  })
+  handle(IPC.diagExport, () => exportDiagnostics())
+  handle(IPC.clipboardWrite, (text: string) => clipboard.writeText(String(text ?? '')))
 
   // ---------- 设置 ----------
   handle(IPC.settingsGet, () => settings.get())

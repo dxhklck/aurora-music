@@ -66,6 +66,10 @@ export const usePlaylistStore = defineStore('playlists', () => {
     items.value = await window.api.removePlaylistSong(id, song.platform, song.id)
   }
 
+  async function moveSong(id: string, song: Song, direction: 'up' | 'down'): Promise<void> {
+    items.value = await window.api.movePlaylistSong(id, song.platform, song.id, direction)
+  }
+
   async function toggleFavorite(song: Song): Promise<void> {
     const result = await window.api.toggleFavorite(plain(song))
     items.value = result.list
@@ -94,6 +98,7 @@ export const usePlaylistStore = defineStore('playlists', () => {
     remove,
     addSongs,
     removeSong,
+    moveSong,
     toggleFavorite,
     openPicker,
     closePicker

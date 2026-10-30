@@ -175,6 +175,43 @@ export interface LibraryTrack {
   lyricPath?: string
   metaPath?: string
   downloadedAt: number
+  /**
+   * 文件当前不在磁盘上。条目保留而不是直接丢弃：移动过文件夹的用户
+   * 还能靠「重新定位」救回来，编辑过的元数据也不会白改。
+   */
+  missing?: boolean
+  /** 最后一次确认存在的路径，仅用于重新定位时给提示 */
+  lastSeenPath?: string
+}
+
+/** 本地库单条操作结果：action 说明这一条到底做了什么 */
+export interface LibraryOpItem {
+  id: string
+  name: string
+  ok: boolean
+  /** trash=放进回收站 / unlink=永久删除 / remove=仅从库移除 / copy=复制 / export=导出 / meta=改标签 */
+  action?: 'trash' | 'unlink' | 'remove' | 'copy' | 'export' | 'meta'
+  /** 失败原因，或成功时的补充说明（如「导入目录，仅从库移除」） */
+  note?: string
+}
+
+/** 本地库批量操作结果汇总（部分成功是常态，逐条给结论） */
+export interface LibraryOpReport {
+  ok: number
+  failed: number
+  items: LibraryOpItem[]
+  /** 复制/导出的目标目录，用于「打开文件夹」 */
+  targetDir?: string
+  /** 顺带从歌单里清掉的条目数（真删之后避免留下死链） */
+  playlistsRemoved?: number
+}
+
+/** 重复文件分组 */
+export interface DuplicateGroup {
+  /** identical=内容完全一致；similar=同曲不同音质 */
+  kind: 'identical' | 'similar'
+  label: string
+  ids: string[]
 }
 
 /** 内置收藏夹的固定 id：不可重命名、不可删除 */
@@ -224,7 +261,7 @@ export interface AppSettings {
    * 五段均衡器。gain 单位为 dB，固定 5 段（60/230/910/3600/14000 Hz），范围 ±12。
    * 关闭时滤波器仍在链路里，只是增益归零——拆链重接极易踩到静音。
    */
-  equalizer: { enabled: boolean; gains: number[] }
+  equalizer: { enabled: boolean; gains: number[]; /** 夜间限幅（压动态） */ night?: boolean }
   /** 点关闭按钮时最小化到系统托盘（关掉 = 隐藏后台播放）；为 false 时关闭即退出。托盘不可用时始终退出 */
   closeToTray: boolean
   /**

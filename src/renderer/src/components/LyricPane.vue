@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Lyric, LyricLine } from '@shared/types'
 import { findLyricIndex } from '@shared/lyric'
 import { audio } from '../core/audio'
+import { usePlayerStore } from '../stores/player'
 
 const props = withDefaults(
   defineProps<{
@@ -24,6 +25,20 @@ const offsetY = ref(0)
 const hasLines = ref(false)
 const karaoke = ref(false)
 let raf = 0
+
+/**
+ * 手动对齐：偏移的单一事实来源在 player store（源偏移 + 用户微调），
+ * 逐帧高亮与 store 里的 activeLyricIndex 用同一个合成偏移，节奏保持一致。
+ */
+const player = usePlayerStore()
+const totalOffset = computed(() => (props.lyric?.offset ?? 0) + player.lyricOffsetAdj)
+/** 控制条上的偏移读数：带「偏移」前缀与两侧步进按钮区分开（中间这颗是复位），0 显示「对齐」 */
+const offsetLabel = computed(() => {
+  const s = totalOffset.value / 1000
+  if (Math.abs(s) < 0.05) return '对齐'
+  const sign = s > 0 ? '+' : '−'
+  return `偏移 ${sign}${Math.abs(s).toFixed(1).replace(/\.0$/, '')}s`
+})
 
 const lines = () => props.lyric?.lines ?? []
 
@@ -50,14 +65,14 @@ function writeElapsed(): void {
   const line = list[active.value]
   const el = lineEls.value[active.value]
   if (!line || !el || !line.words?.length) return
-  const time = audio.currentTime + (props.lyric?.offset ?? 0)
+  const time = audio.currentTime + totalOffset.value
   el.style.setProperty('--e', String(Math.max(0, time - line.time)))
 }
 
 function tick(): void {
   const list = lines()
   if (list.length) {
-    const time = audio.currentTime + (props.lyric?.offset ?? 0)
+    const time = audio.currentTime + totalOffset.value
     const index = findLyricIndex(list, time)
     if (index !== active.value) {
       active.value = index
@@ -142,6 +157,15 @@ onBeforeUnmount(() => {
       </div>
       <div class="mask top" />
       <div class="mask bottom" />
+
+      <!-- 歌词手动对齐：悬停浮现，调完按歌记忆 -->
+      <div class="align" title="歌词整体偏早/偏晚时微调，正数 = 歌词提前">
+        <button @click="player.nudgeLyric(-500)" title="歌词延后 0.5 秒">−0.5s</button>
+        <button class="val" :class="{ adjusted: player.lyricOffsetAdj !== 0 }" @click="player.resetLyricOffset()" title="点击复位为源偏移">
+          {{ offsetLabel }}
+        </button>
+        <button @click="player.nudgeLyric(500)" title="歌词提前 0.5 秒">+0.5s</button>
+      </div>
     </template>
 
     <div v-else-if="lyric && lyric.plain" class="plain">
@@ -300,6 +324,53 @@ onBeforeUnmount(() => {
   right: 0;
   height: 42px;
   pointer-events: none;
+}
+
+/* ===== 歌词手动对齐控制条 ===== */
+.align {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(10, 10, 16, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  transition: opacity 0.28s var(--ease);
+}
+.lyric:hover .align,
+.align:focus-within {
+  opacity: 1;
+}
+.align button {
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 6px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.18s var(--ease);
+  font-variant-numeric: tabular-nums;
+}
+.align button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.align .val {
+  min-width: 60px;
+  text-align: center;
+  font-weight: 600;
+}
+.align .val.adjusted {
+  color: var(--accent);
 }
 .mask.top {
   top: 0;

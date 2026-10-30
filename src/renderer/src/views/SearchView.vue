@@ -18,7 +18,23 @@ function submit(): void {
 
 function pick(keyword: string): void {
   input.value = keyword
+  suggestOpen.value = false
   void search.run(keyword)
+}
+
+/* 输入联想：聚焦且输入非空时，下拉匹配历史关键词（含子串，不限前缀） */
+const suggestOpen = ref(false)
+const suggestions = computed(() => {
+  const q = input.value.trim().toLowerCase()
+  if (!q || q === search.keyword.toLowerCase()) return []
+  return search.history.filter((item) => item.toLowerCase().includes(q)).slice(0, 6)
+})
+
+function onBlur(): void {
+  // 延迟关闭：让下拉项的 click 先触发（mousedown 已 prevent 掉失焦）
+  setTimeout(() => {
+    suggestOpen.value = false
+  }, 150)
 }
 
 onMounted(() => {
@@ -50,9 +66,24 @@ watch(
         v-model="input"
         placeholder="输入歌曲、歌手或专辑名，回车搜索"
         spellcheck="false"
+        @focus="suggestOpen = suggestions.length > 0"
+        @input="suggestOpen = true"
+        @blur="onBlur"
         @keydown.enter="submit"
       />
       <button class="btn primary" @click="submit">搜索</button>
+      <div v-if="suggestOpen && suggestions.length" class="suggest glass">
+        <button
+          v-for="item in suggestions"
+          :key="item"
+          class="s-item"
+          @mousedown.prevent
+          @click="pick(item)"
+        >
+          <Icon name="search" :size="13" />
+          {{ item }}
+        </button>
+      </div>
     </div>
 
     <div v-if="search.history.length" class="history">
@@ -134,6 +165,7 @@ watch(
 }
 
 .search-box {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -289,5 +321,42 @@ watch(
 .guide-chips button:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* 输入联想下拉：贴在搜索框下方。
+   底色用 --bg 高比例混合（而非 .glass 的 4.5% 白）：浮层压住「最近搜索」时
+   半透明会让底下的 chips 文字透上来，和联想项糊成两层字。 */
+.suggest {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: 6px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.s-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.s-item:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
 }
 </style>

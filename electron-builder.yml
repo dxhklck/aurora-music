@@ -36,6 +36,14 @@ win:
   # 这条链上被不同环节各自规范化一次（本地留着空格、GitHub 换成点），
   # 最终 latest.yml 指向的名字和实际资产名对不上，更新永远 404。
   artifactName: Aurora-Music-${version}-${arch}.${ext}
+  # 代码签名：证书不进仓库，由 CI 的 CSC_LINK（base64 的 .pfx）+ CSC_KEY_PASSWORD 提供，
+  # electron-builder 自动识别，未配置时跳过签名（产物仍可运行，只是会触发 SmartScreen）。
+  # 时间戳服务器决定「证书过期后旧版本签名是否还有效」，必须配 RFC3161。
+  # 申请与验证步骤见 docs/code-signing.md
+  signingHashAlgorithms:
+    - sha256
+  rfc3161TimeStampServer: http://timestamp.digicert.com
+  timeStampServer: http://timestamp.digicert.com
 
 nsis:
   oneClick: false

@@ -378,6 +378,25 @@ function openBilibili(): void {
   window.open('https://space.bilibili.com/477558144')
 }
 
+/**
+ * 导出诊断信息：系统与运行时信息 + 脱敏后的设置 + 音源巡检 + 最近日志，
+ * 保存成一个 txt。遇到「没声音 / 白屏 / 某个源搜不到」时先让用户导这个。
+ */
+const exportingDiag = ref(false)
+
+async function exportDiagnostics(): Promise<void> {
+  if (exportingDiag.value) return
+  exportingDiag.value = true
+  try {
+    const path = await window.api.exportDiagnostics()
+    if (path) app.toast('诊断信息已导出，可直接发给开发者', 'success')
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : '导出失败', 'error')
+  } finally {
+    exportingDiag.value = false
+  }
+}
+
 let offLoginResult: (() => void) | null = null
 
 onBeforeUnmount(() => {
@@ -859,6 +878,9 @@ onBeforeUnmount(() => {
           </button>
           <button class="btn" :disabled="checkingUpdate" @click="checkUpdate">
             <Icon name="download" :size="14" /> {{ checkingUpdate ? '检查中…' : '检查更新' }}
+          </button>
+          <button class="btn" :disabled="exportingDiag" @click="exportDiagnostics">
+            <Icon name="folder" :size="14" /> {{ exportingDiag ? '导出中…' : '导出诊断' }}
           </button>
           <button v-if="update?.state === 'ready'" class="btn primary" @click="installUpdateNow">
             重启并安装

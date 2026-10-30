@@ -37,7 +37,8 @@ export class LocalProvider extends BaseProvider {
 
   async search({ keyword, page, limit }: SearchArgs): Promise<SearchPage> {
     const key = keyword.trim().toLowerCase()
-    const all = library.list()
+    // 缺失文件不进搜索结果：点开必然报「文件已被移动或删除」，只会添堵
+    const all = library.list().filter((item) => !item.missing)
     const matched = key
       ? all.filter(
           (item) =>
