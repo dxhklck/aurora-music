@@ -126,6 +126,26 @@ async function deleteStaleAssets(tag, names, purgeAllAttach = false) {
   }
 }
 
+/**
+ * 清理指针 release 里「不属于本轮」的旧附件（上一版的 exe / blockmap / latest.yml）。
+ * 只在全部上传与校验通过之后调用——顺序反了就会重演 v1.3.8 的事故：
+ * 先把 stable 清空、再传 110MB 的 exe，一旦传输失败，主更新源直接变成空的。
+ */
+async function pruneOldAssets(tag, keep) {
+  const rel = await api(`/repos/${REPO}/releases/tags/${tag}`)
+  for (const asset of rel.assets ?? []) {
+    if (asset.type !== 'attach' || keep.includes(asset.name)) continue
+    const res = await fetch(`${API}/repos/${REPO}/releases/${tag}/attach_files/${asset.id}`, {
+      method: 'DELETE',
+      headers: { 'PRIVATE-TOKEN': TOKEN }
+    })
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`DELETE ${tag}/${asset.name}（id=${asset.id}）: HTTP ${res.status}`)
+    }
+    console.log(`已清理旧版本附件 ${tag}/${asset.name}`)
+  }
+}
+
 async function uploadOnce(tag, file, absPath) {
   const up = await api(`/repos/${REPO}/releases/${tag}/upload_url?file_name=${encodeURIComponent(file)}`)
   const body = new Uint8Array(await readFile(absPath))
@@ -187,22 +207,32 @@ try {
   await ensureRelease(TAG)
   await ensureRelease(POINTER_TAG, { pointer: true })
 
-  // 版本 release 与指针 release 各放一份；同名附件必须先删旧记录再传
-  // （直接重复 PUT 不会更新内容，见 deleteStaleAssets 的注释）
-  // 指针 release 额外清掉旧版本命名的附件（1.3.6 的 exe 不会匹配 1.3.7 的文件名清单，
-  // 不清就会逐版堆积——v1.3.7 首跑后 stable 里就同时躺着 1.3.6 与 1.3.7 两套）
-  for (const tag of [TAG, POINTER_TAG]) {
-    await deleteStaleAssets(tag, assets, tag === POINTER_TAG)
+  // 带版本号的文件每次发版都是新名字，永远不会同名冲突；
+  // 只有 latest.yml 是固定名，必须「先删旧记录再传」（重复 PUT 不会更新内容，
+  // 见 deleteStaleAssets 的注释）。
+  const versioned = assets.filter((name) => name !== 'latest.yml')
+  const pointerFile = assets.filter((name) => name === 'latest.yml')
+
+  // 版本 release：同名先删再传，保证重跑（比如重打 tag）时内容能刷新
+  await deleteStaleAssets(TAG, assets, false)
+  for (const name of [...versioned, ...pointerFile]) {
+    await upload(TAG, name, path.join(DIR, name))
   }
-  for (const name of assets) {
-    const absPath = path.join(DIR, name)
-    await upload(TAG, name, absPath)
-    await upload(POINTER_TAG, name, absPath)
+
+  // 指针 release：先传新版本的安装包/差量包，此时旧 latest.yml 与旧 exe 都还在，
+  // 更新器仍然可用；最后才替换 latest.yml，全部校验通过后再清理旧版本附件。
+  for (const name of versioned) {
+    await upload(POINTER_TAG, name, path.join(DIR, name))
+  }
+  if (pointerFile.length) {
+    await deleteStaleAssets(POINTER_TAG, pointerFile, false)
+    await upload(POINTER_TAG, pointerFile[0], path.join(DIR, pointerFile[0]))
   }
 
   const localFiles = new Map(assets.map((name) => [name, path.join(DIR, name)]))
   await verify(TAG, assets, localFiles)
   await verify(POINTER_TAG, assets, localFiles)
+  await pruneOldAssets(POINTER_TAG, assets)
   console.log('GitCode 同步完成')
 } catch (error) {
   fail(`::error::GitCode 同步失败：${String(error).slice(0, 500)}`)
