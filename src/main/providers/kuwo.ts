@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import type {
   ChartSummary,
   Lyric,
@@ -17,6 +18,29 @@ const KUWO_MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148'
 
 /**
+ * 车载播放器取址接口（伪装成车机 App）。免登录、免签名就能拿到完整音频，
+ * 会员曲目同样是全长 320k——它们只是不允许「在线听免费版」，车机端照给。
+ */
+const VEHICLE_PLAY_URL = 'https://mobi.kuwo.cn/mobi.s'
+const VEHICLE_SOURCE = 'kwplayercar_ar_6.0.0.9_B_jiakong_vh.apk'
+const VEHICLE_UA = 'okhttp/3.10.0'
+/** 小于这个体积的音轨按试听片段丢弃（128k 的 15 秒约 240 KB） */
+const PREVIEW_BYTES = 240 * 1024
+
+interface MobilePlayResponse {
+  code?: number
+  data?: {
+    rid?: number | string
+    url?: string
+    format?: string
+    /** 0 = 完整音轨；非 0 是试听/占位 */
+    type?: number
+    bitrate?: number
+    duration?: number
+  }
+}
+
+/**
  * 酷我适配器。
  * 搜索接口返回的是「单引号伪 JSON」，这里用字段级正则解析而不是整体 JSON.parse，
  * 避免歌手名里的撇号破坏解析（musicdl 用 json_repair 解决同类问题）。
@@ -34,6 +58,9 @@ export class KuwoProvider extends BaseProvider {
   }
 
   private readonly referer = 'https://www.kuwo.cn/'
+
+  /** 车载接口的匿名会话 id：服务端只校验格式，不校验真实性，进程内复用一个即可 */
+  private readonly anonymousUser = `C_APK_guanwang_${Date.now()}${randomBytes(8).toString('hex')}`
 
   /** 酷我精选 6 榜（顺序即展示顺序）：bid 对应 kuwo.cn/rankList「官方」分组 */
   private static readonly BANGS = [
@@ -120,42 +147,62 @@ export class KuwoProvider extends BaseProvider {
     return match ? decodeHtml(match[1]) : ''
   }
 
+  /**
+   * 取播放地址。
+   *
+   * 走车载播放器接口：`source=kwplayercar_ar_6.0.0.9` 伪装成车机 App，无需登录、
+   * 无需签名即可拿到完整音频（会员曲目也是全长 320k，实测会员畅听榜前三首可用）。
+   *
+   * 为什么弃用 antiserver 的 `anti.s?type=convert_url`：2026-10 起它对**任意** rid
+   * 都返回同一个 11 秒占位文件（181 KB），探针能过、播放能出声，但下载下来是残缺的，
+   * 用户侧表现为「榜单一首都下载不了 / 提示要会员」。
+   */
   async resolveStream(song: Song, quality: Quality): Promise<StreamInfo> {
-    const ladders =
+    // 逐档降级；每档都以接口实际返回的音质为准（会员曲要无损可能只给 320k）
+    const ladder =
       quality === 'lossless'
-        ? [
-            { br: '2000kflac', format: 'flac', label: '无损 FLAC', quality: 'lossless' as Quality },
-            { br: '320kmp3', format: 'mp3', label: '320k MP3', quality: 'high' as Quality }
-          ]
+        ? ['2000kflac', '320kmp3']
         : quality === 'high'
-          ? [
-              { br: '320kmp3', format: 'mp3', label: '320k MP3', quality: 'high' as Quality },
-              { br: '128kmp3', format: 'mp3', label: '128k MP3', quality: 'standard' as Quality }
-            ]
-          : [{ br: '128kmp3', format: 'mp3', label: '128k MP3', quality: 'standard' as Quality }]
+          ? ['320kmp3', '128kmp3']
+          : ['128kmp3']
 
-    for (const step of ladders) {
-      const url =
-        'https://antiserver.kuwo.cn/anti.s?' +
-        new URLSearchParams({
-          type: 'convert_url',
-          br: step.br,
-          format: step.format,
-          response: 'url',
-          rid: `MUSIC_${song.id}`
-        }).toString()
+    for (const br of ladder) {
       try {
-        const raw = (await this.text(url, { headers: { Referer: this.referer } })).trim()
-        if (!raw.startsWith('http')) continue
-        const probe = await this.probe(raw, this.referer)
+        const query = new URLSearchParams({
+          user: this.anonymousUser,
+          source: VEHICLE_SOURCE,
+          type: 'convert_url_with_sign',
+          from: 'PC',
+          f: 'web',
+          rid: song.id,
+          br
+        }).toString()
+        const payload = await this.json<MobilePlayResponse>(`${VEHICLE_PLAY_URL}?${query}`, {
+          headers: { 'User-Agent': VEHICLE_UA }
+        })
+        const data = payload.data
+        if (payload.code !== 200 || !data?.url || !/^https?:/i.test(data.url)) continue
+        // 身份对不上说明平台塞了别的歌过来，宁可不放
+        if (data.rid !== undefined && String(data.rid) !== String(song.id)) continue
+        // 非 0 = 试听片段；mflac/mgg 是加密壳，本项目不做解密
+        if (data.type !== undefined && data.type !== 0) continue
+        if (data.format === 'mflac' || data.format === 'mgg') continue
+        if (!(Number(data.duration ?? 0) > 0)) continue
+
+        const probe = await this.probe(data.url, this.referer, { 'User-Agent': VEHICLE_UA })
         if (!probe.ok) continue
+        if (probe.size > 0 && probe.size < PREVIEW_BYTES) continue
+
+        // 以实际返回的音质为准：会员曲要 flac 可能被降成 320k mp3
+        const lossless = data.format === 'flac'
+        const bitrate = Number(data.bitrate ?? 0)
         return {
-          url: mediaUrl(raw, this.referer),
-          directUrl: probe.finalUrl || raw,
+          url: mediaUrl(data.url, this.referer),
+          directUrl: probe.finalUrl || data.url,
           headers: { Referer: this.referer },
-          quality: step.quality,
-          label: step.label,
-          format: step.format,
+          quality: lossless ? 'lossless' : bitrate >= 320 ? 'high' : 'standard',
+          label: lossless ? '无损 FLAC' : bitrate >= 320 ? '320k MP3' : '128k MP3',
+          format: lossless ? 'flac' : 'mp3',
           expiresAt: Date.now() + 30 * 60_000
         }
       } catch {
@@ -201,7 +248,7 @@ export class KuwoProvider extends BaseProvider {
     }
   }
 
-  /** 解析 H5 详情页：mid 是音乐 id，可直接走 antiserver 换播放地址 */
+  /** 解析 H5 详情页：mid 是音乐 id，可直接走车载接口换播放地址 */
   private parseBangHtml(html: string): Song[] {
     const songs: Song[] = []
     const blocks = html.split('<li class="singBox"').slice(1)
