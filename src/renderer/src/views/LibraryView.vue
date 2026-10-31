@@ -1119,6 +1119,12 @@ function openTargetDir(): void {
   font-size: 11.5px;
   outline: none;
 }
+/* 弹出列表由浏览器绘制，不会继承 select 自身的 background；
+   不显式给 option 上色，深色主题下就是白底白字 */
+.sel option {
+  background: var(--bg-soft);
+  color: var(--text);
+}
 .sorter {
   display: flex;
   align-items: center;

@@ -1,4 +1,7 @@
 :root {
+  /* 让原生控件（select 下拉列表、滚动条等）跟随主题；
+     缺了它，深色下 select 弹出层是系统浅色底、文字却是白字 */
+  color-scheme: dark;
   --bg: #07070b;
   --bg-soft: #0c0c13;
   --bg-elev: rgba(18, 18, 26, 0.72);
@@ -57,6 +60,7 @@
 
 /* 浅色主题：只翻转中性色；强调色由当前音源的渐变色提供（App.vue shellStyle） */
 html[data-theme='light'] {
+  color-scheme: light;
   --bg: #f2f3f8;
   --bg-soft: #e9ebf2;
   --bg-elev: rgba(255, 255, 255, 0.86);
