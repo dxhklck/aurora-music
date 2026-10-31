@@ -25,11 +25,20 @@ import { isNewerVersion } from './utils'
 const REPO = 'dxhklck/aurora-music'
 const MANUAL_URL = `https://github.com/${REPO}/releases/latest`
 
-/** GitCode 主源。指向固定 tag `stable` 的资产目录（CI 每次发版覆盖其中的
- *  latest.yml + exe + blockmap，2026-10-30 实测：tag 路径匿名可下、Range 206）。
- *  不能用 /releases/latest/download/ 别名——GitCode 对该路径返回的是网页 HTML 而非文件，
- *  也不能把 tag 叫做 latest——它会被解析成「当前 API latest」而不是固定 tag。 */
-const GITCODE_FEED = `https://gitcode.com/dxhklck/aurora_music/releases/download/stable`
+/**
+ * GitCode 主源。指向**独立的公开资产仓库** `aurora_music_release`，不是代码仓库。
+ *
+ * 原因（2026-10-31 踩实）：代码仓库 `aurora_music` 一旦改为私有，release 资产的
+ * 匿名下载会一律 403——GitCode 的下载口只认「仓库公开」，连 PRIVATE-TOKEN 都不看
+ * （三种带令牌方式实测全 403）。而分发型客户端的更新源必须匿名可读，
+ * 所以安装包与 latest.yml 拆到单独的公开仓库，代码仓库可以保持私有。
+ *
+ * 目录形态：固定 tag `stable` 下的扁平资产目录（CI 每次发版覆盖
+ * latest.yml + exe + blockmap）。不能用 /releases/latest/download/ 别名——
+ * GitCode 对该路径返回网页 HTML 而非文件；也不能把 tag 叫做 latest——
+ * 它会被解析成「当前 API latest」而不是固定 tag。
+ */
+const GITCODE_FEED = `https://gitcode.com/dxhklck/aurora_music_release/releases/download/stable`
 
 /**
  * 国内对象存储源（可选，备胎）。

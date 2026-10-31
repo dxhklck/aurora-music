@@ -1,13 +1,17 @@
 # 国内更新源配置指南
 
-> 目标：国内用户自动更新不超时、速度快。**主源 = GitCode（免费，已实测接线）**，
-> GitHub 直连与镜像作后备；对象存储是可选的差量更新增强（未配置）。
+> 目标：国内用户自动更新不超时、速度快。**主源 = GitCode 的公开资产仓库
+> `aurora_music_release`（免费，已实测接线）**，GitHub 直连与镜像作后备；
+> 对象存储是可选的差量更新增强（未配置）。
+>
+> 代码仓库 `aurora_music` 可以是私有的——但**更新资产必须放在公开仓库**，
+> 原因见第二节的「私有仓库」一行。
 
-## 一、当前架构（2026-10-30 落地）
+## 一、当前架构（2026-10-31 调整）
 
 ```
 探测顺序（src/main/updater.ts 的 CHANNELS）：
-  1. GitCode 主源  → gitcode.com/dxhklck/aurora_music/releases/download/stable/
+  1. GitCode 主源  → gitcode.com/dxhklck/aurora_music_release/releases/download/stable/
   2. 对象存储（可选，STORAGE_FEED 为空串时不启用）
   3. GitHub 直连
   4. ghfast.top / gh-proxy.com 镜像兜底
@@ -15,6 +19,16 @@
 首个能拉到 latest.yml 的胜出，跨启动记在 settings.updateChannel；
 渠道失效（error 事件）时清掉记忆重新探测。
 ```
+
+**两个仓库的分工**（2026-10-31 拆分）：
+
+| 仓库 | 可见性 | 内容 |
+| --- | --- | --- |
+| `dxhklck/aurora_music` | 可私有 | 源码、tag、CI 镜像 |
+| `dxhklck/aurora_music_release` | **必须公开** | 只有 `latest.yml` / `exe` / `blockmap`，无任何源码 |
+
+更新器只认后者。断链时的排查顺序也因此变了：先看资产仓库是否被改成私有，
+再看网络。
 
 每个渠道还会切一次更新器 session 的代理（`electron-updater` 是独立 partition，不碰主窗口与音源请求）：
 **GitCode → `direct`**，对象存储 / GitHub / 镜像 → `system`。GitCode 国内直连实测约 11 MB/s，
@@ -26,14 +40,17 @@
 CI（`build.yml` 的 publish-release job）每次发版做两件事：
 
 - **Sync update files to GitCode**：`scripts/publish-gitcode.mjs` 把
-  `latest.yml + exe + blockmap` 传到版本 release（tag=vX.Y.Z）与指针 release（tag=stable）；
-- **Mirror code to GitCode**：把 `origin/main` 与全部 tags 推到 GitCode 仓库作镜像。
+  `latest.yml + exe + blockmap` 传到**公开资产仓库** `aurora_music_release` 的
+  版本 release（tag=vX.Y.Z）与指针 release（tag=stable）；
+- **Mirror code to GitCode**：把 `origin/main` 与全部 tags 推到代码仓库 `aurora_music` 作镜像
+  （这个可以私有，令牌推送仍可用）。
 
 ## 二、GitCode 上的实测结论（排坑实录，2026-10-30）
 
 | 事项 | 结论 |
 | --- | --- |
-| 附件下载 | `releases/download/<tag>/<file>` **可用**，匿名、无需登录 |
+| 附件下载 | `releases/download/<tag>/<file>` **可用**，匿名、无需登录——**前提是仓库公开** |
+| 仓库私有 | **一律 403**（2026-10-31 实测）：仓库页 403、匿名下载 403，连 `PRIVATE-TOKEN` 头 / `Bearer` / `?private_token=` 三种带令牌方式**也全是 403**。GitCode 的下载口只认「仓库公开」这一条，不接受令牌。所以更新资产必须放公开仓库 |
 | Range 请求 | **支持**（HTTP 206 + Content-Range），断点续传没问题 |
 | `releases/latest/download/<file>` 别名 | **不可用**：返回的是网页 HTML 而不是文件（只看状态码会误判，必须查内容） |
 | tag 名叫 `latest` | **不要用**：下载路由会把它解析成「当前 API latest」而不是固定 tag |
@@ -53,7 +70,9 @@ CI（`build.yml` 的 publish-release job）每次发版做两件事：
 
 ## 三、一次性配置（已完成项打勾）
 
-- [x] GitCode 注册账号 `dxhklck`，建公开仓库 `aurora_music`
+- [x] GitCode 注册账号 `dxhklck`，建公开仓库 `aurora_music`（代码镜像）
+- [x] **建公开资产仓库 `aurora_music_release`**（2026-10-31，只放更新三件套；
+      代码仓库转私有后，更新链路靠它。`private=false` 是硬要求）
 - [x] 生成私人令牌（作用域 repo + api），本地存 `F:\aurora\.env.local`（已被 .gitignore 覆盖）
 - [x] **把同一个令牌配到 GitHub 仓库 Secrets**（名字 `GITCODE_TOKEN`）：v1.3.9 的
       「Sync update files to GitCode」步骤已跑通；CI 的两个 GitCode 步骤都依赖它，
@@ -67,8 +86,10 @@ CI（`build.yml` 的 publish-release job）每次发版做两件事：
 
 ```bash
 # 1. CI「Sync update files to GitCode」步骤成功，输出「GitCode 同步完成」
-# 2. 指针内容已更新为新版本：
-curl -sL "https://gitcode.com/dxhklck/aurora_music/releases/download/stable/latest.yml" | head -3
+# 2. 指针内容已更新为新版本（注意是资产仓库，不是代码仓库）：
+curl -sL "https://gitcode.com/dxhklck/aurora_music_release/releases/download/stable/latest.yml" | head -3
+# 2b. 公开性自检：仓库页必须是 200，403 说明仓库被改成私有了
+curl -sL -o /dev/null -w "%{http_code}\n" "https://gitcode.com/dxhklck/aurora_music_release"
 # 3. 应用端：settings.json 里出现 "updateChannel" 指向 stable 路径；
 #    设置页检查更新能发现新版本并完成下载
 # 4. 代码镜像：GitCode 仓库的 main 与 tags 与 GitHub 一致

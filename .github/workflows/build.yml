@@ -224,10 +224,13 @@ jobs:
       # continue-on-error：GitHub 美国 runner 到 GitCode 的连通性不可控（实测 fetch failed），
       # 同步失败只告警不红——发布主体（GitHub Release）已在前面完成，GitCode 侧可由
       # 本机手动补跑 scripts/publish-gitcode.mjs 兜底（见 docs/update-feed-setup.md）。
+      # 更新资产投到**公开仓库** aurora_music_release：代码仓库可以是私有的，
+      # 但 GitCode 的资产下载口只认「仓库公开」，私有仓库时匿名下载一律 403。
       - name: Sync update files to GitCode
         continue-on-error: true
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          REPO: dxhklck/aurora_music_release
           TAG: ${{ github.ref_name }}
         run: |
           if [ -z "$GITCODE_TOKEN" ]; then

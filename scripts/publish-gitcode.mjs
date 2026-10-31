@@ -1,5 +1,10 @@
 /**
- * 把 Windows 更新资产同步到 GitCode（主更新源，GitHub 为备份）。
+ * 把 Windows 更新资产同步到 GitCode 的**公开资产仓库** `aurora_music_release`
+ * （代码仓库 `aurora_music` 可以是私有的；GitHub Release 仍作备份）。
+ *
+ * 为什么单独一个仓库：GitCode 的资产下载口只认「仓库公开」——私有仓库时匿名下载
+ * 一律 403，连 PRIVATE-TOKEN 头也无效（2026-10-31 实测三种令牌方式全 403）。
+ * 而分发型客户端的更新源必须匿名可读，所以安装包与 latest.yml 拆出来。
  *
  * GitCode 侧维护两类 release（2026-10-30 实测结论，见 docs/update-feed-setup.md）：
  *   1. 版本 release（tag=vX.Y.Z）：存放该版本三件套，供人下载；
@@ -29,7 +34,9 @@ import { createHash } from 'node:crypto'
 // 备用域名多一条路；两个都失败时报错要带全原因。
 const API_HOSTS = ['https://api.gitcode.com/api/v5', 'https://api.atomgit.com/api/v5']
 const API = API_HOSTS[0]
-const REPO = process.env.REPO || 'dxhklck/aurora_music'
+// 默认投到**公开资产仓库**，不是代码仓库：私有仓库的 release 资产匿名下载 403，
+// 而更新器必须匿名可读（详见 src/main/updater.ts 的 GITCODE_FEED 注释）。
+const REPO = process.env.REPO || 'dxhklck/aurora_music_release'
 const TAG = process.env.TAG
 const TOKEN = process.env.GITCODE_TOKEN
 const DIR = process.env.FILES_DIR || 'artifacts'
