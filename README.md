@@ -169,3 +169,11 @@ HLS（m3u8）音源转封装依赖系统的 `ffmpeg`；缺失时会退回 TS 分
 
 音源引擎的分页并行、逐首回调与错误码分类参考了 [`musicdl`](https://github.com/CharlesPikachu/musicdl)（MIT），
 实现已全部改写为 TypeScript，运行时不包含 Python，也不再分发上游代码。
+
+## 许可证
+
+代码按 [MIT](LICENSE) 授权。**名称、应用图标与品牌标识不在授权范围内**：
+再分发修改版须改名换图标，不得暗示原作者背书。详见 [NOTICE](NOTICE)。
+
+安装包仅在 [GitHub Releases](https://github.com/dxhklck/aurora-music/releases) 与
+[GitCode Releases](https://gitcode.com/dxhklck/aurora_music_release/releases) 发布。
