@@ -12,7 +12,7 @@ let toastSeed = 0
 
 export const useAppStore = defineStore('app', () => {
   const providers = ref<ProviderInfo[]>([])
-  const platform = ref<PlatformId>('demo')
+  const platform = ref<PlatformId>('netease')
   const settings = ref<AppSettings | null>(null)
   const toasts = ref<Toast[]>([])
   const booted = ref(false)
@@ -29,12 +29,18 @@ export const useAppStore = defineStore('app', () => {
 
   async function boot(): Promise<void> {
     const [list, config] = await Promise.all([window.api.providers(), window.api.getSettings()])
-    // hidden 音源（本地音乐等）不在切换列表中出现，但底层仍在服务播放
+    // hidden 音源（本地音乐、离线演示）不在切换列表中出现，但底层仍在服务播放
     providers.value = list.filter((item) => !item.hidden)
     settings.value = config
-    platform.value = list.some((item) => item.id === config.platform)
-      ? config.platform
-      : (list[0]?.id ?? 'demo')
+    // 判定必须用过滤后的列表：曾经用原始 list，hidden 的 demo 命中后 platform 停在
+    // 'demo'，而侧栏按过滤后的列表找不到它 → 卡片显示第一个可见源、下拉无勾选，
+    // 实际搜索/榜单却全走 demo。选中的音源必须是用户能在界面上看到的那个。
+    const visible = providers.value.some((item) => item.id === config.platform)
+    platform.value = visible ? config.platform : (providers.value[0]?.id ?? 'demo')
+    // 修正过的结果写回，否则每次启动都要重算一遍（也让设置页显示的值与界面一致）
+    if (!visible && platform.value !== config.platform) {
+      await patchSettings({ platform: platform.value })
+    }
     booted.value = true
   }
 

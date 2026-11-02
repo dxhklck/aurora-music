@@ -35,7 +35,10 @@ export class DemoProvider extends BaseProvider {
     gradient: ['#7c6cff', '#2a1d6e'],
     capabilities: { search: true, charts: true, stream: true, lyric: true },
     description: '内置离线曲目，无需网络即可体验完整功能',
-    // 不出现在音源切换列表；保留作为离线自检/最小适配样例
+    // 不进音源切换列表。它的用途是离线自检（selftest 的 critical 项全走它）
+    // 与「新增音源只需实现接口」的最小样例，不是给用户日常听歌用的。
+    // 注意：既然 hidden，就绝不能把它设成默认 platform——那会让侧栏显示的源
+    // 与实际搜索/榜单用的源不一致（v1.3.12 及之前的问题）。
     hidden: true
   }
 

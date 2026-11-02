@@ -20,7 +20,9 @@ function normalizeEqualizer(input: unknown): AppSettings['equalizer'] {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  platform: 'demo',
+  // 首次启动落到一个真实音源。demo（离线演示）是 hidden 的，不在切换列表里，
+  // 当默认值会让侧栏显示的源与实际使用的源不一致——全新安装打开只有 3 首 40 秒的曲子。
+  platform: 'netease',
   quality: 'high',
   volume: 0.75,
   playMode: 'loop',
