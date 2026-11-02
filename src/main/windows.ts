@@ -5,6 +5,7 @@ import { IPC } from '@shared/ipc'
 import type { MiniVolumeState } from '@shared/types'
 import { trayReady, isQuitting } from './tray'
 import { settings } from './services/settings'
+import { clampTopLeft, restoreRect } from './geometry'
 import { clamp } from './utils'
 
 let mainWindow: BrowserWindow | null = null
@@ -147,10 +148,7 @@ function miniBaseTop(win: BrowserWindow): number {
 /** 把目标矩形纠正到最近显示器的可视区域内（换显示器/分辨率后防止窗口跑到屏外） */
 function clampRect(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
   const display = screen.getDisplayMatching(rect)
-  const area = display.workArea
-  const x = Math.min(Math.max(rect.x, area.x), area.x + area.width - rect.width)
-  const y = Math.min(Math.max(rect.y, area.y), area.y + area.height - rect.height)
-  return { x, y }
+  return clampTopLeft(rect, display.workArea)
 }
 
 /**
@@ -488,6 +486,39 @@ const LYRIC_BOUNDS: Record<
 
 let lyricMode: LyricMode = 'full'
 
+/**
+ * 取某个形态上次存下的矩形，夹到它所在那块屏的可用区域。
+ * 用存下来的坐标反查屏幕：副屏上的歌词窗重启后要留在副屏，不能回主屏。
+ * 没有记录或记录不合法时返回 null，调用方走默认尺寸与系统默认位置。
+ */
+function savedLyricRect(mode: LyricMode): { x: number; y: number; width: number; height: number } | null {
+  const saved = settings.get().desktopLyricBounds?.[mode]
+  if (!saved) return null
+  try {
+    const area = screen.getDisplayMatching(saved).workArea
+    return restoreRect(saved, LYRIC_BOUNDS[mode], area)
+  } catch {
+    // screen 在 app ready 之前不可用：当作没有存档，退回默认位置，别让开窗失败
+    return null
+  }
+}
+
+/**
+ * 把当前歌词窗的位置尺寸写回设置。
+ *
+ * 只在「拖动结束 / 拉伸结束 / 关闭」三个时机调用：move 与 resize 事件是每帧触发的，
+ * 挂在那儿等于每个像素都写一次盘。写盘失败不影响窗口本身——位置记不住是小事，
+ * 把窗口搞挂才是大事（settings.set 内部已有串行队列，不会和别的写入抢 .tmp）。
+ */
+function saveLyricBounds(): void {
+  if (!lyricWindow || lyricWindow.isDestroyed()) return
+  const { x, y, width, height } = lyricWindow.getBounds()
+  const current = settings.get().desktopLyricBounds ?? {}
+  void settings
+    .set({ desktopLyricBounds: { ...current, [lyricMode]: { x, y, width, height } } })
+    .catch(() => undefined)
+}
+
 /** 桌面歌词：透明、无边框、置顶、不占任务栏、默认鼠标穿透 */
 export function createLyricWindow(mode: LyricMode = lyricMode): BrowserWindow {
   if (lyricWindow && !lyricWindow.isDestroyed()) {
@@ -498,10 +529,15 @@ export function createLyricWindow(mode: LyricMode = lyricMode): BrowserWindow {
   lyricMode = mode
   const box = LYRIC_BOUNDS[mode]
   const fixedHeight = mode === 'mini'
+  // 恢复上次的位置尺寸。迷你条高度是锁死的，存下来的高度一律不信
+  const restored = savedLyricRect(mode)
+  const height = fixedHeight ? box.height : (restored?.height ?? box.height)
 
   lyricWindow = new BrowserWindow({
-    width: box.width,
-    height: box.height,
+    width: restored?.width ?? box.width,
+    height,
+    // 没有存档时不传 x/y，交给系统按默认位置摆——与旧版本行为一致
+    ...(restored ? { x: restored.x, y: restored.y } : {}),
     minWidth: box.minWidth,
     minHeight: box.minHeight,
     // 迷你条是单行布局，高度必须锁死；大字模式可自由拉伸
@@ -549,6 +585,8 @@ export function createLyricWindow(mode: LyricMode = lyricMode): BrowserWindow {
   lyricWindow.on('resize', () => {
     if (lyricWindow && !lyricWindow.isDestroyed()) pinDragSize(lyricWindow)
   })
+  // 窗口关掉前把最终位置记下来：close 事件里窗口还在，closed 里已经销毁、取不到 bounds
+  lyricWindow.on('close', () => saveLyricBounds())
   lyricWindow.on('closed', () => {
     lyricWindow = null
     mainWindow?.webContents.send(IPC.lyricWindowState, { closed: true })
@@ -556,7 +594,7 @@ export function createLyricWindow(mode: LyricMode = lyricMode): BrowserWindow {
   // 右键菜单转发：拖拽区（-webkit-app-region: drag）上的右键在部分平台到不了 DOM，
   // 统一走主进程 context-menu 事件转发给渲染层弹菜单
   lyricWindow.webContents.on('context-menu', (_event, params) => {
-    lyricWindow?.webContents.send('lyric-window:context-menu', { x: params.x, y: params.y })
+    lyricWindow?.webContents.send(IPC.lyricWindowContextMenu, { x: params.x, y: params.y })
   })
 
   const target = rendererUrl('#/desktop-lyric')
@@ -583,16 +621,30 @@ export function getLyricMode(): LyricMode {
  * 再设新的最小尺寸，最后才 setBounds。
  */
 export function setLyricMode(mode: LyricMode): LyricMode {
+  // 切形态前先把旧形态的位置存下来，否则切一次丢一次
+  if (mode !== lyricMode && lyricWindow && !lyricWindow.isDestroyed()) saveLyricBounds()
   lyricMode = mode
   if (!lyricWindow || lyricWindow.isDestroyed()) return lyricMode
 
   const box = LYRIC_BOUNDS[mode]
+  const restored = savedLyricRect(mode)
   try {
     lyricWindow.setMaximumSize(4000, 4000)
     lyricWindow.setMinimumSize(box.minWidth, box.minHeight)
     if (mode === 'mini') lyricWindow.setMaximumSize(4000, box.height)
-    const [x, y] = lyricWindow.getPosition()
-    lyricWindow.setBounds({ x, y, width: box.width, height: box.height })
+    if (restored) {
+      // 两种形态各记各的：切到迷你条就回到迷你条上次待的地方
+      lyricWindow.setBounds({
+        x: restored.x,
+        y: restored.y,
+        width: restored.width,
+        height: mode === 'mini' ? box.height : restored.height
+      })
+    } else {
+      // 没有存档：留在原地换默认尺寸，与旧行为一致
+      const [x, y] = lyricWindow.getPosition()
+      lyricWindow.setBounds({ x, y, width: box.width, height: box.height })
+    }
   } catch {
     // 个别 Linux 合成器不支持尺寸约束，忽略——布局仍会按 mode 渲染
   }
@@ -696,9 +748,10 @@ export function lyricDragStart(): void {
 
 let dragWatchdog: NodeJS.Timeout | null = null
 
-/** 收尾：解除尺寸锁。正常松手和超时兜底共用同一条出口 */
+/** 收尾：解除尺寸锁，顺手把最终位置记下来。正常松手和超时兜底共用同一条出口 */
 function finishDrag(): void {
   dragOrigin = null
+  saveLyricBounds()
 }
 
 export function lyricDragMove(dx: number, dy: number): void {
@@ -757,6 +810,7 @@ export function lyricResizeMove(dw: number, dh: number): void {
 
 export function lyricResizeEnd(): void {
   resizeOrigin = null
+  saveLyricBounds()
 }
 
 export const platformFlags = { isMac, isLinux }

@@ -45,7 +45,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   neteaseCookie: '',
   neteaseAccount: null,
   miniMode: false,
-  windowBounds: {}
+  windowBounds: {},
+  desktopLyricBounds: {}
 }
 
 /** 设置持久化（settings.json，原子写入 + 内存缓存） */
@@ -101,6 +102,15 @@ class SettingsService {
     const tmp = `${this.filePath}.tmp`
     await writeFile(tmp, payload, 'utf8')
     await rename(tmp, this.filePath)
+  }
+
+  /**
+   * 等队列里未完成的写入落地。
+   * 窗口关闭时的保存是异步的（`void set(...)`），紧接着应用退出就会写不完——
+   * before-quit 里要显式等一次。
+   */
+  async flush(): Promise<void> {
+    await this.writing.catch(() => undefined)
   }
 }
 

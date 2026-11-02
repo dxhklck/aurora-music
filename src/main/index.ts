@@ -255,6 +255,8 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault()
     void (async () => {
       await downloads.flush().catch(() => undefined)
+      // 窗口位置这类设置是 close 时异步写的，退出前必须等它落地，否则下次启动回到旧位置
+      await settings.flush().catch(() => undefined)
       app.exit(0)
     })()
   })

@@ -38,6 +38,19 @@ export interface Song {
   extra?: Record<string, string | number>
 }
 
+/**
+ * 「其它音源也有这首歌」的候选项。
+ * 只做过搜索与名字/歌手/时长的相似度打分，**没有验证能不能播**——
+ * 所以 UI 上的文案必须写「可能可播放」，点选之后才真正取址。
+ */
+export interface AlternativeTrack {
+  song: Song
+  /** 匹配分：≥70 视为同名同歌手，50–69 可能是翻唱、现场版或 remix */
+  score: number
+  /** 音源显示名，UI 直接展示，不必再查表 */
+  platformName: string
+}
+
 export interface SearchPage {
   items: Song[]
   total: number
@@ -280,6 +293,12 @@ export interface AppSettings {
   miniMode: boolean
   /** 两种窗口形态各自的位置尺寸，切换时互写回存 */
   windowBounds: { normal?: WinRect; mini?: WinRect }
+  /**
+   * 桌面歌词窗两种形态各自的位置尺寸，拖动/拉伸结束后写回。
+   * 单独一个顶层键而不是塞进 windowBounds：主窗与歌词窗是两摊子系统，
+   * 共写一个嵌套对象时，谁用字面量重建整个对象谁就会把对方静默抹掉。
+   */
+  desktopLyricBounds: { mini?: WinRect; full?: WinRect }
 }
 
 /** 界面主题两档 */
