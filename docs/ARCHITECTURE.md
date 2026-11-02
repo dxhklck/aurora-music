@@ -216,7 +216,11 @@ interface StreamInfo {
 
 `library.json` 只存索引：`id`、`filePath`、`size`、`ext`、`lyricPath` / `metaPath`、`downloadedAt` 与歌曲元数据，音频本身始终留在用户目录。id 有两种：下载入库的是 `platform:songId`，导入的是 `local:<绝对路径>`（id 只是索引键，`relocate()` 重绑时保持不变，否则歌单引用会全失效）。`LocalProvider` 把索引包装成音源，所以本地播放与在线播放走完全相同的链路。
 
-**扫描**：`scanLocalDirs()` 递归遍历 `settings.musicDirs`（最多三层，`MAX_SCAN_DEPTH = 2`），跳过隐藏目录，只认 mp3 / flac / wav / m4a / ogg / aac / opus。元数据优先读下载服务写的 `.meta.json`，没有就按「歌手 - 歌名」解析文件名。
+**扫描**：`scanLocalDirs()` 递归遍历 `settings.musicDirs`（最多三层，`MAX_SCAN_DEPTH = 2`），跳过隐藏目录，只认 mp3 / flac / wav / m4a / ogg / aac / opus。元数据优先读下载服务写的 `.meta.json`；没有读音频内嵌标签（`engine/ts/tag-read.ts`，见下）；再没有才按「歌手 - 歌名」解析文件名。
+
+**读标签**（`engine/ts/tag-read.ts`）：mp3 / flac / m4a / ogg 四种容器的**只读**解析，与 `tag.ts` 的写入路径完全独立。关键约束是**不做整文件 `readFile`**——扫描几百首时混几首 100MB 无损会让内存与耗时都不可接受，所以全部走 `open()` + 定长 `read()`：mp3 读前 10 字节拿 ID3 长度再读 tag 区；flac 逐块游标只读 STREAMINFO / VORBIS_COMMENT / PICTURE；m4a 顶层 atom 游标跨过 `mdat` 只读 `moov`；ogg 读首页拿 ident + comment、读末页 granule 算时长。时长一律走精确来源（TLEN → Xing/Info 帧数；STREAMINFO 样本数；`mvhd` 的 duration/timescale；末页 granule），**不做「文件大小 ÷ 比特率」估算**——VBR 下误差能到一分钟，而时长参与同曲比对（阈值 2 秒），错的值比没有更糟。封面落 `<userData>/covers/<sha1(路径)>.<ext>`，URL 复用现成的 `muse://local`（协议白名单已含 jpg/png/webp），不新开 hostname。
+
+**老库回填**：`scanLocalDirs` 对已登记的 `filePath` 直接跳过，所以旧版本留下的空 album / duration / coverUrl 永远补不上。`load()` 之后异步跑一次 `backfillTags()`：只填**空字段**、不覆盖用户手改过的值，跑完置 `settings.tagsBackfilled`；中途异常下次继续。
 
 **移除黑名单**：`library-ignored.json` 记 `{path, size, mtime}` 三元组。移除过的文件不会再被下一次刷新加回来；文件重新下载后 size/mtime 变了，会正常重新入库（上限 2000 条）。
 
