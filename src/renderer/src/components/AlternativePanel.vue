@@ -52,7 +52,7 @@ function close(): void {
         <header class="alt-head">
           <div class="alt-title">
             <strong>换一个版本</strong>
-            <small class="truncate">{{ player.current?.name ?? '当前歌曲' }}</small>
+            <small class="truncate">{{ player.alternativeTarget?.name ?? '当前歌曲' }}</small>
           </div>
           <button class="icon-btn" title="关闭" @click="close">
             <Icon name="close" :size="15" />

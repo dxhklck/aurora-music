@@ -91,6 +91,8 @@ export const usePlayerStore = defineStore('player', () => {
   const alternatives = ref<AlternativeTrack[]>([])
   const alternativesLoading = ref(false)
   const alternativesOpen = ref(false)
+  /** 正在为哪首歌找替代版本：可能是当前播放的，也可能是搜索结果里的一首（浏览模式） */
+  const alternativeTarget = ref<Song | null>(null)
   /** 候选请求的代次号：换歌或关面板后，在途的旧结果按这个丢弃 */
   let alternativesToken = 0
 
@@ -566,6 +568,21 @@ export const usePlayerStore = defineStore('player', () => {
   async function findAlternatives(): Promise<void> {
     const song = current.value
     if (!song) return
+    await loadAlternatives(song)
+  }
+
+  /**
+   * 为**任意一首**歌找替代版本（搜索结果里右键/点按钮打开）。
+   *
+   * 与换源面板的区别只在「点选之后怎么办」：当前播放的那首是替换队列项，
+   * 而这里只是浏览，点选等于播放它——不动队列里已有的内容。
+   */
+  async function findAlternativesFor(song: Song): Promise<void> {
+    await loadAlternatives(song)
+  }
+
+  async function loadAlternatives(song: Song): Promise<void> {
+    alternativeTarget.value = song
     // 搜索要几秒，期间用户可能换歌或重开面板：过期结果不能挂到新歌上
     const token = ++alternativesToken
     alternativesOpen.value = true
@@ -585,20 +602,41 @@ export const usePlayerStore = defineStore('player', () => {
 
   function closeAlternatives(): void {
     alternativesOpen.value = false
+    alternativeTarget.value = null
     // 关掉面板后回来的结果不该再弹出内容
     alternativesToken += 1
   }
 
   /**
-   * 换到候选版本：用候选替换队列里的当前项后重播。
+   * 换到候选版本。
+   *
+   * 两种语义，由 `alternativeTarget` 决定：
+   * - 目标是当前播放的那首 → 用候选替换队列项后重播（失败回退，队列恢复原样）；
+   * - 目标是搜索结果里的某首 → 直接播候选（追加到队列尾），不动当前队列。
    *
    * 不预探测——点选即验证，播不了就把错误交给 playAt（它内部已有自愈与跨源兜底）。
-   *
-   * 失败时把原来那首放回队列：用户只是「试一下」，不该被一次尝试永久改掉队列内容。
-   * 返回 false 表示这次没播起来（面板据此标红），错误条不保留——队列已经回到原样了。
    */
   async function switchToAlternative(target: Song): Promise<boolean> {
     const at = index.value
+    const browsing = alternativeTarget.value
+    const targetIsCurrent =
+      !!browsing && !!current.value && browsing.id === current.value.id && browsing.platform === current.value.platform
+
+    if (!targetIsCurrent) {
+      const lengthBefore = queue.value.length
+      queue.value.push(toQueueItem(target))
+      saveQueue()
+      await playAt(queue.value.length - 1, { noSkip: true })
+      if (!error.value) return true
+      const reason = error.value
+      queue.value.splice(lengthBefore)
+      saveQueue()
+      loadedUid = null
+      error.value = ''
+      useAppStore().toast(`这个版本播不了：${reason}`, 'error')
+      return false
+    }
+
     if (at < 0) return false
     const previous = queue.value[at]
     queue.value.splice(at, 1, toQueueItem(target))
@@ -860,6 +898,8 @@ export const usePlayerStore = defineStore('player', () => {
     alternativesLoading,
     alternativesOpen,
     findAlternatives,
+    findAlternativesFor,
+    alternativeTarget,
     closeAlternatives,
     switchToAlternative,
     toggle,

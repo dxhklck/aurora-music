@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { onMounted, computed, ref, watch } from 'vue'
+import type { PlatformId } from '@shared/types'
 import Icon from '../components/Icon.vue'
 import SongTable from '../components/SongTable.vue'
 import { useSearchStore } from '../stores/search'
 import { useAppStore } from '../stores/app'
+import { usePlayerStore } from '../stores/player'
 
 const search = useSearchStore()
 const app = useAppStore()
+const player = usePlayerStore()
 const input = ref(search.keyword)
 
 /** 引擎音源要逐首解析真实地址，比官方接口慢，加载态要给出解释 */
@@ -20,6 +23,12 @@ function pick(keyword: string): void {
   input.value = keyword
   suggestOpen.value = false
   void search.run(keyword)
+}
+
+/** 空态里换音源：切换后自动用同一个关键词重搜，不用用户再敲一遍 */
+async function switchProvider(id: PlatformId): Promise<void> {
+  await app.setPlatform(id)
+  if (search.keyword) void search.run(search.keyword)
 }
 
 /* 输入联想：聚焦且输入非空时，下拉匹配历史关键词（含子串，不限前缀） */
@@ -122,9 +131,26 @@ watch(
         :loading="search.loading"
         :show-size="isEngine"
         selectable
+        show-alternative
         empty-title="没有找到匹配的歌曲"
         empty-hint="检查关键词，或到侧边栏切换一个音源"
-      />
+        @alternative="(song) => player.findAlternativesFor(song)"
+      >
+        <template #empty>
+          <strong>没有找到匹配的歌曲</strong>
+          <span>检查关键词，或者换个音源再试一次——同一个词在不同平台的结果差别很大</span>
+          <div class="empty-providers">
+            <button
+              v-for="item in app.providers.slice(0, 4)"
+              :key="item.id"
+              :class="{ active: item.id === app.platform }"
+              @click="switchProvider(item.id)"
+            >
+              {{ item.name }}
+            </button>
+          </div>
+        </template>
+      </SongTable>
 
       <div v-if="search.hasMore" class="more">
         <button class="btn" :disabled="search.loadingMore" @click="search.loadMore()">
@@ -146,6 +172,35 @@ watch(
 </template>
 
 <style scoped>
+/* 空态里的音源快切：把「去侧边栏切换」从一句提示变成可点的动作 */
+.empty-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.empty-providers button {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.empty-providers button:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.empty-providers button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .head {
   display: flex;
   align-items: flex-start;

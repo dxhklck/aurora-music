@@ -184,6 +184,20 @@ const SHOTS = {
       return 'rows=' + rowCount()
     `
   },
+  stats: {
+    script: `
+      await pickPlatform('网易云音乐')
+      await go('#/search')
+      await searchFor('晴天', '稻香')
+      await sleep(600)
+      // 播一首让统计有数据（心跳 15 秒一拍，先听一小段再进报告页）
+      q('.table .row .play-mini')?.click()
+      await sleep(6000)
+      await go('#/stats')
+      await sleep(1200)
+      return 'cells=' + all('.cell').length + ' top=' + all('.top-row').length + ' bars=' + all('.bar-row').length
+    `
+  },
   charts: {
     script: `
       await pickPlatform('网易云音乐')

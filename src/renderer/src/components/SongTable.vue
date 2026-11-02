@@ -31,6 +31,8 @@ const props = withDefaults(
     sortDir?: 'asc' | 'desc'
     /** 显示「更多操作」按钮（本地库用它挂复制/导出/删除） */
     menuable?: boolean
+    /** 显示「在其它音源找这首歌」按钮（只给搜索结果用，避免列表太挤） */
+    showAlternative?: boolean
     /** 歌单排序模式：每行显示上移/下移按钮，隐藏收藏等操作避免挤爆 */
     moveable?: boolean
     emptyTitle?: string
@@ -62,6 +64,8 @@ const emit = defineEmits<{
   sort: [key: string]
   /** 打开行菜单：第三项是这次要操作的对象（右键多选时是整批） */
   menu: [song: Song, event: MouseEvent, selection: Song[]]
+  /** 在其它音源找这首歌 */
+  alternative: [song: Song]
 }>()
 
 const player = usePlayerStore()
@@ -344,6 +348,9 @@ function qualityBadge(song: Song): string {
           >
             <Icon :name="isDownloaded(song) ? 'check' : 'download'" :size="15" />
           </button>
+          <button v-if="showAlternative" title="在其它音源找这首歌" @click.stop="emit('alternative', song)">
+            <Icon name="refresh" :size="15" />
+          </button>
           <button v-if="removable" :title="removeTitle" @click.stop="emit('remove', song)">
             <Icon name="trash" :size="15" />
           </button>
@@ -360,8 +367,10 @@ function qualityBadge(song: Song): string {
     </template>
 
     <div v-else class="empty">
-      <strong>{{ emptyTitle }}</strong>
-      <span>{{ emptyHint }}</span>
+      <slot name="empty">
+        <strong>{{ emptyTitle }}</strong>
+        <span>{{ emptyHint }}</span>
+      </slot>
     </div>
   </div>
 </template>

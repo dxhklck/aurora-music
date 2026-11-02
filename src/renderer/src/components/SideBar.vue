@@ -23,6 +23,7 @@ const navs = [
   { name: 'favorites', to: '/favorites', label: '我的收藏', icon: 'heart' },
   { name: 'library', to: '/library', label: '本地音乐', icon: 'folder' },
   { name: 'downloads', to: '/downloads', label: '下载管理', icon: 'download' },
+  { name: 'stats', to: '/stats', label: '收听报告', icon: 'clock' },
   { name: 'settings', to: '/settings', label: '设置', icon: 'settings' }
 ]
 
