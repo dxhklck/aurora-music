@@ -1,4 +1,5 @@
 import type {
+  AlternativeTrack,
   ChartSummary,
   Lyric,
   Quality,
@@ -12,6 +13,7 @@ import { ProviderError } from '../providers/types'
 import { TtlCache } from './cache'
 import { settings } from './settings'
 import { SourceScoreboard } from './source-score'
+import { dedupeAlternatives, normalize, rankMatches } from './match'
 
 const searchCache = new TtlCache<SearchPage>(3 * 60_000, 120)
 const chartCache = new TtlCache<SearchPage>(10 * 60_000, 60)
@@ -65,12 +67,6 @@ export interface SearchInput {
   limit?: number
   /** 增量结果回调（只有慢音源会触发），用于边搜边出 */
   onPartial?: (items: Song[]) => void
-}
-
-function normalize(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[\s\-_（）()【】[\]·,，.。'’!！?？]/g, '')
 }
 
 /**
@@ -258,6 +254,68 @@ class CatalogService {
     return new ProviderError('network', `${providerName}：${message}`)
   }
 
+  /**
+   * 查「其它音源有没有这首歌」，给手动换版本面板用。
+   *
+   * 与 `findAlternative` 的关键区别：**只搜索 + 打分，不取址**。
+   * 不调 `resolveStream` 就不会写 scoreboard、不会熔断音源——这是给 UI 的浏览接口，
+   * 用户可能反复点开看，不能因为「看了一眼」就把某个源拉黑、影响后续换源顺位。
+   *
+   * 另外预算默认 4 秒（换源那里是 12 秒）：12 秒是「必须播成功」的预算，
+   * 面板上转 12 秒等于卡死。
+   */
+  async rankAlternatives(song: Song, budgetMs = 4_000): Promise<AlternativeTrack[]> {
+    // 只用歌名检索：带歌手名反而会让部分平台的搜索接口召回变差（与换源同一策略）
+    const keyword = song.name.trim()
+    if (!keyword) return []
+
+    const candidates = providers
+      .streamCandidates(song.platform)
+      .filter((candidate) => candidate.info.capabilities.search)
+      .sort((a, b) => {
+        const diff = scoreboard.score(b.info.id) - scoreboard.score(a.info.id)
+        if (Math.abs(diff) > 0.05) return diff
+        return Number(a.info.id.startsWith('mdl-')) - Number(b.info.id.startsWith('mdl-'))
+      })
+      // 只看前 8 个：候选是 20 个源，全试一遍既要十几秒，又容易在同一秒打出去被风控
+      .slice(0, 8)
+
+    const deadline = Date.now() + budgetMs
+    const found: AlternativeTrack[] = []
+
+    // 并发 4：串行试 8 个源要十几秒，全并发又太容易被风控
+    let cursor = 0
+    const worker = async (): Promise<void> => {
+      while (cursor < candidates.length) {
+        const candidate = candidates[cursor++]
+        const remain = deadline - Date.now()
+        if (remain <= 0) return
+        try {
+          const page = await withTimeout(
+            candidate.search({ keyword, page: 1, limit: 8 }),
+            Math.min(remain, 3_000)
+          )
+          if (!page) continue
+          for (const match of rankMatches(song, page.items)) {
+            // 50 分以下基本是「名字沾点边」，列出来只会让用户白点
+            if (match.score < 50) continue
+            found.push({
+              song: match.song,
+              score: match.score,
+              platformName: candidate.info.name
+            })
+          }
+        } catch {
+          /* 单个源失败不影响其它候选：这正是「浏览」和「换源」的区别 */
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, worker))
+
+    // 同一首歌可能被多个源同时命中，也可能一个源内部返回好几个翻唱：去重后按分数取前 12
+    return dedupeAlternatives(found.sort((a, b) => b.score - a.score))
+  }
+
   private async findAlternative(song: Song, quality: Quality): Promise<ResolvedTrack | null> {
     // 只用歌名检索：带歌手名反而会让部分平台的搜索接口召回变差
     const keyword = song.name.trim()
@@ -319,28 +377,7 @@ class CatalogService {
   }
 
   private pickBest(target: Song, candidates: Song[]): Song | null {
-    let best: { song: Song; score: number } | null = null
-    const targetName = normalize(target.name)
-    const targetArtists = target.artists.map(normalize)
-
-    for (const candidate of candidates) {
-      const name = normalize(candidate.name)
-      let score = 0
-      if (name === targetName) score += 60
-      else if (name.includes(targetName) || targetName.includes(name)) score += 35
-      else continue
-
-      const artists = candidate.artists.map(normalize)
-      if (artists.some((artist) => targetArtists.some((t) => artist.includes(t) || t.includes(artist)))) {
-        score += 30
-      }
-      if (target.duration && candidate.duration) {
-        const diff = Math.abs(target.duration - candidate.duration)
-        if (diff < 5_000) score += 10
-        else if (diff > 30_000) score -= 15
-      }
-      if (!best || score > best.score) best = { song: candidate, score }
-    }
+    const best = rankMatches(target, candidates)[0]
     return best && best.score >= 70 ? best.song : null
   }
 

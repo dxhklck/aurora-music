@@ -421,7 +421,7 @@ onBeforeUnmount(() => {
         <div v-else ref="queueList" class="queue-list">
           <button
             v-for="(item, index) in player.queue"
-            :key="`${item.platform}-${item.id}-${index}`"
+            :key="item.uid"
             class="queue-row"
             :class="{ active: index === player.index }"
             @click="playQueueItem(index)"

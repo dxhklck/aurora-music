@@ -1,5 +1,6 @@
 /** 渲染进程专用：由主进程注入的 API 类型（与 preload 暴露的对象一一对应） */
 import type {
+  AlternativeTrack,
   AppSettings,
   CellphoneLoginArgs,
   CellphoneLoginResult,
@@ -92,6 +93,11 @@ export interface AuroraApi {
   chartDetail(args: ChartDetailArgs): Promise<SearchPage>
   lyric(song: Song): Promise<Lyric | null>
   resolveTrack(args: { song: Song; autoSwitch: boolean; forceSwitch?: boolean }): Promise<ResolvedTrack>
+  /**
+   * 查其它音源有没有这首歌。只搜索打分、不取址、不影响换源评分——
+   * 返回项是否真能播放要等用户点选后才知道。
+   */
+  findAlternatives(song: Song): Promise<AlternativeTrack[]>
   /** 封面补全：当 song.coverUrl 为空时，跨平台按歌名+歌手搜封面 */
   coverResolve(song: Song): Promise<string | null>
 
@@ -247,7 +253,6 @@ export interface AuroraApi {
   onLyricWindowState(cb: (state: unknown) => void): () => void
   /** 订阅歌词窗口右键菜单（主进程 context-menu 事件转发，坐标为 CSS 像素） */
   onLyricContextMenu(cb: (pos: { x: number; y: number }) => void): () => void
-  onToast(cb: (payload: { type: 'info' | 'error' | 'success'; message: string }) => void): () => void
 
   /** 扫码登录：创建会话并返回二维码（dataURL） */
   startQrLogin(platform: QrLoginPlatform): Promise<QrLoginState>

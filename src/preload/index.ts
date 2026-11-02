@@ -15,6 +15,8 @@ const api: AuroraApi = {
   chartDetail: (args) => ipcRenderer.invoke(IPC.chartDetail, args),
   lyric: (song) => ipcRenderer.invoke(IPC.lyric, song),
   resolveTrack: (args) => ipcRenderer.invoke(IPC.resolveTrack, args),
+  // 只搜索打分、不取址：给「换一个版本」面板用，不写评分板也不熔断音源
+  findAlternatives: (song) => ipcRenderer.invoke(IPC.findAlternatives, song),
   coverResolve: (song) => ipcRenderer.invoke(IPC.coverResolve, song),
 
   enqueueDownload: (song) => ipcRenderer.invoke(IPC.downloadEnqueue, song),
@@ -163,11 +165,6 @@ const api: AuroraApi = {
     const listener = (_event: unknown, pos: { x: number; y: number }): void => cb(pos)
     ipcRenderer.on(IPC.lyricWindowContextMenu, listener)
     return () => ipcRenderer.removeListener(IPC.lyricWindowContextMenu, listener)
-  },
-  onToast: (cb) => {
-    const listener = (_event: unknown, payload: any): void => cb(payload)
-    ipcRenderer.on(IPC.toast, listener)
-    return () => ipcRenderer.removeListener(IPC.toast, listener)
   }
 }
 

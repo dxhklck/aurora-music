@@ -16,6 +16,7 @@ import { BrowserWindow, session } from 'electron'
 import { getMainWindow } from '../windows'
 import { settings } from './settings'
 import { notifyLoginSuccess } from './qrlogin'
+import { IPC } from '@shared/ipc'
 import type { QrLoginPlatform } from '@shared/types'
 
 const UA_PC =
@@ -80,7 +81,7 @@ async function captureCookie(spec: LoginSpec): Promise<string> {
 }
 
 function report(platform: QrLoginPlatform, ok: boolean, message: string): void {
-  getMainWindow()?.webContents.send('login-window:result', { platform, ok, message })
+  getMainWindow()?.webContents.send(IPC.loginWindowResult, { platform, ok, message })
 }
 
 /** 打开（或聚焦）浏览器登录窗口 */

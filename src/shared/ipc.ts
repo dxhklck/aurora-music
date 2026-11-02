@@ -11,6 +11,7 @@ export const IPC = {
   chartDetail: 'provider:chart-detail',
   lyric: 'provider:lyric',
   resolveTrack: 'provider:resolve-track',
+  findAlternatives: 'provider:find-alternatives',
   coverResolve: 'provider:cover-resolve',
 
   // 下载
@@ -145,7 +146,6 @@ export const IPC = {
   loginWindowResult: 'login-window:result',
 
   // 通知
-  toast: 'app:toast',
   /** 写系统剪贴板（复制文件路径用；渲染层的 navigator.clipboard 在部分环境不可靠） */
   clipboardWrite: 'app:clipboard-write',
   /** 渲染层未捕获错误 / 手动上报日志（写 userData/logs） */

@@ -214,6 +214,14 @@ onBeforeUnmount(() => {
           <Icon name="playlist-add" :size="18" />
         </button>
         <button
+          class="icon-btn"
+          title="换一个版本（其它音源）"
+          :disabled="!song"
+          @click.stop="player.findAlternatives()"
+        >
+          <Icon name="refresh" :size="18" />
+        </button>
+        <button
           class="icon-btn sleep"
           :class="{ active: player.sleepMode !== 'off' }"
           title="睡眠定时"

@@ -1,7 +1,7 @@
 # Aurora Music 架构设计
 
 > 本文说明技术决策、分层边界、关键流程，以及从 `musicdl` 借鉴并改造的设计。
-> 对应版本：1.3.9 · 最后核对：2026-10-30 · 文档索引见 [README.md](./README.md)
+> 对应版本：1.3.12 · 最后核对：2026-11-02 · 文档索引见 [README.md](./README.md)
 
 ## 1. 设计目标
 
@@ -115,6 +115,23 @@ lossless → exhigh → standard → 外链(128k)
 5. 命中后取地址并写入缓存；返回 `{song, stream, switchedFrom, notice}`，UI 顶部提示「已自动切换音源」。
 
 > 顺序依赖是刻意的：**先验熔断、再算预算**。否则一个刚超时的源会在每首歌上都再等满 8 秒。
+
+打分逻辑在 `services/match.ts` 的 `rankMatches()`（纯函数），自动换源与手动面板共用同一套
+——两处标准不一致会出现「自动换源找得到、手动面板列不出来」的怪事。阈值 70 只在调用方判断。
+
+**手动换版本**（`CatalogService.rankAlternatives(song, budgetMs = 4000)`，面板入口）：
+
+| 维度 | 自动换源 `findAlternative` | 手动面板 `rankAlternatives` |
+| --- | --- | --- |
+| 目的 | 必须播成功 | 让用户浏览、自己挑 |
+| 是否取址 | 是（逐候选 `resolveStream`） | **否，只搜索 + 打分** |
+| 副作用 | 写评分板、硬失败会熔断音源 | **零副作用**：不写分、不熔断 |
+| 预算 | 12 s | 4 s（面板上转 12 秒等于卡死） |
+| 返回 | 单个 `ResolvedTrack` | 候选数组（≥50 分，去重后取前 12） |
+
+不取址是硬约束：面板是用户会反复点开的热路径，复用换源那条带副作用的路径会让
+「看一眼有没有别的版本」把本来正常的音源逐个熔断掉，反过来影响后续自动换源的顺位。
+代价是面板只能写「可能可播放」——点选即验证，失败的那行标红、队列回退成原来那首。
 
 ---
 
@@ -455,6 +472,25 @@ source → b0 → b1 → b2 → b3 → b4 → gain → destination
 
 夜间限幅是音频图里常驻的 `DynamicsCompressorNode`（开启时 threshold −26 dB、knee 18、ratio 5；关闭时回到 threshold 0 / ratio 1 的透明状态）。和 EQ 一样**只改参数不拆链**——拆链重连在 Web Audio 里容易踩到「接了没通」的静音，而静音态排查成本极高。
 
+### 7.5 队列持久化与重排
+
+队列项是 `Song & { uid }`（见 `core/queue.ts`）。uid 只在当前会话内有意义，用于列表 `key` 与拖拽定位。
+**不能拿 `index` 当 key**：重排一次所有 key 都变，等于整段重渲染——封面重新请求、正在播那行的 `.eq` 动画重启。
+
+- **写入单一入口**：`toQueueItems()` 负责「清洁脏数据 + 盖 uid」，五个写入点
+  （`setQueue` / `startHero` / `playSong` / `playNext` / `appendToQueue`）全部走它。
+  漏盖一处就是 `uid: undefined`，两个 undefined 又会撞 key，而这次没有 index 兜底。
+- **两个 key 分开存**：`aurora.queue` 只存队列内容（结构变化时写），`aurora.queue.pos` 只存
+  `{ index, time }`（每 5 秒写）。合并成一个 key 的话，几百首的 JSON 每 5 秒重写一遍。
+- **恢复不出声**：启动时只还原队列与选中项，不取址、不调 `playAt`。所以 `toggle()` 要先看
+  `loadedUid`——恢复出来的那首没有音源，直接 `play()` 会失败，必须重新走一次完整取址。
+- **进度归属**：恢复时记下 `{ uid, time }`，只有用户重新播放**同一首**时才沿用；点了别的歌立刻作废，
+  否则会跳到一个不相干的位置。
+- **重排**：`moveItem` 搬元素、`moveIndex` 算「正在播那首」的新下标，两个都是纯函数、有单测。
+  下标算错不会报错，只会表现为「拖一下队列，正在播的变成别的歌」。
+- **uid 不用 `crypto.randomUUID()`**：渲染层构建目标是 es2017（历史上为兼容老 WebView 压低的），
+  `randomUUID` 要 Chrome 92+。会话内计数器足够。
+
 ---
 
 ## 8. UI 层
@@ -553,5 +589,5 @@ MusicdlProvider.search → musicdl.searchStream / resolve / lyric / tag
    这类时效性结论只写在巡检结果（`userData/source-health.json`）与 README 里。
 9. 本文 5.5 的行为描述以迁移后的 TS 实现为准；与旧 Python 版的逐源对拍基线见
    [`archive/engine-ts-parity-report.md`](./archive/engine-ts-parity-report.md)（历史记录，不再更新）。
-10. 桌面歌词窗的位置与尺寸不持久化：每次打开回到屏幕默认位置与形态尺寸；锁定（穿透）状态下没有手势，
-    无法拉伸，需先解锁。
+10. 桌面歌词窗的位置与尺寸写在 `settings.desktopLyricBounds`（mini / full 各一份），拖动、拉伸、
+    关闭时写回；锁定（穿透）状态下没有手势，无法拉伸，需先解锁。

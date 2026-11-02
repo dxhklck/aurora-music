@@ -1,19 +1,37 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { Lyric, PlayMode, Song } from '@shared/types'
+import type { AlternativeTrack, Lyric, PlayMode, Song } from '@shared/types'
 import { findLyricIndex } from '@shared/lyric'
 import { audio } from '../core/audio'
 import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
 import { useStatsStore } from './stats'
+import { usePlaylistStore } from './playlists'
 import { createLatestGate } from '../core/latest'
+import { createUidFactory, moveIndex, moveItem, type QueueItem } from '../core/queue'
 
 const HISTORY_KEY = 'aurora.recent'
 /** 榜单队列断点：记录「哪份榜单 + 第几首 + 播到几毫秒」，跨重启续播 */
 const RESUME_KEY = 'aurora.hero.resume'
 /** 歌词手动对齐记忆：{ "platform:id": 毫秒偏移 }，只记用户调过的歌 */
 const LYRIC_OFFSET_KEY = 'aurora.lyric-offsets'
+/**
+ * 整个队列的快照（任意来源，不限于首页榜单）与播放位置。
+ * 拆成两个 key：队列内容只在结构变化时写，进度每 5 秒写一次——
+ * 合并成一个 key 的话，几百首的 JSON 每 5 秒重写一遍，白耗 IO。
+ */
+const QUEUE_KEY = 'aurora.queue'
+const QUEUE_POS_KEY = 'aurora.queue.pos'
+
+interface QueueSnapshot {
+  songs: Song[]
+}
+
+interface QueuePosition {
+  index: number
+  time: number
+}
 
 interface ResumeSnapshot {
   tag: string
@@ -32,16 +50,18 @@ function loadResume(): ResumeSnapshot | null {
 }
 
 /** 音源可能返回 name 缺失或字面 "Undefined" 的脏数据：入队前统一兜底 */
+function sanitizeSong(song: Song): Song {
+  return !song.name || song.name.toLowerCase() === 'undefined'
+    ? { ...song, name: '未知曲目' }
+    : song
+}
+
 function sanitizeSongs(songs: Song[]): Song[] {
-  return songs.map((song) =>
-    !song.name || song.name.toLowerCase() === 'undefined'
-      ? { ...song, name: '未知曲目' }
-      : song
-  )
+  return songs.map(sanitizeSong)
 }
 
 export const usePlayerStore = defineStore('player', () => {
-  const queue = ref<Song[]>([])
+  const queue = ref<QueueItem[]>([])
   const index = ref(-1)
   const playing = ref(false)
   const loading = ref(false)
@@ -66,6 +86,12 @@ export const usePlayerStore = defineStore('player', () => {
   const recent = ref<Song[]>(loadRecent())
   /** 当前队列的来源标签（如 hero:qq:榜id）；空 = 普通队列，不记断点 */
   const queueTag = ref('')
+  /** 「换一个版本」面板：候选列表 / 加载中 / 是否展开 */
+  const alternatives = ref<AlternativeTrack[]>([])
+  const alternativesLoading = ref(false)
+  const alternativesOpen = ref(false)
+  /** 候选请求的代次号：换歌或关面板后，在途的旧结果按这个丢弃 */
+  let alternativesToken = 0
 
   /* ---------------- 睡眠定时 ----------------
      15/30/60 分钟倒计时，或「播完当前这首」。
@@ -92,7 +118,33 @@ export const usePlayerStore = defineStore('player', () => {
    */
   const playGate = createLatestGate()
 
-  const current = computed<Song | null>(() =>
+  /** 队列项 uid 的工厂（会话内递增，原因见 core/queue.ts） */
+  const nextQueueUid = createUidFactory()
+  /**
+   * 已取址并交给 audio 的那首 uid。
+   * 静默恢复的队列只有「选中」没有「已加载」：此时直接 audio.play() 会因为没有
+   * 音源而失败，必须先重新走一次 playAt。
+   */
+  let loadedUid: string | null = null
+  /** 静默恢复时记下的进度，只有用户重新播放「同一首」时才接着跳转 */
+  let restoredSeek: { uid: string; time: number } | null = null
+
+  /**
+   * 队列写入的唯一入口：清洁脏数据 + 盖 uid 一起做。
+   *
+   * 队列有五个写入点（setQueue / startHero / playSong / playNext / appendToQueue），
+   * 任何一处漏盖就是 uid undefined，两个 undefined 又会撞 key——而这次没有 index 兜底。
+   * 所以全部统一走这里，不要在各调用点各盖一次。
+   */
+  function toQueueItem(song: Song): QueueItem {
+    return { ...sanitizeSong(song), uid: nextQueueUid() }
+  }
+
+  function toQueueItems(songs: Song[]): QueueItem[] {
+    return songs.map(toQueueItem)
+  }
+
+  const current = computed<QueueItem | null>(() =>
     index.value >= 0 ? queue.value[index.value] ?? null : null
   )
   const displaySong = computed<Song | null>(() => current.value ?? resolvedSong.value)
@@ -126,10 +178,11 @@ export const usePlayerStore = defineStore('player', () => {
     engineBound = true
     audio.on('time', (value: number) => {
       time.value = value
-      // 断点快照：5 秒一记，只在带标签的队列（首页榜单）下生效
-      if (queueTag.value && Date.now() - lastResumeSave > 5000) {
+      // 快照 5 秒一记：带标签的队列额外存榜单断点，任意队列都存播放位置
+      if (Date.now() - lastResumeSave > 5000) {
         lastResumeSave = Date.now()
-        saveResume()
+        if (queueTag.value) saveResume()
+        saveQueuePos()
       }
       // 系统媒体面板（MediaSession）状态同步：5 秒一推即可
       if (Date.now() - lastNativeSync > 5000) {
@@ -189,14 +242,21 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function playAt(
     target: number,
-    opts: { isRetry?: boolean; forceSwitch?: boolean } = {}
+    opts: { isRetry?: boolean; forceSwitch?: boolean; noSkip?: boolean } = {}
   ): Promise<void> {
     const song = queue.value[target]
     if (!song) return
     const app = useAppStore()
     bindEngine()
     const token = playGate.next()
-    if (!opts.isRetry) stallCount = 0
+    if (!opts.isRetry) {
+      stallCount = 0
+      // 静默恢复的进度：只有点的就是恢复出来那首才沿用，点了别的歌立刻作废
+      if (restoredSeek) {
+        pendingSeek = restoredSeek.uid === song.uid ? restoredSeek.time : null
+        restoredSeek = null
+      }
+    }
     index.value = target
     loading.value = true
     error.value = ''
@@ -222,6 +282,10 @@ export const usePlayerStore = defineStore('player', () => {
         }, 6000)
       }
       audio.load(resolved.stream.url, { autoplay: true })
+      // 记下「这一首是真的加载过音源的」，toggle 据此判断能不能直接 play()
+      loadedUid = song.uid
+      // 切歌后立刻把位置落盘：否则要等 5 秒后的进度快照，中途关掉会恢复到上一首的下标
+      saveQueuePos()
       failureStreak = 0
       pushRecent(song)
       // 收听统计：与最近播放同一个成功点（拿到流并开始播放才记）
@@ -234,8 +298,9 @@ export const usePlayerStore = defineStore('player', () => {
       error.value = friendlyError(err)
       playing.value = false
       failureStreak += 1
-      // 一首歌播不了就自动跳下一首，连续 3 次失败后停下来等用户处理
-      if (failureStreak <= 3 && queue.value.length > 1) {
+      // 一首歌播不了就自动跳下一首，连续 3 次失败后停下来等用户处理。
+      // noSkip：用户从「换一个版本」面板主动试播时不能跳——他还在挑，跳走等于把队列进度弄乱
+      if (!opts.noSkip && failureStreak <= 3 && queue.value.length > 1) {
         useAppStore().toast(`《${song.name}》无法播放，已自动跳过`, 'error')
         window.setTimeout(() => {
           void next(false)
@@ -298,6 +363,74 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  /** 队列内容变化时写快照（不含播放进度，进度见 saveQueuePos） */
+  function saveQueue(): void {
+    if (!queue.value.length) {
+      localStorage.removeItem(QUEUE_KEY)
+      localStorage.removeItem(QUEUE_POS_KEY)
+      return
+    }
+    try {
+      // uid 是会话内的定位标记，落盘前剥掉；恢复时重新生成
+      const songs = queue.value.map(({ uid: _uid, ...song }) => song)
+      localStorage.setItem(QUEUE_KEY, JSON.stringify({ songs } satisfies QueueSnapshot))
+      saveQueuePos()
+    } catch {
+      /* 存储失败不影响播放 */
+    }
+  }
+
+  /** 播放位置：每 5 秒写一次，是个几十字节的小对象 */
+  function saveQueuePos(): void {
+    if (!queue.value.length || index.value < 0) return
+    try {
+      localStorage.setItem(
+        QUEUE_POS_KEY,
+        JSON.stringify({ index: index.value, time: Math.round(time.value) } satisfies QueuePosition)
+      )
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function loadQueueSnapshot(): { items: QueueItem[]; index: number; time: number } | null {
+    try {
+      const raw = localStorage.getItem(QUEUE_KEY)
+      if (!raw) return null
+      const snap = JSON.parse(raw) as QueueSnapshot
+      if (!Array.isArray(snap?.songs)) return null
+      // 存储可能被手改坏：没有 id/platform 的条目直接丢掉，别让一行脏数据把整个恢复搞崩
+      const songs = snap.songs.filter(
+        (song) => song && typeof song.id === 'string' && typeof song.platform === 'string'
+      )
+      if (!songs.length) return null
+      const posRaw = localStorage.getItem(QUEUE_POS_KEY)
+      const pos = posRaw ? (JSON.parse(posRaw) as Partial<QueuePosition>) : null
+      const items = toQueueItems(songs)
+      const index = Math.max(0, Math.min(Math.floor(Number(pos?.index) || 0), items.length - 1))
+      const time = Math.max(0, Number(pos?.time) || 0)
+      return { items, index, time }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 启动时把上次的队列摆回来，但**不出声**：不取址、不调 playAt，
+   * 只还原队列与选中项。用户点播放时才真正加载——这也是为什么
+   * toggle 里要先看 loadedUid，否则会对着一个没有音源的 audio 调 play()。
+   */
+  function restoreQueue(): void {
+    const snap = loadQueueSnapshot()
+    if (!snap) return
+    queue.value = snap.items
+    index.value = snap.index
+    // 进度先不显示：duration 还是 0，显示「1:20 / 0:00」比显示 0:00 更莫名其妙。
+    // 记下来等用户点播放时再跳（太靠前就没必要跳）
+    restoredSeek = snap.time > 3000 ? { uid: snap.items[snap.index].uid, time: snap.time } : null
+    loadedUid = null
+  }
+
   function saveResume(): void {
     if (!queueTag.value || index.value < 0) return
     try {
@@ -316,8 +449,11 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   function setQueue(songs: Song[], startIndex = 0, tag = ''): void {
-    queue.value = sanitizeSongs([...songs])
+    queue.value = toQueueItems(songs)
     queueTag.value = tag
+    // 用户主动重建队列：恢复时的进度作废
+    restoredSeek = null
+    saveQueue()
     if (queue.value.length) void playAt(Math.max(0, Math.min(startIndex, queue.value.length - 1)))
   }
 
@@ -329,8 +465,11 @@ export const usePlayerStore = defineStore('player', () => {
     songs: Song[],
     tag: string
   ): Promise<{ resumed: boolean; song: Song | null }> {
-    queue.value = sanitizeSongs([...songs])
+    queue.value = toQueueItems(songs)
     queueTag.value = tag
+    // 榜单续播有自己的 pendingSeek，别被「静默恢复」那套覆盖掉
+    restoredSeek = null
+    saveQueue()
     const snap = loadResume()
     if (snap && snap.tag === tag && snap.index >= 0 && snap.index < songs.length) {
       pendingSeek = snap.time > 3000 ? snap.time : null
@@ -349,40 +488,133 @@ export const usePlayerStore = defineStore('player', () => {
       void playAt(existing)
       return
     }
-    queue.value.push(song)
+    queue.value.push(toQueueItem(song))
+    saveQueue()
     void playAt(queue.value.length - 1)
   }
 
   function playNext(song: Song): void {
     const insertAt = index.value + 1
-    queue.value.splice(insertAt, 0, song)
+    queue.value.splice(insertAt, 0, toQueueItem(song))
+    saveQueue()
     // 插队是静默操作，不给反馈用户会以为没点上（与「加入播放列表」的提示对齐）
     useAppStore().toast(`下一首播放：${song.name}`, 'success')
   }
 
   function appendToQueue(song: Song): void {
     if (queue.value.some((item) => item.id === song.id && item.platform === song.platform)) return
-    queue.value.push(song)
+    queue.value.push(toQueueItem(song))
+    saveQueue()
     useAppStore().toast('已添加到播放列表', 'success')
   }
 
   function removeAt(target: number): void {
     if (target < 0 || target >= queue.value.length) return
+    const removed = queue.value[target]
+    // 必须在 splice 前判定：删掉当前项后 index 可能恰好等于 target，靠后置比较会误判
+    const wasCurrent = target === index.value
     queue.value.splice(target, 1)
     if (target < index.value) index.value -= 1
-    else if (target === index.value) {
+    else if (wasCurrent) {
       if (!queue.value.length) {
         stop()
         return
       }
-      const nextIndex = Math.min(index.value, queue.value.length - 1)
-      void playAt(nextIndex)
+      // 后面的项前移了一位，index 位置现在装的就是「原本的下一首」
+      index.value = Math.min(index.value, queue.value.length - 1)
     }
+    if (removed && removed.uid === loadedUid) loadedUid = null
+    // 下标调整完再落盘，快照里才是删除后的真实位置
+    saveQueue()
+    if (wasCurrent) void playAt(index.value)
+  }
+
+  /**
+   * 拖拽重排。index 必须跟着动，否则「拖一下队列，正在播的变成别的歌」。
+   * 下标换算在 core/queue.ts 里，有单测。
+   */
+  function moveQueueItem(from: number, to: number): void {
+    if (from === to) return
+    const moved = moveIndex(index.value, from, to)
+    queue.value = moveItem(queue.value, from, to)
+    index.value = moved
+    saveQueue()
   }
 
   function clearQueue(): void {
     queue.value = []
+    saveQueue()
     stop()
+  }
+
+  /** 把当前队列存成歌单；uid 是会话内的定位标记，落盘前剥掉，别写进 playlists.json */
+  async function saveQueueAsPlaylist(name: string): Promise<boolean> {
+    const trimmed = name.trim()
+    if (!trimmed || !queue.value.length) return false
+    const songs = queue.value.map(({ uid: _uid, ...song }) => song)
+    const created = await usePlaylistStore().create(trimmed, songs)
+    if (!created) return false
+    useAppStore().toast(`已存为歌单「${created.name}」`, 'success')
+    return true
+  }
+
+  /**
+   * 打开「换一个版本」面板并拉候选。
+   * 主进程那边只搜索打分、不取址，所以不会熔断音源、也不写换源评分。
+   */
+  async function findAlternatives(): Promise<void> {
+    const song = current.value
+    if (!song) return
+    // 搜索要几秒，期间用户可能换歌或重开面板：过期结果不能挂到新歌上
+    const token = ++alternativesToken
+    alternativesOpen.value = true
+    alternativesLoading.value = true
+    alternatives.value = []
+    try {
+      // 可选调用：外部宿主（另一个 WebView 壳）没实现这个方法时退化成空列表，而不是崩掉
+      const list = await window.api.findAlternatives?.(plain(song))
+      if (token !== alternativesToken) return
+      alternatives.value = Array.isArray(list) ? list : []
+    } catch {
+      if (token === alternativesToken) alternatives.value = []
+    } finally {
+      if (token === alternativesToken) alternativesLoading.value = false
+    }
+  }
+
+  function closeAlternatives(): void {
+    alternativesOpen.value = false
+    // 关掉面板后回来的结果不该再弹出内容
+    alternativesToken += 1
+  }
+
+  /**
+   * 换到候选版本：用候选替换队列里的当前项后重播。
+   *
+   * 不预探测——点选即验证，播不了就把错误交给 playAt（它内部已有自愈与跨源兜底）。
+   *
+   * 失败时把原来那首放回队列：用户只是「试一下」，不该被一次尝试永久改掉队列内容。
+   * 返回 false 表示这次没播起来（面板据此标红），错误条不保留——队列已经回到原样了。
+   */
+  async function switchToAlternative(target: Song): Promise<boolean> {
+    const at = index.value
+    if (at < 0) return false
+    const previous = queue.value[at]
+    queue.value.splice(at, 1, toQueueItem(target))
+    saveQueue()
+    await playAt(at, { noSkip: true })
+    if (!error.value) return true
+    if (!previous) return false
+
+    const reason = error.value
+    queue.value.splice(at, 1, previous)
+    index.value = at
+    // 让 toggle 走一次完整取址：恢复到「干净暂停」的状态，而不是界面显示 0 秒、音频停在 3 分钟
+    loadedUid = null
+    saveQueue()
+    error.value = ''
+    useAppStore().toast(`这个版本播不了：${reason}`, 'error')
+    return false
   }
 
   async function toggle(): Promise<void> {
@@ -390,14 +622,21 @@ export const usePlayerStore = defineStore('player', () => {
       if (queue.value.length) await playAt(0)
       return
     }
-    if (playing.value) audio.pause()
-    else {
-      try {
-        await audio.play()
-      } catch (err) {
-        // 缓冲中用户又点了暂停：play() 会以 AbortError 拒绝，不是播放失败
-        if ((err as Error)?.name !== 'AbortError') error.value = '播放失败，请重试'
-      }
+    if (playing.value) {
+      audio.pause()
+      return
+    }
+    // 静默恢复的队列只有「选中」没有「加载」：直接 play() 会因为没有音源而失败，
+    // 必须先走一次完整取址。正常播放中两者相等，这里是零成本判断。
+    if (loadedUid !== current.value.uid) {
+      await playAt(index.value)
+      return
+    }
+    try {
+      await audio.play()
+    } catch (err) {
+      // 缓冲中用户又点了暂停：play() 会以 AbortError 拒绝，不是播放失败
+      if ((err as Error)?.name !== 'AbortError') error.value = '播放失败，请重试'
     }
   }
 
@@ -524,6 +763,8 @@ export const usePlayerStore = defineStore('player', () => {
     resolvedSong.value = null
     lyric.value = null
     queueTag.value = ''
+    loadedUid = null
+    restoredSeek = null
   }
 
   function hydrate(config: { volume: number; playMode: PlayMode }): void {
@@ -611,6 +852,16 @@ export const usePlayerStore = defineStore('player', () => {
     appendToQueue,
     removeAt,
     clearQueue,
+    moveQueueItem,
+    restoreQueue,
+    saveQueue,
+    saveQueueAsPlaylist,
+    alternatives,
+    alternativesLoading,
+    alternativesOpen,
+    findAlternatives,
+    closeAlternatives,
+    switchToAlternative,
     toggle,
     next,
     prev,

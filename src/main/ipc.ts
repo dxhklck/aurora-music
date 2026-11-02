@@ -122,6 +122,7 @@ export function registerIpc(): void {
   handle(IPC.resolveTrack, (args: { song: Song; autoSwitch?: boolean; forceSwitch?: boolean }) =>
     catalog.resolveTrack(args.song, args.autoSwitch !== false, args.forceSwitch === true)
   )
+  handle(IPC.findAlternatives, (song: Song) => catalog.rankAlternatives(song))
   handle(IPC.coverResolve, (song: Song) => resolveCover(song))
 
   // ---------- 下载 ----------

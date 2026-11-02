@@ -9,6 +9,7 @@ import NowPlaying from './components/NowPlaying.vue'
 import QueueDrawer from './components/QueueDrawer.vue'
 import ToastHost from './components/ToastHost.vue'
 import PlaylistPicker from './components/PlaylistPicker.vue'
+import AlternativePanel from './components/AlternativePanel.vue'
 import { useAppStore } from './stores/app'
 import { usePlayerStore } from './stores/player'
 import { useDownloadStore } from './stores/download'
@@ -28,7 +29,6 @@ const router = useRouter()
 
 let lyricTimer = 0
 let offSettings: (() => void) | null = null
-let offToast: (() => void) | null = null
 let offTray: (() => void) | null = null
 let offLyricState: (() => void) | null = null
 /** 托盘状态只在变化时推送，缓存上一次的比较基准 */
@@ -147,10 +147,12 @@ onMounted(async () => {
     }
   }
   player.bindEngine()
+  // 把上次关掉时的队列摆回来：只还原队列与选中项，不取址也不出声，
+  // 用户点播放时才真正加载（见 stores/player.ts 的 restoreQueue）
+  player.restoreQueue()
   await Promise.all([download.init(), library.load(), playlists.load()])
 
   offSettings = window.api.onSettingsChanged((next) => app.applySettings(next))
-  offToast = window.api.onToast((payload) => app.toast(payload.message, payload.type))
   offTray = window.api.onTrayCommand((command) => {
     if (command === 'toggle') void player.toggle()
     else if (command === 'next') player.next()
@@ -174,7 +176,6 @@ onBeforeUnmount(() => {
   window.clearInterval(lyricTimer)
   window.removeEventListener('keydown', onKey)
   offSettings?.()
-  offToast?.()
   offTray?.()
   offLyricState?.()
 })
@@ -202,6 +203,7 @@ onBeforeUnmount(() => {
 
     <QueueDrawer />
     <PlaylistPicker />
+    <AlternativePanel />
 
     <transition name="fade">
       <div v-if="player.notice" class="source-notice">
@@ -214,6 +216,7 @@ onBeforeUnmount(() => {
       <div v-if="player.error" class="play-error" @click="player.error = ''">
         <strong>播放失败</strong>
         <span>{{ player.error }}</span>
+        <button class="switch-btn" @click.stop="player.findAlternatives()">换个版本</button>
         <em>点击关闭</em>
       </div>
     </transition>
@@ -311,6 +314,20 @@ onBeforeUnmount(() => {
   font-style: normal;
   font-size: 10.5px;
   color: rgba(255, 208, 216, 0.55);
+}
+/* 错误条常驻深色底（不跟主题走），按钮沿用同一套色，别用 --accent */
+.switch-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  background: rgba(255, 92, 124, 0.16);
+  border: 1px solid rgba(255, 92, 124, 0.4);
+  color: #ffd0d8;
+  cursor: pointer;
+}
+.switch-btn:hover {
+  background: rgba(255, 92, 124, 0.28);
 }
 
 .stage-enter-active,
