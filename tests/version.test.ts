@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isNewerVersion } from '../src/main/utils.ts'
+import { compareVersion, isNewerVersion } from '../src/main/update-logic.ts'
 
 test('跨十位要按数字比，不能按字符串比', () => {
   assert.equal(isNewerVersion('1.3.10', '1.3.9'), true)
@@ -38,4 +38,12 @@ test('预发布后缀按同版本处理（本项目不发预发布）', () => {
 test('空值与垃圾输入不会误判成更新', () => {
   assert.equal(isNewerVersion('', '1.0.0'), false)
   assert.equal(isNewerVersion('abc', '1.0.0'), false)
+})
+
+test('compareVersion 给出三向结果，供渠道选择判「落后 / 同步 / 更新」', () => {
+  assert.ok(compareVersion('1.3.12', '1.3.11') > 0)
+  assert.equal(compareVersion('1.3.12', '1.3.12'), 0)
+  assert.ok(compareVersion('1.3.11', '1.3.12') < 0)
+  // 与 isNewerVersion 必须同源：两套判据不同会让「渠道可用」与「要不要提示」打架
+  assert.equal(compareVersion('1.3.12', '1.3.11') > 0, isNewerVersion('1.3.12', '1.3.11'))
 })

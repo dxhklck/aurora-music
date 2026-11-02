@@ -4,14 +4,14 @@ import { IPC } from '@shared/ipc'
 import type { UpdateStatusView } from '@shared/api'
 import { markQuitting } from './tray'
 import { settings } from './services/settings'
-import { isNewerVersion } from './utils'
+import { pickChannel, compareVersion, isNewerVersion, type ChannelProbe } from './update-logic'
 
 /**
  * 自动更新（electron-updater）。
  *
  * 渠道策略：GitCode 主源（2026-10-30 实测通过，国内可达、免费）→ 对象存储（可选）
- * → GitHub 直连 → ghproxy 系镜像。第一个能拉到 latest.yml 的胜出，并跨启动记在
- * settings.updateChannel——国内直连通常被墙，不记忆的话每次启动都要白等直连超时。
+ * → GitHub 直连 → ghproxy 系镜像。第一个**不落后于当前版本**的渠道胜出，并跨启动
+ * 记在 settings.updateChannel——国内直连通常被墙，不记忆的话每次启动都要白等超时。
  * 渠道中途失效时清掉记忆重新探测。
  *
  * 范围刻意做小：
@@ -102,6 +102,10 @@ const CHANNELS: Channel[] = [
 
 /** 渠道探测超时：国内对被墙端点通常是快速重置或长时间挂起，12s 足够分辨 */
 const PROBE_TIMEOUT = 12_000
+/** 顺延探测（主源落后时才会用到）给更短的超时，别让「检查更新」变成等一分钟 */
+const PROBE_FALLBACK_TIMEOUT = 5_000
+/** 一次渠道探测的总预算：正常情况只用掉第一个的 12s 预算，其余是兜底上限 */
+const PROBE_BUDGET = 20_000
 
 let initialized = false
 /** 已验证可用的渠道；null = 尚未选定（下次检查时重新探测） */
@@ -169,8 +173,13 @@ async function useChannel(channel: Channel): Promise<void> {
  * 确保选定可用渠道并切到位。
  * - 上次验证过的渠道记在 settings.updateChannel 里（跨启动生效）：直接应用，不重复探测。
  *   国内直连 GitHub 通常被墙，不记忆的话每次启动都要白等直连超时 12s；
- * - 无记忆：按 CHANNELS 顺序探测，第一个能拉到 latest.yml 的胜出，并写回设置；
+ * - 无记忆：按 CHANNELS 顺序探测，**第一个不落后于当前版本的**胜出，并写回设置；
+ * - 全部落后（本地构建 / 刚回滚）：取版本最高者兜底，不为「更新」提示降级；
  * - 全部失败：抛错，调用方决定提示方式。
+ *
+ * 判据是「远端版本 ≥ 当前版本」而不是「探测没抛错」：后者会让一个**落后但可达**
+ * 的源被永久选中——它正常返回「无更新」，GitHub 上的新版永远不会被尝试，
+ * 而渠道记忆跨启动，用户就这样停在旧版本里（v1.3.11 → v1.3.12 实测发生）。
  */
 async function ensureChannel(): Promise<void> {
   if (activeChannel === null) {
@@ -181,18 +190,48 @@ async function ensureChannel(): Promise<void> {
     await useChannel(activeChannel)
     return
   }
+
+  const current = app.getVersion()
+  const probes: ChannelProbe[] = []
   const failures: string[] = []
-  for (const channel of CHANNELS) {
+  const deadline = Date.now() + PROBE_BUDGET
+
+  for (let index = 0; index < CHANNELS.length; index += 1) {
+    const channel = CHANNELS[index]
+    const label = channel.id || '直连'
+    const remaining = deadline - Date.now()
+    if (remaining < 1_000) {
+      failures.push(`${label}：超出探测总预算，跳过`)
+      break
+    }
+    const timeout = Math.min(index === 0 ? PROBE_TIMEOUT : PROBE_FALLBACK_TIMEOUT, remaining)
     try {
       await useChannel(channel)
-      await withTimeout(autoUpdater.checkForUpdates(), PROBE_TIMEOUT)
-      activeChannel = channel
-      // 渠道验证成本高（坏渠道要等满超时才换下一个），必须跨启动记住
-      void settings.set({ updateChannel: channel.id }).catch(() => undefined)
-      return
+      const result = await withTimeout(autoUpdater.checkForUpdates(), timeout)
+      const version = result?.updateInfo?.version ?? null
+      probes.push({ id: label, version })
+      // 落后于当前的源：它返回的「无更新」不能采信，继续问下一个
+      if (version && compareVersion(version, current) >= 0) {
+        activeChannel = channel
+        // 渠道验证成本高（坏渠道要等满超时才换下一个），必须跨启动记住
+        void settings.set({ updateChannel: channel.id }).catch(() => undefined)
+        return
+      }
     } catch (error) {
-      failures.push(`${channel.id || '直连'}：${(error as Error).message?.slice(0, 80) ?? '未知错误'}`)
+      probes.push({ id: label, version: null })
+      failures.push(`${label}：${(error as Error).message?.slice(0, 80) ?? '未知错误'}`)
     }
+  }
+
+  // 所有渠道都落后于当前版本：挑版本最高的当 active。
+  // 不会因此提示降级——checkForUpdate() 用 isNewerVersion 把关。
+  const decision = pickChannel(probes, current)
+  if (decision.reason === 'stale') {
+    const channel = CHANNELS[decision.index]
+    await useChannel(channel)
+    activeChannel = channel
+    void settings.set({ updateChannel: channel.id }).catch(() => undefined)
+    return
   }
   throw new Error(`所有更新渠道均不可达。${failures.join('；')}`)
 }

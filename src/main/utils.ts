@@ -19,23 +19,7 @@ export function clamp(value: number, min: number, max: number): number {
  * 不追求 semver 全语义（本项目不发预发布版）：逐段取数字，缺位按 0，
  * `1.3.10` 要大于 `1.3.9`（字符串比较会判反）。`-beta.1` 这类后缀按同版本处理。
  */
-export function isNewerVersion(remote: string, current: string): boolean {
-  const parse = (value: string): number[] =>
-    value
-      .trim()
-      .replace(/^v/i, '')
-      .split(/[.+-]/)
-      .slice(0, 3)
-      .map((part) => Number.parseInt(part, 10) || 0)
-  const next = parse(remote)
-  const now = parse(current)
-  for (let i = 0; i < 3; i += 1) {
-    const left = next[i] ?? 0
-    const right = now[i] ?? 0
-    if (left !== right) return left > right
-  }
-  return false
-}
+/** 版本比较在 version.ts（无 fs 依赖，可单测）；utils 不再转发，避免 Node 原生测试里的相对路径解析问题 */
 
 /** 文件名非法字符（跨平台）+ 保留名 */
 const ILLEGAL = /[\\/:*?"<>|\u0000-\u001f]/g
