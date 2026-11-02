@@ -7,8 +7,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 分支推送只跑轻量校验，三平台打包留给 tag。
+  # 2026-11-02 v1.3.12 发版实测：main 推送会额外触发一整套三平台构建，而 release 那步
+  # 又只对 tag 生效，等于白烧一份额度。macOS runner 是 10× 计费，一次发版约 140 billed min，
+  # Free 的 2000/月撑不住这种双跑。校验本身没丢：打完 tag 的构建里同样会跑这两步。
+  verify:
+    name: verify
+    if: github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
   build:
     name: build-${{ matrix.os }}
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -240,6 +266,9 @@ jobs:
           node scripts/publish-gitcode.mjs
 
       # 代码镜像：main 与标签推到 GitCode（GitHub 仍是 CI 与主开发仓库，GitCode 为镜像备份）
+      # --follow-tags 已经把 main 可达的附注标签一起推走（本项目的发版标签一定在 main 上），
+      # 所以不再单独跑一次 `git push --tags`：实测 v1.3.8~v1.3.12 在 GitCode 上都已存在，
+      # 那条命令只会以 "already exists" 全部被拒，把这一步染红却不影响镜像完整性（v1.3.12 实测）。
       - name: Mirror code to GitCode
         continue-on-error: true
         env:
@@ -250,4 +279,3 @@ jobs:
             exit 1
           fi
           git push "https://oauth2:$GITCODE_TOKEN@gitcode.com/dxhklck/aurora_music.git" "origin/main:main" --follow-tags
-          git push "https://oauth2:$GITCODE_TOKEN@gitcode.com/dxhklck/aurora_music.git" --tags

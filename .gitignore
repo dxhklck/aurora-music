@@ -4,6 +4,9 @@ dist
 release
 *.log
 .DS_Store
+# 发布资产落点（scripts/publish-gitcode.mjs 的默认 FILES_DIR）：本机补跑 GitCode
+# 同步时下载的三件套，单是 exe 就 105 MB，绝不能进仓库
+artifacts/
 
 # 仓库根目录下历史的 Python 引擎目录（2026-10-29 已删除）。保留忽略规则，防止误把这类体积重新入库。
 # 必须带前导斜杠：否则 `engine/` 会匹配任意层级同名目录，把 src/main/engine/ts 一起忽略掉。

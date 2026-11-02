@@ -42,8 +42,41 @@ CI（`build.yml` 的 publish-release job）每次发版做两件事：
 - **Sync update files to GitCode**：`scripts/publish-gitcode.mjs` 把
   `latest.yml + exe + blockmap` 传到**公开资产仓库** `aurora_music_release` 的
   版本 release（tag=vX.Y.Z）与指针 release（tag=stable）；
-- **Mirror code to GitCode**：把 `origin/main` 与全部 tags 推到代码仓库 `aurora_music` 作镜像
-  （这个可以私有，令牌推送仍可用）。
+- **Mirror code to GitCode**：把 `origin/main` 与 main 可达的附注标签推到代码仓库
+  `aurora_music` 作镜像（这个可以私有，令牌推送仍可用）。
+
+### CI 连不上 GitCode 时：本机补跑（必须做，否则主源停在旧版本）
+
+GitHub 的美国 runner 到 `api.gitcode.com` 常常直接 `fetch failed`（疑似屏蔽海外云 IP）。
+两步都是 `continue-on-error: true`，**发版照样是绿的**，只在注解里留一行
+`::error::GitCode 同步失败：…`。所以「CI 绿了」不代表主更新源更新了——
+v1.3.11 与 v1.3.12 都踩过，`stable` 指针一直停在上一版，而 GitHub 侧一切正常。
+
+发完版**必须**去 `https://gitcode.com/dxhklck/aurora_music_release/releases/download/stable/latest.yml`
+看一眼 `version:` 是不是新版本。不是就本机补跑（国内直连 11 MB/s，比 CI 靠谱得多）：
+
+```bash
+# 1. 取回 CI 打出来的三个文件（GitHub 在国外，用代理快 8 倍；直连约 130 KB/s）
+mkdir -p artifacts && cd artifacts
+for f in Aurora-Music-<版本>-x64.exe Aurora-Music-<版本>-x64.exe.blockmap latest.yml; do
+  curl -L -x http://127.0.0.1:10808 -C - -o "$f" \
+    "https://github.com/dxhklck/aurora-music/releases/download/v<版本>/$f"
+done
+cd ..
+
+# 2. 核对下载完整性（比对 latest.yml 里的 sha512，对不上就是没下完）
+node -e "const c=require('crypto'),f=require('fs');const b=f.readFileSync('artifacts/Aurora-Music-<版本>-x64.exe');console.log(c.createHash('sha512').update(b).digest('base64'))"
+grep sha512 artifacts/latest.yml
+
+# 3. 同步（令牌在 .env.local，不进仓库）
+set -a && . ./.env.local && set +a
+REPO=dxhklck/aurora_music_release TAG=v<版本> FILES_DIR=artifacts node scripts/publish-gitcode.mjs
+
+# 4. 代码镜像（这一步 CI 通常也能成功；失败时同样在本机补）
+git push "https://oauth2:$GITCODE_TOKEN@gitcode.com/dxhklck/aurora_music.git" "origin/main:main" --follow-tags
+```
+
+脚本自带「先删旧附件再传 + sha256 回查 + 最后清理上一版附件」，可以重复跑。
 
 ## 二、GitCode 上的实测结论（排坑实录，2026-10-30）
 
