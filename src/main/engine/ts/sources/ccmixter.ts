@@ -1,7 +1,7 @@
 import { BaseSource, makeSong, probeFirst, type SourceConfig } from '../base'
 import { parseJsonLoose } from './../http'
 import { safeGet } from '../text'
-import type { SearchContext, SongInfo } from '../types'
+import type { SearchContext } from '../types'
 
 /**
  * ccMixter（CC 授权混音素材库）。

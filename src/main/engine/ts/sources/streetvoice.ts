@@ -1,6 +1,6 @@
 import { BaseSource, makeSong, type SourceConfig } from '../base'
 import { parseJsonLoose } from '../http'
-import { attrOf, parseHtml, selectAll, selectOne, textOf } from '../html'
+import { attrOf, parseHtml, selectAll, selectOne } from '../html'
 import { cleanLrc, safeGet, toFloat, toInt } from '../text'
 import type { SearchContext, SongInfo } from '../types'
 

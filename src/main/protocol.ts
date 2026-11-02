@@ -1,4 +1,4 @@
-import { protocol, net } from 'electron'
+import { protocol } from 'electron'
 import { open, readFile, stat, type FileHandle } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { MEDIA_SCHEME } from './media'

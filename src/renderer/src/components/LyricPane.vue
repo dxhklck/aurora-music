@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Lyric, LyricLine } from '@shared/types'
+import type { Lyric } from '@shared/types'
 import { findLyricIndex } from '@shared/lyric'
 import { audio } from '../core/audio'
 import { usePlayerStore } from '../stores/player'

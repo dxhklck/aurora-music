@@ -23,25 +23,6 @@ const keyword = process.argv[2] ?? 'love'
 const size = Number(process.argv[3] ?? 3)
 const OUT = 'scripts/engine-ts/fixtures/sources'
 
-/** 这些 query 参数每次请求都会变（时间戳、随机用户号、签名），不能作为匹配键 */
-const VOLATILE = new Set([
-  '_', 't', 'ts', 'time', 'timestamp', 'sign', 'signature', 'nonce', 'user', 'loginUid',
-  'devid', 'devId', 'qimei36', 'mid', 'dfid', 'uuid', 'token', 'access_token'
-])
-
-function stableKey(raw: string): string {
-  try {
-    const url = new URL(raw)
-    const params = [...url.searchParams.entries()]
-      .filter(([key]) => !VOLATILE.has(key))
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => `${key}=${value}`)
-    return `${url.pathname}?${params.join('&')}`
-  } catch {
-    return raw
-  }
-}
-
 function normalize(item: {
   identifier: string
   songName: string

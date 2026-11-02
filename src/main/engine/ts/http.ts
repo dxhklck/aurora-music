@@ -64,7 +64,6 @@ export interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT = 15_000
-const BINARY_CHUNK = 8192
 
 function cookiesToHeader(cookies: Record<string, string>): string {
   return Object.entries(cookies)

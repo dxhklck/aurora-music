@@ -7,7 +7,6 @@ import { usePlayerStore } from '../stores/player'
 import { useDownloadStore } from '../stores/download'
 import { usePlaylistStore } from '../stores/playlists'
 import { formatDuration } from '@shared/lyric'
-import type { Quality } from '@shared/types'
 const player = usePlayerStore()
 
 const download = useDownloadStore()

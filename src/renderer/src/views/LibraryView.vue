@@ -13,7 +13,6 @@ import {
   applyFilters,
   confirmSummary,
   dirOf,
-  isImported,
   sortTracks,
   splitPending,
   type SortDir,
