@@ -9,6 +9,16 @@ import { useDownloadStore } from '../stores/download'
 import { usePlayerStore } from '../stores/player'
 import { useAppStore } from '../stores/app'
 import { formatBytes } from '@shared/lyric'
+import {
+  applyFilters,
+  confirmSummary,
+  dirOf,
+  isImported,
+  sortTracks,
+  splitPending,
+  type SortDir,
+  type SortKey
+} from './library/filters'
 
 const library = useLibraryStore()
 const download = useDownloadStore()
@@ -18,8 +28,6 @@ const dir = ref('')
 const tableRef = ref<InstanceType<typeof SongTable> | null>(null)
 
 /* ---------------- 搜索 / 筛选 / 排序 ---------------- */
-
-type SortKey = 'added' | 'name' | 'artist' | 'album' | 'duration' | 'size' | 'ext'
 
 const SORT_LABELS: Record<SortKey, string> = {
   added: '添加时间',
@@ -41,7 +49,7 @@ const filterFolder = ref('')
 /** 来源：下载目录里的是应用下回来的，其余是用户导入的 */
 const sourceFilter = ref<'' | 'download' | 'imported'>('')
 const sortKey = ref<SortKey>('added')
-const sortDir = ref<'asc' | 'desc'>('desc')
+const sortDir = ref<SortDir>('desc')
 
 const artists = computed(() => {
   const set = new Set<string>()
@@ -70,11 +78,6 @@ const folders = computed(() => {
   return [...map.entries()].sort((a, b) => collator.compare(a[1], b[1]))
 })
 
-function dirOf(path: string): string {
-  const index = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'))
-  return index > 0 ? path.slice(0, index) : ''
-}
-
 const hasFilter = computed(
   () =>
     !!(
@@ -100,63 +103,16 @@ function onArtistChange(): void {
   if (filterAlbum.value && !albums.value.includes(filterAlbum.value)) filterAlbum.value = ''
 }
 
-/** 空值（空专辑 / 时长未知）不参与比较，永远沉底 */
-function isBlank(track: LibraryTrack): boolean {
-  if (sortKey.value === 'album') return !track.song.album
-  if (sortKey.value === 'artist') return !track.song.artists.length
-  if (sortKey.value === 'duration') return !track.song.duration
-  return false
-}
-
-function compareTracks(a: LibraryTrack, b: LibraryTrack): number {
-  switch (sortKey.value) {
-    case 'name':
-      return collator.compare(a.song.name, b.song.name)
-    case 'artist':
-      return collator.compare(a.song.artists.join('/'), b.song.artists.join('/'))
-    case 'album':
-      return collator.compare(a.song.album, b.song.album)
-    case 'duration':
-      return a.song.duration - b.song.duration
-    case 'size':
-      return a.size - b.size
-    case 'ext':
-      return collator.compare(a.ext, b.ext)
-    default:
-      return a.downloadedAt - b.downloadedAt
-  }
-}
-
-/** 导入条目的 id 是 local:<绝对路径>，下载条目是 <平台>:<songId>；比路径判断稳，改了下载目录也不会串 */
-function isImported(item: LibraryTrack): boolean {
-  return item.id.startsWith('local:')
-}
-
 const filtered = computed(() => {
-  const key = keyword.value.trim().toLowerCase()
-  const rows = library.items.filter((item) => {
-    if (filterArtist.value && !item.song.artists.includes(filterArtist.value)) return false
-    if (filterAlbum.value && item.song.album !== filterAlbum.value) return false
-    if (filterExt.value && item.ext !== filterExt.value) return false
-    if (filterFolder.value && dirOf(item.filePath) !== filterFolder.value) return false
-    if (sourceFilter.value === 'download' && isImported(item)) return false
-    if (sourceFilter.value === 'imported' && !isImported(item)) return false
-    if (!key) return true
-    return (
-      item.song.name.toLowerCase().includes(key) ||
-      item.song.album.toLowerCase().includes(key) ||
-      item.song.artists.join(' ').toLowerCase().includes(key) ||
-      item.fileName.toLowerCase().includes(key) ||
-      item.filePath.toLowerCase().includes(key)
-    )
+  const rows = applyFilters(library.items, {
+    keyword: keyword.value,
+    artist: filterArtist.value,
+    album: filterAlbum.value,
+    ext: filterExt.value,
+    folder: filterFolder.value,
+    source: sourceFilter.value
   })
-  const direction = sortDir.value === 'asc' ? 1 : -1
-  return rows.sort((a, b) => {
-    const blankA = isBlank(a)
-    const blankB = isBlank(b)
-    if (blankA !== blankB) return blankA ? 1 : -1
-    return compareTracks(a, b) * direction
-  })
+  return sortTracks(rows, sortKey.value, sortDir.value, collator)
 })
 
 const songs = computed<Song[]>(() =>
@@ -181,16 +137,6 @@ function toggleSort(key: string): void {
 
 /* ---------------- 删除判定 ---------------- */
 
-const norm = (path: string): string => path.replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase()
-
-const downloadKey = computed(() => norm(dir.value))
-
-/** 保守策略：只有下载目录里的文件才允许真删，导入目录是用户的原始文件 */
-function inDownloadDir(track: LibraryTrack): boolean {
-  const root = downloadKey.value
-  return !!root && norm(track.filePath).startsWith(`${root}/`)
-}
-
 function trackOf(song: Song): LibraryTrack | undefined {
   return library.items.find((item) => item.id === song.id)
 }
@@ -207,19 +153,18 @@ const pending = ref<LibraryTrack[]>([])
 const busy = ref(false)
 const report = ref<LibraryOpReport | null>(null)
 
-const pendingDeletable = computed(() => pending.value.filter((item) => inDownloadDir(item)))
-const pendingImported = computed(() => pending.value.filter((item) => !inDownloadDir(item)))
-const pendingSize = computed(() =>
-  pendingDeletable.value.reduce((sum, item) => sum + (item.missing ? 0 : item.size), 0)
-)
+/**
+ * 待处理条目的拆分：只有下载目录里的才允许真删，导入目录是用户的原始文件。
+ *
+ * 这一段是全应用唯一决定「能不能真删用户文件」的地方，所以逻辑放在
+ * `library/filters.ts` 里用纯函数 + 测试锁住，这里只负责把当前下载目录喂进去。
+ */
+const pendingSplit = computed(() => splitPending(pending.value, dir.value))
+const pendingDeletable = computed(() => pendingSplit.value.deletable)
+const pendingImported = computed(() => pendingSplit.value.imported)
+const pendingSize = computed(() => pendingSplit.value.bytes)
 
-const confirmText = computed(() => {
-  if (confirmMode.value === 'remove' || !pendingDeletable.value.length) {
-    return `从库移除 ${pending.value.length} 首`
-  }
-  if (!pendingImported.value.length) return `删除 ${pendingDeletable.value.length} 个文件`
-  return `删除 ${pendingDeletable.value.length} 个 · 移除 ${pendingImported.value.length} 个`
-})
+const confirmText = computed(() => confirmSummary(pendingSplit.value, confirmMode.value))
 
 function requestDelete(items: LibraryTrack[]): void {
   if (!items.length) return
@@ -324,7 +269,7 @@ const metaBusy = ref(false)
 const menuDeleteLabel = computed(() => {
   const items = menu.value?.items ?? []
   if (!items.length) return ''
-  const deletable = items.filter((item) => inDownloadDir(item)).length
+  const deletable = splitPending(items, dir.value).deletable.length
   if (!deletable) return ''
   if (deletable === items.length) return items.length > 1 ? `删除文件（${items.length} 个）` : '删除文件'
   return `删除 ${deletable} 个 · 移除 ${items.length - deletable} 个`
