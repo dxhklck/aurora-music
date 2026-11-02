@@ -115,6 +115,31 @@ git push "https://oauth2:$GITCODE_TOKEN@gitcode.com/dxhklck/aurora_music.git" "o
 
 ## 四、验证清单
 
+### 一条命令（推荐）
+
+```bash
+npm run release:verify                  # 核对 package.json 里的版本
+npm run release:verify -- 1.3.13        # 核对指定版本
+npm run release:verify -- --deep        # 额外整包下载比对 sha512（约 110MB / 10 秒）
+npm run release:verify -- --proxy=http://127.0.0.1:10808   # GitHub 走代理（GitCode 始终直连）
+```
+
+它检查五件事并在任一不通过时**非零退出**：GitHub `releases/latest` 的 tag、
+GitHub `latest.yml` 的 version、GitCode `stable/latest.yml` 的 version、
+两源的安装包文件名一致、主源安装包可匿名 Range 下载（`--deep` 时再比 sha512）。
+
+必须在**能同时到达两边**的机器上跑（作者本机）。放进 CI 是自欺——那个 runner
+到 `api.gitcode.com` 本来就通不了，检查必然和同步步骤一起失败。
+
+脚本覆盖不到、仍需手工确认的三项：
+
+- CI「Sync update files to GitCode」这一步**是否真成功**：它是
+  `continue-on-error: true`，步骤变绿不代表同步成功，要展开看有没有 `::error::` 注解。
+- 代码镜像：GitCode 代码仓库的 `main` 与 tags 是否与 GitHub 一致。
+- 应用端：`settings.json` 里出现 `updateChannel`；设置页「检查更新」能发现新版本并完成下载。
+
+### 手工兜底
+
 下次发版（`v*` tag）后按序确认：
 
 ```bash
