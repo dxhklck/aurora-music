@@ -16,6 +16,7 @@ import { BrowserWindow, session } from 'electron'
 import { getMainWindow } from '../windows'
 import { settings } from './settings'
 import { notifyLoginSuccess } from './qrlogin'
+import { isAllowedLoginUrl } from './login-guard'
 import { IPC } from '@shared/ipc'
 import type { QrLoginPlatform } from '@shared/types'
 
@@ -93,6 +94,13 @@ export async function openLoginWindow(platform: QrLoginPlatform): Promise<{ open
   const spec = SPECS[platform]
   currentPlatform = platform
 
+  // 登录窗只需要「把密码交给官网」，不该有任何设备权限。Electron 的默认行为是
+  // **放行全部权限请求**，不显式关掉的话，登录页里的任意内容都能要摄像头/麦克风/定位。
+  // 按 partition 单独设：defaultSession 的处理器不影响 fromPartition 出来的会话。
+  session
+    .fromPartition(partitionOf(platform))
+    .setPermissionRequestHandler((_contents, _permission, done) => done(false))
+
   loginWindow = new BrowserWindow({
     width: 980,
     height: 680,
@@ -110,10 +118,18 @@ export async function openLoginWindow(platform: QrLoginPlatform): Promise<{ open
   })
   loginWindow.setMenu(null)
 
-  // 站点自己的登录弹窗也在应用内接过来，不外泄到系统浏览器
+  // 站点自己的登录弹窗也在应用内接过来，不外泄到系统浏览器。
+  // 但必须限定该平台自己的域：否则登录页里的任何脚本都能把窗口导航到任意地址，
+  // 而那个页面继承着本 partition 里已经登录的 Cookie。
+  // 取舍：第三方登录（微信/微博）会被挡住，只保留平台自己的账号密码登录。
   loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void loginWindow?.loadURL(url)
+    if (isAllowedLoginUrl(platform, url)) void loginWindow?.loadURL(url)
     return { action: 'deny' }
+  })
+
+  // 渲染层自己发起的跳转同样走白名单（will-navigate 不拦 loadURL 与非主框架）
+  loginWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isAllowedLoginUrl(platform, url)) event.preventDefault()
   })
 
   loginWindow.on('closed', () => {

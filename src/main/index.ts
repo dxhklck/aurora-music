@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, globalShortcut } from 'electron'
+import { app, BrowserWindow, Menu, globalShortcut, session } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { writeFile, readFile } from 'node:fs/promises'
@@ -162,6 +162,14 @@ if (!app.requestSingleInstanceLock()) {
         : null
     )
     await bootstrapRuntime()
+
+    // 权限收口：Electron 默认**放行全部权限请求**，而这个应用一个都用不到
+    // （无摄像头/麦克风/定位/通知/串口/HID）。显式全拒，比给 100 个通道做校验
+    // 更直接地关掉一整类攻击面。登录窗的独立 partition 在 weblogin.ts 里单独设。
+    session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) =>
+      done(false)
+    )
+    session.defaultSession.setPermissionCheckHandler(() => false)
 
     // 渲染/GPU 子进程崩溃：白屏、画面冻结最常见的两种真因，必须留痕
     app.on('render-process-gone', (_event, _contents, details) => {
