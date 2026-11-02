@@ -48,7 +48,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   neteaseAccount: null,
   miniMode: false,
   windowBounds: {},
-  desktopLyricBounds: {}
+  desktopLyricBounds: {},
+  tagsBackfilled: false
 }
 
 /** 设置持久化（settings.json，原子写入 + 内存缓存） */

@@ -8,6 +8,9 @@ import { ensureDir, fileSize, isInsideDir } from '../utils'
 import { trashFiles, companionFiles } from './fileops'
 import { createWriteQueue, writeAtomic } from './atomic-write'
 import { musicdl } from '../engine/musicdl'
+import { readTagFields, type TagCover } from '../engine/ts/tag-read'
+import { localUrl } from '../media'
+import { settings } from './settings'
 
 /** 本地库识别的音频格式（与 Muse 播放支持的格式保持一致） */
 const AUDIO_EXTS = new Set(['mp3', 'flac', 'wav', 'm4a', 'ogg', 'aac', 'opus'])
@@ -78,8 +81,11 @@ function summarize(items: LibraryOpItem[], targetDir?: string): LibraryOpReport 
  */
 class LibraryService {
   private items: LibraryTrack[] = []
+  private userDataDir = ''
   private filePath = ''
   private ignoredPath = ''
+  /** 回填正在进行：load 与手动扫描可能同时触发，重复跑会白读两遍文件 */
+  private backfilling = false
   private ignored: IgnoredEntry[] = []
   private loaded = false
   /**
@@ -91,6 +97,7 @@ class LibraryService {
   private scanDirs: string[] = []
 
   configure(userDataDir: string): void {
+    this.userDataDir = userDataDir
     this.filePath = join(userDataDir, 'library.json')
     this.ignoredPath = join(userDataDir, 'library-ignored.json')
   }
@@ -121,6 +128,9 @@ class LibraryService {
       }
     }
     await this.prune()
+    // 老库升级后自动补一次标签（专辑/时长/封面），不阻塞启动也不等用户手动扫描。
+    // 只跑一次，标记写在 backfillTags 里。
+    if (this.items.length) void this.backfillTags().catch(() => undefined)
   }
 
   /**
@@ -327,7 +337,112 @@ class LibraryService {
       this.items.push(track)
     }
     if (discovered.length) await this.persist()
+    // 一次性迁移：旧版本导入的条目没有专辑/时长/封面，而上面的 known 判断让它们
+    // 永远不会被重读。返回值只算新增，回填不算「新导入」。
+    await this.backfillTags()
     return discovered.length
+  }
+
+  /**
+   * 没有 sidecar 时：先读音频内嵌标签，读不到再按文件名猜。
+   *
+   * 标签比文件名可靠——「歌手 - 歌名.mp3」只是个民间约定，而标签是压制/翻录的人
+   * 明确写进去的。没有标签的文件（绝大多数 WAV、裸 AAC）退回原名解析，行为不变。
+   */
+  private async fromTagsOrName(filePath: string, fileName: string): Promise<Song> {
+    const fallback = parseFileName(fileName)
+    const tags = await readTagFields(filePath)
+    if (!tags) return fallback
+    const song: Song = { ...fallback }
+    if (tags.title) song.name = tags.title
+    if (tags.artists?.length) song.artists = tags.artists
+    if (tags.album) song.album = tags.album
+    if (tags.duration) song.duration = tags.duration
+    if (tags.cover) {
+      const coverUrl = await this.persistCover(filePath, tags.cover)
+      if (coverUrl) song.coverUrl = coverUrl
+    }
+    return song
+  }
+
+  /**
+   * 把内嵌封面落成文件，返回能直接给渲染层用的 `muse://local` 地址。
+   *
+   * 不返回 data URL：封面要进列表里的 `<img src>` 与任务栏媒体面板，几百首的列表
+   * 各带一份 base64 会让内存翻几倍；而 CoverArt 按 src 做缓存，稳定路径才能命中。
+   * 文件名用文件路径的哈希，同一首歌重复扫描只会覆盖同一份，不会堆垃圾。
+   */
+  private async persistCover(filePath: string, cover: TagCover): Promise<string | null> {
+    try {
+      const dir = join(this.userDataDir, 'covers')
+      await ensureDir(dir)
+      const ext =
+        cover.mime === 'image/png' ? '.png' : cover.mime === 'image/webp' ? '.webp' : '.jpg'
+      const target = join(dir, `${createHash('sha1').update(filePath).digest('hex')}${ext}`)
+      await writeFile(target, cover.data)
+      return localUrl(target)
+    } catch {
+      // 封面是加分项：写不进去就退回渐变占位，不该让一次导入失败
+      return null
+    }
+  }
+
+  /**
+   * 老库回填：把已有条目的 album / artists / duration / coverUrl 补齐一次。
+   *
+   * `scanLocalDirs` 对已登记的 filePath 直接跳过，所以这些字段在旧版本里是空的
+   * 就永远是空的——不做这一步，升级后本地库看起来没有任何变化。
+   *
+   * 只填**空字段**，不覆盖用户手改过的值；跑过一次就置标记，不会每次启动都重扫。
+   */
+  private async backfillTags(): Promise<number> {
+    if (this.backfilling) return 0
+    if (settings.get().tagsBackfilled) return 0
+    this.backfilling = true
+    try {
+      return await this.runBackfill()
+    } finally {
+      this.backfilling = false
+    }
+  }
+
+  private async runBackfill(): Promise<number> {
+    let changed = 0
+    // 拍快照再遍历：扫描可能在此期间替换整个 items 数组，按下标写回会写错条目
+    const snapshot = [...this.items]
+    for (const item of snapshot) {
+      const song = item.song
+      if (song.platform !== 'local') continue
+      if (song.album && song.duration && song.coverUrl && song.artists.length) continue
+      if (!existsSync(item.filePath)) continue
+      const tags = await readTagFields(item.filePath)
+      if (!tags) continue
+
+      const next: Song = { ...song }
+      if (!next.album && tags.album) next.album = tags.album
+      if (!next.artists.length && tags.artists?.length) next.artists = tags.artists
+      if (!next.duration && tags.duration) next.duration = tags.duration
+      if (!next.coverUrl && tags.cover) {
+        const coverUrl = await this.persistCover(item.filePath, tags.cover)
+        if (coverUrl) next.coverUrl = coverUrl
+      }
+      if (
+        next.album === song.album &&
+        next.duration === song.duration &&
+        next.coverUrl === song.coverUrl &&
+        next.artists.join('/') === song.artists.join('/')
+      ) {
+        continue
+      }
+      const index = this.items.findIndex((entry) => entry.id === item.id)
+      if (index < 0) continue
+      this.items[index] = { ...item, song: next }
+      changed += 1
+    }
+    if (changed) await this.persist()
+    // 标记写入放在最后：中途异常时下次还能继续补，不会永久停在半截状态
+    await settings.set({ tagsBackfilled: true }).catch(() => undefined)
+    return changed
   }
 
   /** 逐层列出目录里的音频文件（跳过子目录里的 .meta.json 等非音频） */
@@ -378,7 +493,7 @@ class LibraryService {
     } catch {
       /* sidecar 损坏不影响导入，退回文件名解析 */
     }
-    if (!song) song = parseFileName(fileName)
+    if (!song) song = await this.fromTagsOrName(filePath, fileName)
     if (existsSync(filePath.replace(/\.[^.]+$/, '.lrc'))) {
       lyricPath = filePath.replace(/\.[^.]+$/, '.lrc')
     }

@@ -299,6 +299,14 @@ export interface AppSettings {
    * 共写一个嵌套对象时，谁用字面量重建整个对象谁就会把对方静默抹掉。
    */
   desktopLyricBounds: { mini?: WinRect; full?: WinRect }
+  /**
+   * 本地库「读音频标签」的一次性迁移标记。
+   *
+   * 导入的本地文件在旧版本里只有文件名猜出来的歌名，album 为空、duration 为 0、
+   * 没有封面。而 scanLocalDirs 有 `if (known.has(filePath)) continue`——已登记的
+   * 文件永远不会再被读一次，所以必须显式回填一遍，否则老用户升级后那些字段永远是空的。
+   */
+  tagsBackfilled?: boolean
 }
 
 /** 界面主题两档 */
