@@ -52,8 +52,17 @@ GitHub 的美国 runner 到 `api.gitcode.com` 常常直接 `fetch failed`（疑�
 `::error::GitCode 同步失败：…`。所以「CI 绿了」不代表主更新源更新了——
 v1.3.11 与 v1.3.12 都踩过，`stable` 指针一直停在上一版，而 GitHub 侧一切正常。
 
-发完版**必须**去 `https://gitcode.com/dxhklck/aurora_music_release/releases/download/stable/latest.yml`
-看一眼 `version:` 是不是新版本。不是就本机补跑（国内直连 11 MB/s，比 CI 靠谱得多）：
+为了不再靠人记得去翻注解，这一步失败时会往 **job 摘要页**（Actions 运行页顶部）写一段
+`⚠ 主更新源未同步（版本号）`，成功时写 `✅ 主更新源已同步到 …`。打开 Actions 一眼可见。
+
+不过最省事的判据还是本地一条命令：
+
+```bash
+npm run release:verify            # 直连
+npm run release:verify -- --proxy=http://127.0.0.1:10808   # GitHub 走代理
+```
+
+五项全过才叫发完版。任一项不通过，本机补跑（国内直连 11 MB/s，比 CI 靠谱得多）：
 
 ```bash
 # 1. 取回 CI 打出来的三个文件（GitHub 在国外，用代理快 8 倍；直连约 130 KB/s）

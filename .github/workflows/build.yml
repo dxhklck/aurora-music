@@ -259,11 +259,34 @@ jobs:
           REPO: dxhklck/aurora_music_release
           TAG: ${{ github.ref_name }}
         run: |
+          # 这一步刻意 continue-on-error：GitHub Release 已经成功，不该因为主源没同步
+          # 就让整次发版变红。但也绝不能让它**静默**失败——写进 job 摘要页，
+          # 发版时打开 Actions 就能看见，不用去翻注解。
+          warn_summary() {
+            {
+              echo "## ⚠ 主更新源未同步（${TAG}）"
+              echo ""
+              echo "GitHub Release 已发布，但 GitCode 的 \`stable\` 指针没有更新，"
+              echo "已安装旧版的用户会一直拿到「已是最新」。"
+              echo ""
+              echo "**处理**：按 \`docs/update-feed-setup.md\` 的「本机补跑」执行，"
+              echo "然后跑 \`npm run release:verify\` 确认两源一致。"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
           if [ -z "$GITCODE_TOKEN" ]; then
             echo "::error::缺 GITCODE_TOKEN secret（GitCode 私人令牌），无法同步主更新源"
+            warn_summary
             exit 1
           fi
-          node scripts/publish-gitcode.mjs
+
+          if node scripts/publish-gitcode.mjs; then
+            echo "✅ 主更新源已同步到 ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::GitCode 同步失败，主更新源仍停在旧版本"
+            warn_summary
+            exit 1
+          fi
 
       # 代码镜像：main 与标签推到 GitCode（GitHub 仍是 CI 与主开发仓库，GitCode 为镜像备份）
       # --follow-tags 已经把 main 可达的附注标签一起推走（本项目的发版标签一定在 main 上），
