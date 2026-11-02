@@ -1,6 +1,6 @@
 # 跨平台支持说明
 
-> 对应版本：1.3.9 · 最后核对：2026-10-30 · 文档索引见 [README.md](./README.md)
+> 对应版本：1.4.1 · 最后核对：2026-11-02 · 文档索引见 [README.md](./README.md)
 
 ## 一、结论
 
@@ -8,7 +8,7 @@
 | --- | :---: | --- |
 | Windows 10 / 11（x64） | 支持 | 主目标平台，已实机验证；CI 产出 `-x64.exe` |
 | Windows arm64 | 未提供产物 | Electron 支持该架构，但 CI 的 `windows-latest` 只出 x64；需要时本地 `electron-builder --win --arm64` 自建，未实机验证 |
-| macOS 12+（Apple Silicon） | 支持 | CI 的 `macos-latest` 是 arm64，产出 `-arm64.dmg` / `.zip`；已做红绿灯、应用菜单、置顶层级适配 |
+| macOS 13+（Ventura，Apple Silicon） | 支持 | CI 的 `macos-latest` 是 arm64，产出 `-arm64.dmg` / `.zip`；已做红绿灯、应用菜单、置顶层级适配 |
 | macOS（Intel） | 未提供产物 | 需要 `electron-builder --mac --x64` 自行构建，官方发布中暂无 Intel 包 |
 | Linux（X11，x64） | 支持 | 自绘标题栏，`-amd64.deb` / `-x86_64.AppImage`，X11 下窗口行为完整 |
 | Linux（Wayland） | 基本可用 | 桌面歌词的「鼠标穿透 / 置顶 / 透明」依赖合成器能力，见下方限制 |

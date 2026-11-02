@@ -1,7 +1,7 @@
 # Aurora Music
 
 一款多音源桌面音乐播放器：**搜索、榜单、下载、本地库、逐字歌词与桌面歌词**，全部在一个窗口里完成。
-Electron 40 + Vue 3.5 + TypeScript 5.9 + Vite 6，深色毛玻璃界面；内置离线演示音源，装完不登录也能听。
+Electron 45 + Vue 3.5 + TypeScript 5.9 + Vite 6，深色毛玻璃界面；内置离线演示音源，装完不登录也能听。
 
 | 发现 | 正在播放 |
 | --- | --- |
@@ -133,7 +133,7 @@ tests/                  单元测试
 | 平台 | 状态 |
 | --- | --- |
 | Windows 10/11（x64） | 支持（NSIS 安装包，主目标平台） |
-| macOS 12+（Apple Silicon） | 支持（arm64 dmg / zip，保留原生红绿灯与菜单）；Intel Mac 需自行 `--mac --x64` 构建 |
+| macOS 13+（Ventura，Apple Silicon） | 支持（arm64 dmg / zip，保留原生红绿灯与菜单）；Intel Mac 需自行 `--mac --x64` 构建 |
 | Linux (X11, x64) | 支持（AppImage / deb） |
 | Android / iOS | 不支持（原因与改造路径见 [PLATFORM.md](docs/PLATFORM.md)） |
 

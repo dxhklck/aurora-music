@@ -9,6 +9,7 @@ import { useAppStore } from './app'
 import { useStatsStore } from './stats'
 import { usePlaylistStore } from './playlists'
 import { createLatestGate } from '../core/latest'
+import { artworkSrc } from '../core/artwork'
 import { createUidFactory, moveIndex, moveItem, type QueueItem } from '../core/queue'
 
 const HISTORY_KEY = 'aurora.recent'
@@ -776,9 +777,8 @@ export const usePlayerStore = defineStore('player', () => {
   function updateMediaSession(song: Song): void {
     if (!('mediaSession' in navigator)) return
     try {
-      const artwork = song.coverUrl
-        ? [{ src: song.coverUrl, sizes: '512x512', type: 'image/jpeg' }]
-        : undefined
+      const src = artworkSrc(song.coverUrl)
+      const artwork = src ? [{ src, sizes: '512x512', type: 'image/jpeg' }] : undefined
       navigator.mediaSession.metadata = new MediaMetadata({
         title: song.name,
         artist: song.artists.join(' / '),
