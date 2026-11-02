@@ -12,6 +12,8 @@
 | [mini-player.md](mini-player.md) | 迷你播放窗的三态、悬停面板、尺寸与位置记忆 | 改 `MiniPlayer.vue` 或 `windows.ts` 的窗口形态 |
 | [desktop-lyric.md](desktop-lyric.md) | 桌面歌词的「裸字 / 悬停」两态、伪元素画面板、逐字高亮、拖动与右下角把手缩放 | 改歌词窗口样式、拖动手势或穿透行为 |
 | [update-feed-setup.md](update-feed-setup.md) | 国内更新源：GitCode 主源（stable 指针）+ GitHub 后备，实测排坑实录、secrets 配置、验证清单 | 配置或排查自动更新 |
+| [adding-a-source.md](adding-a-source.md) | 新增音源：模板走查、字段对照、常见问题（搜不到 / 播不了 / 时长错 / 被限流） | 想接一个新音源 |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | 开发环境、四道检查、代码约定、PR 边界 | 准备提 PR |
 | [code-signing.md](code-signing.md) | Windows 代码签名的三条路线、证书接入 CI 的步骤、签名相关的打包坑 | 处理 SmartScreen、配置 CSC_LINK |
 
 ## 归档（`archive/`）

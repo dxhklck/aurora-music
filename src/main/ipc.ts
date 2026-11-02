@@ -12,6 +12,7 @@ import { library } from './services/library'
 import { copyTracks, openTrash } from './services/fileops'
 import { copyFilesToClipboard } from './services/clipboard'
 import { playlists } from './services/playlists'
+import { exportPlaylistToM3u, importM3uFromFile } from './services/m3u-io'
 import { settings } from './services/settings'
 import { logger } from './services/logger'
 import { exportDiagnostics } from './services/diagnostics'
@@ -26,6 +27,7 @@ import { musicdl } from './engine/musicdl'
 import { refresh as refreshSourceHealth, snapshot as sourceHealthSnapshot } from './services/source-health'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
 import { checkForUpdate, installUpdate } from './updater'
+import { sanitizeFileName } from './utils'
 import {
   createLyricWindow,
   destroyLyricWindow,
@@ -268,6 +270,32 @@ export function registerIpc(): void {
       playlists.moveSong(args.id, args.platform, args.songId, args.direction)
   )
   handle(IPC.playlistToggleFavorite, (song: Song) => playlists.toggleFavorite(song))
+  handle(IPC.playlistExportM3u, async (args: { id: string; name: string }) => {
+    const win = BrowserWindow.getFocusedWindow() ?? undefined
+    const options: Electron.SaveDialogOptions = {
+      title: '导出 M3U 播放列表',
+      defaultPath: `${sanitizeFileName(args.name) || 'playlist'}.m3u`,
+      filters: [{ name: 'M3U 播放列表', extensions: ['m3u', 'm3u8'] }]
+    }
+    const picked = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (picked.canceled || !picked.filePath) return { canceled: true, saved: 0, skipped: 0, path: '' }
+    const result = await exportPlaylistToM3u(args.id, picked.filePath)
+    return { canceled: false, ...result }
+  })
+  handle(IPC.playlistImportM3u, async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? undefined
+    const options: Electron.OpenDialogOptions = {
+      title: '导入 M3U 播放列表',
+      properties: ['openFile'],
+      filters: [{ name: 'M3U 播放列表', extensions: ['m3u', 'm3u8'] }]
+    }
+    const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (picked.canceled || !picked.filePaths.length) {
+      return { canceled: true, playlistId: null, name: '', total: 0, matched: 0, missing: 0 }
+    }
+    const result = await importM3uFromFile(picked.filePaths[0])
+    return { canceled: false, ...result }
+  })
 
   // ---------- 日志与诊断 ----------
   handle(IPC.logWrite, (args: { level: 'info' | 'warn' | 'error'; scope: string; message: string }) => {

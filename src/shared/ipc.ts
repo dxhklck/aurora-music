@@ -81,6 +81,10 @@ export const IPC = {
   playlistRemoveSong: 'playlist:remove-song',
   playlistMoveSong: 'playlist:move-song',
   playlistToggleFavorite: 'playlist:toggle-favorite',
+  /** 导出为 M3U（只含本地曲目；在线曲目跳过并回报数量） */
+  playlistExportM3u: 'playlist:export-m3u',
+  /** 从 M3U 导入成新歌单（按路径匹配库内条目） */
+  playlistImportM3u: 'playlist:import-m3u',
 
   // 设置
   settingsGet: 'settings:get',

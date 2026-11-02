@@ -7,12 +7,14 @@ import SongTable from '../components/SongTable.vue'
 import Icon from '../components/Icon.vue'
 import { usePlaylistStore } from '../stores/playlists'
 import { usePlayerStore } from '../stores/player'
+import { useAppStore } from '../stores/app'
 import { formatDuration } from '@shared/lyric'
 
 const props = defineProps<{ id?: string }>()
 
 const playlists = usePlaylistStore()
 const player = usePlayerStore()
+const app = useAppStore()
 const router = useRouter()
 
 const playlistId = computed(() => props.id ?? FAVORITES_ID)
@@ -60,6 +62,55 @@ async function removePlaylist(): Promise<void> {
   if (isFavorites.value) return
   await playlists.remove(playlistId.value)
   void router.push('/favorites')
+}
+
+/**
+ * 导出为 M3U。
+ *
+ * 只有本地曲目写得进去：在线曲目的地址需要本项目的主进程代理与鉴权，
+ * 写进 M3U 别的播放器也播不了，反而让用户以为导出成功了。
+ * 所以跳过多少首必须说清楚，不能静默丢弃。
+ */
+async function exportM3u(): Promise<void> {
+  const result = await window.api.exportPlaylistM3u({
+    id: playlistId.value,
+    name: playlist.value?.name ?? '播放列表'
+  })
+  if (result.canceled) return
+  if (!result.saved) {
+    app.toast(
+      result.skipped ? `${result.skipped} 首都不是本地文件，无法写进 M3U` : '这个歌单是空的',
+      'error'
+    )
+    return
+  }
+  app.toast(
+    result.skipped
+      ? `已导出 ${result.saved} 首；${result.skipped} 首在线曲目未导出，先下载再导`
+      : `已导出 ${result.saved} 首到 ${result.path.split(/[\\/]/).pop()}`,
+    result.skipped ? 'info' : 'success'
+  )
+}
+
+async function importM3u(): Promise<void> {
+  const result = await window.api.importPlaylistM3u()
+  if (result.canceled) return
+  await playlists.load()
+  if (!result.total) {
+    app.toast('这个文件里没有可识别的曲目', 'error')
+    return
+  }
+  if (!result.matched) {
+    app.toast(`${result.total} 首都没有匹配到本地库里的文件`, 'error')
+    return
+  }
+  app.toast(
+    result.missing
+      ? `已导入 ${result.matched} 首；${result.missing} 首在本地库里找不到`
+      : `已导入 ${result.matched} 首`,
+    result.missing ? 'info' : 'success'
+  )
+  if (result.playlistId) void router.push(`/playlist/${result.playlistId}`)
 }
 </script>
 
@@ -109,6 +160,12 @@ async function removePlaylist(): Promise<void> {
       </button>
       <button v-if="!isFavorites && playlist" class="btn" @click="removePlaylist">
         <Icon name="trash" :size="15" /> 删除歌单
+      </button>
+      <button class="btn" :disabled="!songs.length" title="导出为 M3U（只含本地文件）" @click="exportM3u">
+        <Icon name="export" :size="15" /> 导出 M3U
+      </button>
+      <button class="btn" title="从 M3U 导入成新歌单" @click="importM3u">
+        <Icon name="download" :size="15" /> 导入 M3U
       </button>
     </div>
 

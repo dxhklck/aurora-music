@@ -208,6 +208,29 @@ export interface LibraryOpItem {
   note?: string
 }
 
+/** M3U 导出结果（用户取消时 canceled 为 true，其余字段为 0） */
+export interface M3uExportResult {
+  canceled: boolean
+  /** 写进文件的条数 */
+  saved: number
+  /** 无法写进 M3U 的条数：在线曲目、文件已不存在的本地曲目 */
+  skipped: number
+  path: string
+}
+
+/** M3U 导入结果（按路径匹配库内条目，匹配不上的如实计数） */
+export interface M3uImportResult {
+  canceled: boolean
+  playlistId: string | null
+  name: string
+  /** 文件里的总条数 */
+  total: number
+  /** 匹配回库并写进歌单的条数 */
+  matched: number
+  /** 库里找不到对应文件的条数 */
+  missing: number
+}
+
 /** 本地库批量操作结果汇总（部分成功是常态，逐条给结论） */
 export interface LibraryOpReport {
   ok: number

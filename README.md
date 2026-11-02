@@ -148,11 +148,19 @@ HLS（m3u8）音源转封装依赖系统的 `ffmpeg`；缺失时会退回 TS 分
 4. 引擎音源只返回首屏约 10 条，无分页——分页并行会让耗时翻倍，是有意取舍。
 5. 自动更新的完整链路（下载 → 重启安装）需在真机安装版上验证，开发模式无法覆盖。
 
+## 参与
+
+- 想接一个新音源？[`docs/adding-a-source.md`](docs/adding-a-source.md) 是唯一需要读的文档，
+  配 [`src/main/engine/ts/sources/_template.ts`](src/main/engine/ts/sources/_template.ts) 的注释骨架。
+- 提 PR 前先看 [`CONTRIBUTING.md`](CONTRIBUTING.md)：四道检查、代码约定、以及哪些方向会被拒绝
+  （AI 推荐 / 云同步 / 移动端 / 完整 i18n —— 都是定位问题，不是工作量问题）。
+
 ## 文档
 
 | 文档 | 内容 |
 | --- | --- |
 | [docs/README.md](docs/README.md) | 文档索引：哪些是现行、哪些是归档 |
+| [docs/adding-a-source.md](docs/adding-a-source.md) | 新增一个音源：只读这一篇就能从零接进来（含模板与踩坑表） |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 分层、音源接口、缓存与换源调度、下载状态机、本地库、Web Audio 图、关键流程 |
 | [PLATFORM.md](docs/PLATFORM.md) | 三平台差异与移动端不可行的原因 |
 | [mini-player.md](docs/mini-player.md) | 迷你播放窗的三态、悬停面板与尺寸记忆 |

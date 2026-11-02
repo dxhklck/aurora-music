@@ -10,6 +10,8 @@ import type {
   LibraryOpReport,
   LibraryTrack,
   Lyric,
+  M3uExportResult,
+  M3uImportResult,
   MiniVolumeState,
   Playlist,
   QrLoginPlatform,
@@ -180,6 +182,13 @@ export interface AuroraApi {
     direction: 'up' | 'down'
   ): Promise<Playlist[]>
   toggleFavorite(song: Song): Promise<{ list: Playlist[]; favorited: boolean }>
+  /**
+   * 导出歌单为 M3U（会弹保存对话框）。
+   * 只有本地曲目写得进去，在线曲目按曲目数计入 `skipped` —— 不静默丢弃。
+   */
+  exportPlaylistM3u(args: { id: string; name: string }): Promise<M3uExportResult>
+  /** 从 M3U 导入成新歌单（会弹选择对话框），按路径匹配库内条目 */
+  importPlaylistM3u(): Promise<M3uImportResult>
 
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>

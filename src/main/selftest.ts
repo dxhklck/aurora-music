@@ -7,6 +7,8 @@ import { extractQQUin, getProviderCookies, setProviderCookies } from './provider
 import { catalog } from './services/catalog'
 import { downloads } from './services/download'
 import { library } from './services/library'
+import { playlists } from './services/playlists'
+import { exportPlaylistToM3u, importM3uFromFile } from './services/m3u-io'
 import { settings } from './services/settings'
 import { cancelQrLogin, pollQrLogin, startQrLogin } from './services/qrlogin'
 import { musicdl } from './engine/musicdl'
@@ -248,6 +250,34 @@ export async function runSelfTest(): Promise<number> {
     const again = await library.scanLocalDirs()
     assert(again === 0, `重复扫描不幂等：又新增 ${again} 首`)
     return `新增 ${added} 首，曲名/歌手解析正确，重复扫描幂等`
+  })
+
+  await check('M3U 导出与导入往返', true, async () => {
+    const locals = library.list().filter((item) => item.song.platform === 'local')
+    assert(locals.length > 0, '本地库没有条目，无法测试导出')
+
+    const name = `自检歌单${Date.now().toString(36)}`
+    const before = new Set(playlists.list().map((item) => item.id))
+    const list = await playlists.create(name, locals.slice(0, 3).map((item) => item.song))
+    const created = list.find((item) => !before.has(item.id))
+    assert(created, '歌单没有建出来')
+
+    const file = join(app.getPath('temp'), 'aurora-selftest', 'selftest.m3u')
+    const exported = await exportPlaylistToM3u(created.id, file)
+    assert(existsSync(file), 'M3U 文件没有写出来')
+    assert(exported.saved > 0, `导出了 0 首（跳过 ${exported.skipped}）`)
+
+    // 往返：导入时按路径匹配库内条目，条数必须与导出一致
+    const imported = await importM3uFromFile(file)
+    assert(
+      imported.matched === exported.saved,
+      `导入匹配 ${imported.matched} 首，导出 ${exported.saved} 首`
+    )
+
+    // 清理测试歌单，避免自检反复跑把库撑大
+    await playlists.remove(created.id)
+    if (imported.playlistId) await playlists.remove(imported.playlistId)
+    return `导出 ${exported.saved} 首 → 导入匹配 ${imported.matched} 首，文本可读`
   })
 
   await check('HTTP 直连下载（原生音源）', false, async () => {
