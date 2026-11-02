@@ -9,6 +9,7 @@ import { lyricToLrc } from '@shared/lyric'
 import { catalog } from './catalog'
 import { library } from './library'
 import { settings } from './settings'
+import { createWriteQueue } from './atomic-write'
 import { musicdl } from '../engine/musicdl'
 import {
   ensureDir,
@@ -49,6 +50,11 @@ class DownloadManager extends EventEmitter {
   private persistTimer: NodeJS.Timeout | null = null
   private filePath = ''
   private restored = false
+  /**
+   * 落盘串行队列。persistTimer 负责节流，队列负责串行——两者不冲突：
+   * 节流保证不会每个进度都写盘，队列保证两次写不会抢同一个 `.tmp`。
+   */
+  private writeQueue = createWriteQueue()
 
   configure(userDataDir: string): void {
     this.filePath = join(userDataDir, 'downloads.json')
@@ -509,10 +515,14 @@ class DownloadManager extends EventEmitter {
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, 300)
       .map((task) => this.publicTask(task))
+    // 快照在入队前取；写入仍走 moveFile（跨盘符时 rename 会失败，它自带复制降级）
+    const payload = JSON.stringify(snapshot, null, 2)
     try {
-      const tmp = `${this.filePath}.tmp`
-      await writeFile(tmp, JSON.stringify(snapshot, null, 2), 'utf8')
-      await moveFile(tmp, this.filePath)
+      await this.writeQueue(async () => {
+        const tmp = `${this.filePath}.tmp`
+        await writeFile(tmp, payload, 'utf8')
+        await moveFile(tmp, this.filePath)
+      })
     } catch {
       /* 落盘失败不影响内存中的队列 */
     }

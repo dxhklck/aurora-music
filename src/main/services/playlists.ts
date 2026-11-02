@@ -1,9 +1,10 @@
 import { join } from 'node:path'
-import { readFile, writeFile, rename } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import type { Playlist, Song } from '@shared/types'
 import { FAVORITES_ID } from '@shared/types'
 import { ensureDir } from '../utils'
+import { createWriteQueue, writeAtomic } from './atomic-write'
 
 const MAX_NAME = 40
 
@@ -36,6 +37,8 @@ class PlaylistService {
   private items: Playlist[] = []
   private filePath = ''
   private loaded = false
+  /** 落盘串行队列：连续增删改会并发触发 persist，抢同一个 .tmp 会 ENOENT */
+  private writeQueue = createWriteQueue()
 
   configure(userDataDir: string): void {
     this.filePath = join(userDataDir, 'playlists.json')
@@ -196,9 +199,9 @@ class PlaylistService {
   private async persist(): Promise<void> {
     if (!this.filePath) return
     await ensureDir(join(this.filePath, '..'))
-    const tmp = `${this.filePath}.tmp`
-    await writeFile(tmp, JSON.stringify(this.items, null, 2), 'utf8')
-    await rename(tmp, this.filePath)
+    // 快照在入队前取：排队执行时用的应是「调用那一刻」的完整状态
+    const snapshot = JSON.stringify(this.items, null, 2)
+    await this.writeQueue(() => writeAtomic(this.filePath, snapshot))
   }
 }
 

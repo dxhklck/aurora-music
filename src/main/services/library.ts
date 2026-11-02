@@ -1,11 +1,12 @@
 import { join, basename, extname } from 'node:path'
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { readFile, writeFile, rename, readdir, stat } from 'node:fs/promises'
+import { readFile, writeFile, readdir, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import type { DuplicateGroup, LibraryOpItem, LibraryOpReport, LibraryTrack, Song } from '@shared/types'
 import { ensureDir, fileSize, isInsideDir } from '../utils'
 import { trashFiles, companionFiles } from './fileops'
+import { createWriteQueue, writeAtomic } from './atomic-write'
 import { musicdl } from '../engine/musicdl'
 
 /** 本地库识别的音频格式（与 Muse 播放支持的格式保持一致） */
@@ -81,6 +82,11 @@ class LibraryService {
   private ignoredPath = ''
   private ignored: IgnoredEntry[] = []
   private loaded = false
+  /**
+   * 落盘串行队列。批量改标签 / 批量入库会连着触发 persist，
+   * 两次并发会抢同一个 `.tmp`，后者 rename 直接 ENOENT。
+   */
+  private writeQueue = createWriteQueue()
   /** 要扫描的本地目录：下载目录 + 用户导入的目录 */
   private scanDirs: string[] = []
 
@@ -624,19 +630,20 @@ class LibraryService {
     return stamp.size === entry.size && stamp.mtime === entry.mtime
   }
 
+  /**
+   * 落盘。items 与 ignored 必须成组提交——只串行单个文件的话，两个文件会落到
+   * 不同版本（索引更新了、黑名单还是旧的）。快照在入队前取，与 settings.set 同一套语义。
+   */
   private async persist(): Promise<void> {
     if (!this.filePath) return
     await ensureDir(join(this.filePath, '..'))
-    await writeAtomic(this.filePath, JSON.stringify(this.items, null, 2))
-    await writeAtomic(this.ignoredPath, JSON.stringify(this.ignored, null, 2))
+    const itemsSnapshot = JSON.stringify(this.items, null, 2)
+    const ignoredSnapshot = JSON.stringify(this.ignored, null, 2)
+    await this.writeQueue(async () => {
+      await writeAtomic(this.filePath, itemsSnapshot)
+      await writeAtomic(this.ignoredPath, ignoredSnapshot)
+    })
   }
-}
-
-/** 单文件原子落盘：先写 .tmp 再 rename，避免写一半掉电留下半个 JSON */
-async function writeAtomic(filePath: string, content: string): Promise<void> {
-  const tmp = `${filePath}.tmp`
-  await writeFile(tmp, content, 'utf8')
-  await rename(tmp, filePath)
 }
 
 /** 从「歌手 - 歌名.mp3」这类常见命名里猜元数据；猜不出来就用文件名当歌名 */
