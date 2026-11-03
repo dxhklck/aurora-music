@@ -167,6 +167,7 @@ HLS（m3u8）音源转封装依赖系统的 `ffmpeg`；缺失时会退回 TS 分
 | [desktop-lyric.md](docs/desktop-lyric.md) | 桌面歌词的裸字/悬停两态、拖动与缩放、绘图取舍 |
 | [update-feed-setup.md](docs/update-feed-setup.md) | 国内更新源（GitCode 主源 + GitHub 后备）的接线、实测排坑与验证清单 |
 | [code-signing.md](docs/code-signing.md) | Windows 代码签名的三条路线与 CI 接线 |
+| [bilibili-promo-prompts.md](docs/bilibili-promo-prompts.md) | B 站介绍视频的生图提示词：统一视觉设定、8 条分镜、桌面/移动差异速查 |
 | [archive/](docs/archive/README.md) | 历史记录：Python 移除、引擎迁移对拍、Android 方案、2026-10-29 全量审计 |
 
 ## 说明
