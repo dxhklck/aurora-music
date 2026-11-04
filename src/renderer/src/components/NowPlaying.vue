@@ -159,13 +159,16 @@ onMounted(() => {
   window.addEventListener('keydown', onKey)
   syncCompact()
   window.addEventListener('resize', syncCompact)
-  // 音波可视化：舞台是挂接点（幂等），AudioContext 被系统挂起时靠播放事件唤醒
-  wave.attach(audio.mediaEl)
+  // 音波可视化：舞台是挂接点（幂等），AudioContext 被系统挂起时靠播放事件唤醒。
+  // 两个元素都挂进音频图（交叉淡化要双分支独立控音），随后按引擎当前值同步一次
+  wave.attach(audio.mediaEl, audio.secondaryEl)
+  audio.syncGraph()
   offResume = audio.on('playing', (isPlaying) => {
     if (!isPlaying) return
     // 舞台可能在首次播放前就打开（此时还没有 src，挂接会跳过），
     // 每次真正开始播放都重试一次；attach 幂等，已挂接时只做 resume
-    wave.attach(audio.mediaEl)
+    wave.attach(audio.mediaEl, audio.secondaryEl)
+    audio.syncGraph()
     wave.resume()
   })
 })

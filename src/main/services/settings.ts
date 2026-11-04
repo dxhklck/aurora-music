@@ -44,6 +44,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   searchLimit: 30,
   autoSwitchSource: true,
   preferredSources: [],
+  loudnessNorm: false,
+  crossfadeSec: 0,
   desktopLyricLocked: false,
   desktopLyricMode: 'mini',
   nowPlayingStyle: 'vinyl',
@@ -94,6 +96,11 @@ class SettingsService {
     // 老版本没有输出设备字段：缺了就是系统默认，别让 undefined 流到 enumerateDevices 的比较里
     if (typeof this.cache.audioOutputId !== 'string') this.cache.audioOutputId = ''
     if (typeof this.cache.audioOutputLabel !== 'string') this.cache.audioOutputLabel = ''
+    // 交叉淡化：非法值一律归零（0 = 关），别让 NaN 流进播放器
+    const xf = Number(this.cache.crossfadeSec)
+    if (!Number.isFinite(xf) || xf <= 0) this.cache.crossfadeSec = 0
+    else this.cache.crossfadeSec = Math.min(12, Math.round(xf * 2) / 2)
+    if (typeof this.cache.loudnessNorm !== 'boolean') this.cache.loudnessNorm = false
     return this.get()
   }
 
@@ -106,7 +113,14 @@ class SettingsService {
       ...this.cache,
       ...patch,
       equalizer: normalizeEqualizer(patch.equalizer ?? this.cache.equalizer),
-      preferredSources: normalizeSources(patch.preferredSources ?? this.cache.preferredSources)
+      preferredSources: normalizeSources(patch.preferredSources ?? this.cache.preferredSources),
+      loudnessNorm: patch.loudnessNorm === undefined ? this.cache.loudnessNorm : Boolean(patch.loudnessNorm),
+      crossfadeSec: (() => {
+        const incoming = patch.crossfadeSec ?? this.cache.crossfadeSec
+        const value = Number(incoming)
+        if (!Number.isFinite(value) || value <= 0) return 0
+        return Math.min(12, Math.round(value * 2) / 2)
+      })()
     }
     if (this.filePath) {
       // 快照必须在排队前取：串行执行时用的应是「调用那一刻」的完整状态

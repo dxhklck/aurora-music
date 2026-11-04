@@ -5,23 +5,32 @@ type Handler = (payload: any) => void
 /**
  * 播放引擎：对 HTMLAudioElement 的一层薄封装。
  * - 统一事件（time / duration / ended / playing / error / buffered）
- * - 切歌淡入淡出，避免爆音
+ * - 切歌淡入淡出，避免爆音；交叉淡化用双元素同时升降
  * - 提供高精度 currentTime 供歌词时钟使用
  *
- * 淡入淡出的两个不变量：
+ * 淡入淡出的不变量：
  * 1. 淡入挂在 play() 承诺兑现后（规范上 = 真正开始出声的那一刻），
  *    不等更早的时机；播放被拒时先把音量归位再报错，避免滑块与实况不一致。
  * 2. 音量插值用定时器而不是 rAF：窗口最小化/被遮挡时 rAF 停摆，
  *    淡入会卡在半路（音量 0），同样表现为"在放但没声"。
- * 3. 音量/静音必须**同时**写给元素和音频图里的 GainNode：元素一旦被
+ * 3. 音量/静音必须**同时**写给元素和音频图：元素一旦被
  *    `createMediaElementSource` 接管（打开过「正在播放」舞台就会），
  *    `el.volume` / `el.muted` 就失效了，只改元素等于没改。
+ *
+ * 双元素：`els[activeIdx]` 是「当前曲目」。交叉淡化把下一曲装进另一个元素，
+ * 淡入完成后翻转 activeIdx；事件监听带 `from()` 门，非当前元素的事件一律忽略，
+ * 否则旧元素到点触发的 ended 会把刚切过去的歌再跳走一次。
  */
 class AudioEngine {
-  private el: HTMLAudioElement
+  private els: [HTMLAudioElement, HTMLAudioElement]
+  private activeIdx = 0
   private handlers = new Map<string, Set<Handler>>()
   private fadeTimer: number | null = null
+  private xfTimer: number | null = null
   private targetVolume = 0.75
+  private muted = false
+  /** 每个元素的当前电平（0~targetVolume）。音频图接管后 el.volume 失效，只能记在引擎里 */
+  private levels: [number, number] = [0.75, 0.75]
   private ready = false
   /** 停滞看门狗：waiting/play 后若长时间无进度，报告 stall（数据不来但连接未断，error 事件不会触发） */
   private stallTimer: number | null = null
@@ -29,58 +38,83 @@ class AudioEngine {
   private stallBaseBuffered = 0
 
   constructor() {
-    this.el = new Audio()
-    this.el.preload = 'auto'
-    // 频谱可视化依赖 MediaElementAudioSourceNode：不带 crossOrigin 的媒体算跨域脏数据，
-    // analyser 读出来全是 0（muse:// 代理已统一补 CORS 响应头，anonymous 请求即可通过）
-    this.el.crossOrigin = 'anonymous'
+    const make = (): HTMLAudioElement => {
+      const el = new Audio()
+      el.preload = 'auto'
+      // 频谱可视化依赖 MediaElementAudioSourceNode：不带 crossOrigin 的媒体算跨域脏数据，
+      // analyser 读出来全是 0（muse:// 代理已统一补 CORS 响应头，anonymous 请求即可通过）
+      el.crossOrigin = 'anonymous'
+      return el
+    }
+    this.els = [make(), make()]
+    this.levels = [this.targetVolume, this.targetVolume]
     this.applyVolume(this.targetVolume)
     this.bind()
   }
 
+  /** 当前元素的统一入口：所有「对当前曲目」的操作都落到它 */
+  private get el(): HTMLAudioElement {
+    return this.els[this.activeIdx]
+  }
+
   private bind(): void {
-    const el = this.el
-    el.addEventListener('timeupdate', () => this.emit('time', el.currentTime * 1000))
-    el.addEventListener('durationchange', () =>
-      this.emit('duration', Number.isFinite(el.duration) ? el.duration * 1000 : 0)
-    )
-    el.addEventListener('loadedmetadata', () =>
-      this.emit('duration', Number.isFinite(el.duration) ? el.duration * 1000 : 0)
-    )
-    el.addEventListener('progress', () => {
-      if (!el.buffered.length) return
-      this.emit('buffered', el.buffered.end(el.buffered.length - 1) * 1000)
-    })
-    el.addEventListener('ended', () => {
-      this.stopStallWatch()
-      this.emit('ended', null)
-    })
-    el.addEventListener('play', () => this.emit('playing', true))
-    el.addEventListener('playing', () => {
-      this.stopStallWatch()
-      this.emit('waiting', false)
-    })
-    el.addEventListener('pause', () => {
-      this.stopStallWatch()
-      this.emit('playing', false)
-      this.emit('waiting', false)
-    })
-    el.addEventListener('waiting', () => {
-      this.emit('waiting', true)
-      this.startStallWatch()
-    })
-    el.addEventListener('error', () => {
-      this.stopStallWatch()
-      const code = el.error?.code
-      const message =
-        code === 4
-          ? '音频加载失败，可能是版权限制或链接过期'
-          : code === 2
-            ? '网络中断，音频加载失败'
-            : '播放出错，请尝试切换歌曲或音源'
-      this.emit('waiting', false)
-      this.emit('error', message)
-    })
+    for (const el of this.els) {
+      const gate = (fn: () => void): void => {
+        // 双元素并行时只放行当前元素的事件；旧元素淡出期的 paused/ended 不能漏进来
+        if (el === this.els[this.activeIdx]) fn()
+      }
+      el.addEventListener('timeupdate', () => gate(() => this.emit('time', el.currentTime * 1000)))
+      el.addEventListener('durationchange', () =>
+        gate(() => this.emit('duration', Number.isFinite(el.duration) ? el.duration * 1000 : 0))
+      )
+      el.addEventListener('loadedmetadata', () =>
+        gate(() => this.emit('duration', Number.isFinite(el.duration) ? el.duration * 1000 : 0))
+      )
+      el.addEventListener('progress', () => {
+        gate(() => {
+          if (!el.buffered.length) return
+          this.emit('buffered', el.buffered.end(el.buffered.length - 1) * 1000)
+        })
+      })
+      el.addEventListener('ended', () => gate(() => {
+        this.stopStallWatch()
+        this.emit('ended', null)
+      }))
+      el.addEventListener('play', () => gate(() => this.emit('playing', true)))
+      el.addEventListener('playing', () =>
+        gate(() => {
+          this.stopStallWatch()
+          this.emit('waiting', false)
+        })
+      )
+      el.addEventListener('pause', () =>
+        gate(() => {
+          this.stopStallWatch()
+          this.emit('playing', false)
+          this.emit('waiting', false)
+        })
+      )
+      el.addEventListener('waiting', () =>
+        gate(() => {
+          this.emit('waiting', true)
+          this.startStallWatch()
+        })
+      )
+      el.addEventListener('error', () =>
+        gate(() => {
+          this.stopStallWatch()
+          const code = el.error?.code
+          const message =
+            code === 4
+              ? '音频加载失败，可能是版权限制或链接过期'
+              : code === 2
+                ? '网络中断，音频加载失败'
+                : '播放出错，请尝试切换歌曲或音源'
+          this.emit('waiting', false)
+          this.emit('error', message)
+        })
+      )
+    }
   }
 
   on(event: string, handler: Handler): () => void {
@@ -95,8 +129,10 @@ class AudioEngine {
 
   load(url: string, options: { autoplay?: boolean } = {}): void {
     this.stopFade()
+    this.stopCrossfade()
     this.stopStallWatch()
-    this.el.pause()
+    // 两个都停：另一个元素可能装着交叉淡化残留的 src，不清会占解码器
+    for (const el of this.els) el.pause()
     this.el.src = url
     this.el.load()
     this.ready = true
@@ -126,6 +162,7 @@ class AudioEngine {
   async play(): Promise<void> {
     if (!this.ready) return
     this.stopFade()
+    this.stopCrossfade()
     this.applyVolume(0)
     this.startStallWatch()
     try {
@@ -140,6 +177,7 @@ class AudioEngine {
 
   pause(): void {
     this.stopFade()
+    this.stopCrossfade()
     const from = this.el.volume
     const startedAt = performance.now()
     const step = (): void => {
@@ -155,22 +193,124 @@ class AudioEngine {
 
   stop(): void {
     this.stopStallWatch()
-    this.el.pause()
+    this.stopCrossfade()
+    for (const el of this.els) el.pause()
     this.el.removeAttribute('src')
     this.el.load()
     this.ready = false
   }
 
+  /**
+   * 交叉淡化到新曲目。调用前提：当前正在播放、剩余时间足够（由 store 校验）。
+   * 新元素 play() 兑现（= 真出声）才翻转 activeIdx；失败返回 false，调用方回退自然衔接。
+   * 手动操作（load/play/pause/stop/seek）都会先 stopCrossfade——淡化只服务自动换曲。
+   */
+  async crossfadeTo(url: string, ms: number): Promise<boolean> {
+    if (!this.ready || ms <= 0) return false
+    const fromIdx = this.activeIdx
+    const fromEl = this.els[fromIdx]
+    if (fromEl.paused || !Number.isFinite(fromEl.duration)) return false
+    const toIdx = fromIdx === 0 ? 1 : 0
+    const toEl = this.els[toIdx]
+    this.stopFade()
+    toEl.pause()
+    toEl.src = url
+    toEl.load()
+    this.setElementLevel(toIdx, 0)
+    try {
+      await toEl.play()
+    } catch {
+      // 新曲起不来：恢复现场，让旧曲继续放到自然结束
+      this.setElementLevel(toIdx, this.targetVolume)
+      toEl.removeAttribute('src')
+      toEl.load()
+      return false
+    }
+    this.activeIdx = toIdx
+    const startedAt = performance.now()
+    const fromLevel = this.levels[fromIdx]
+    const target = this.targetVolume
+    this.xfTimer = window.setInterval(() => {
+      const progress = Math.max(0, Math.min(1, (performance.now() - startedAt) / ms))
+      this.setElementLevel(toIdx, target * progress)
+      this.setElementLevel(fromIdx, fromLevel * (1 - progress))
+      if (progress >= 1) {
+        this.stopCrossfadeTimer()
+        fromEl.pause()
+        // 旧元素电平归位：它现在是「待命元素」，下次淡化从满电平出发
+        this.setElementLevel(fromIdx, target)
+      }
+    }, 16)
+    this.startStallWatch()
+    return true
+  }
+
+  /** 中止交叉淡化：定时器停、待命元素清干净（正在淡出的那个保持原状） */
+  private stopCrossfade(): void {
+    this.stopCrossfadeTimer()
+    const standby = this.els[this.activeIdx === 0 ? 1 : 0]
+    if (standby) {
+      standby.pause()
+    }
+  }
+
+  private stopCrossfadeTimer(): void {
+    if (this.xfTimer !== null) {
+      window.clearInterval(this.xfTimer)
+      this.xfTimer = null
+    }
+  }
+
+  /**
+   * 设单元素电平（0~targetVolume）。两条路径与 setGain/setSink 同理：
+   * 无音频图时 el.volume 直接生效；有图时 el.volume 被忽略，
+   * 必须走分支增益（按 targetVolume 归一成比例）。
+   */
+  private setElementLevel(index: number, level: number): void {
+    const clamped = Math.max(0, Math.min(this.targetVolume, Number.isFinite(level) ? level : 0))
+    this.levels[index] = clamped
+    const el = this.els[index]
+    if (el) el.volume = clamped
+    wave.setBranch(index, this.targetVolume > 0 ? clamped / this.targetVolume : 0)
+  }
+
   seek(ms: number): void {
-    if (!Number.isFinite(this.el.duration)) return
-    this.el.currentTime = Math.max(0, Math.min(ms / 1000, this.el.duration - 0.05))
+    const el = this.el
+    if (!Number.isFinite(el.duration)) return
+    const target = Math.max(0, Math.min(ms / 1000, el.duration - 0.05))
+    if (el.paused || this.fadeTimer !== null || this.xfTimer !== null) {
+      this.stopFade()
+      this.stopCrossfade()
+      el.currentTime = target
+      return
+    }
+    // seek 防爆音：跳转点两侧若有波形断差，直接改 currentTime 会「啪」一声。
+    // 播放中先 30ms 淡出 → 跳转 → 60ms 淡回原音量；复用 fadeTimer 的 16ms 步进。
+    const from = el.volume
+    let startedAt = performance.now()
+    let seeked = false
+    const step = (): void => {
+      const progress = Math.max(0, Math.min(1, (performance.now() - startedAt) / (seeked ? 60 : 30)))
+      this.applyVolume(seeked ? from * progress : from * (1 - progress))
+      if (progress < 1) return
+      if (!seeked) {
+        el.currentTime = target
+        seeked = true
+        startedAt = performance.now()
+        return
+      }
+      this.stopFade()
+      this.fadeTimer = null
+    }
+    this.fadeTimer = window.setInterval(step, 16)
   }
 
   setVolume(volume: number): void {
     this.targetVolume = Math.max(0, Math.min(1, volume))
-    // 手动改音量必须打断正在跑的淡入/淡出：fadeTo 每 16ms 会用插值覆盖 el.volume，
+    // 手动改音量必须打断正在跑的淡入/淡出/交叉淡化：定时器每 16ms 会用插值覆盖音量，
     // 不打断的话用户刚拖到的值会在几帧内被拉回去（表现为「滑块动了但声音没变」）
     this.stopFade()
+    this.stopCrossfade()
     this.applyVolume(this.targetVolume)
   }
 
@@ -179,13 +319,15 @@ class AudioEngine {
     if (!Number.isFinite(value)) return
     const clamped = Math.max(0, Math.min(1, value))
     this.el.volume = clamped
-    // 音频图接管后元素音量失效，必须同步到 GainNode；未挂接时是空操作
+    this.levels[this.activeIdx] = clamped
+    // 音频图接管后元素音量失效，必须同步到 master；未挂接时是空操作
     wave.setGain(clamped)
   }
 
   setMuted(muted: boolean): void {
-    this.el.muted = muted
-    wave.setMuted(muted)
+    this.muted = Boolean(muted)
+    for (const el of this.els) el.muted = this.muted
+    wave.setMuted(this.muted)
   }
 
   /**
@@ -203,6 +345,20 @@ class AudioEngine {
       return true
     } catch {
       return false
+    }
+  }
+
+  /**
+   * 音频图挂接后由调用方（NowPlaying）补一次同步：
+   * master 音量、静音态、两个分支的电平都按引擎当前值灌进去。
+   * 挂接本身可能发生在播放中途甚至交叉淡化进行中，靠元素自身状态初始化会错。
+   */
+  syncGraph(): void {
+    if (!wave.state.attached) return
+    wave.setGain(this.targetVolume)
+    wave.setMuted(this.muted)
+    for (const index of [0, 1] as const) {
+      wave.setBranch(index, this.targetVolume > 0 ? this.levels[index] / this.targetVolume : 0)
     }
   }
 
@@ -274,9 +430,17 @@ class AudioEngine {
     return this.el.paused
   }
 
-  /** 底层媒体元素（频谱可视化创建 MediaElementSource 用；别用来改播放状态） */
+  /**
+   * 音频图挂接用的两个元素，按固定位置返回：分支 0 ↔ els[0]，分支 1 ↔ els[1]。
+   * 不能随 activeIdx 翻转——分支编号是挂接时就定死的，翻了就对不上号。
+   */
   get mediaEl(): HTMLAudioElement {
-    return this.el
+    return this.els[0]
+  }
+
+  /** 音频图第二个分支对应的元素（与 mediaEl 一起传给 wave.attach） */
+  get secondaryEl(): HTMLAudioElement {
+    return this.els[1]
   }
 }
 

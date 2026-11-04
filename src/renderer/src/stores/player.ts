@@ -131,6 +131,8 @@ export const usePlayerStore = defineStore('player', () => {
   let loadedUid: string | null = null
   /** 静默恢复时记下的进度，只有用户重新播放「同一首」时才接着跳转 */
   let restoredSeek: { uid: string; time: number } | null = null
+  /** 交叉淡化进行中（含下一曲取址）：防止 time 事件每帧重复触发 */
+  let crossfading = false
 
   /**
    * 队列写入的唯一入口：清洁脏数据 + 盖 uid 一起做。
@@ -181,6 +183,7 @@ export const usePlayerStore = defineStore('player', () => {
     engineBound = true
     audio.on('time', (value: number) => {
       time.value = value
+      maybeCrossfade()
       // 快照 5 秒一记：带标签的队列额外存榜单断点，任意队列都存播放位置
       if (Date.now() - lastResumeSave > 5000) {
         lastResumeSave = Date.now()
@@ -679,6 +682,25 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  function computeNextIndex(auto: boolean): number | null {
+    if (!queue.value.length) return null
+    if (mode.value === 'single' && auto) return index.value
+    if (mode.value === 'shuffle' && queue.value.length > 1) {
+      let target: number
+      do {
+        target = Math.floor(Math.random() * queue.value.length)
+      } while (target === index.value)
+      return target
+    }
+    const target = index.value + 1
+    if (target >= queue.value.length) {
+      // 顺序模式播完即停；循环/随机绕回开头
+      if (mode.value === 'order') return null
+      return 0
+    }
+    return target
+  }
+
   async function next(auto = false): Promise<void> {
     if (!queue.value.length) return
     if (mode.value === 'single' && auto) {
@@ -686,22 +708,94 @@ export const usePlayerStore = defineStore('player', () => {
       await audio.play()
       return
     }
-    let target: number
-    if (mode.value === 'shuffle' && queue.value.length > 1) {
-      do {
-        target = Math.floor(Math.random() * queue.value.length)
-      } while (target === index.value)
-    } else {
-      target = index.value + 1
-      if (target >= queue.value.length) {
-        if (mode.value === 'order') {
-          stop()
-          return
-        }
-        target = 0
-      }
+    const target = computeNextIndex(auto)
+    if (target === null) {
+      stop()
+      return
     }
     await playAt(target)
+  }
+
+  /**
+   * 交叉淡化触发器：随 time 事件走。所有条件都过了才真正起淡——
+   * 淡化只服务「自然临近结束的自动换曲」，手动操作与特殊情况一律不参与。
+   */
+  function maybeCrossfade(): void {
+    if (crossfading) return
+    const app = useAppStore()
+    const sec = app.settings?.crossfadeSec ?? 0
+    if (!sec || loading.value || !playing.value || !duration.value) return
+    // 单曲循环是原地重播；「播完这首就停」要停在结尾，都不适合淡化
+    if (mode.value === 'single' || sleepMode.value === 'eof') return
+    // 太短的歌不淡：还没淡完就结束了，不如正常切
+    if (duration.value < sec * 2000) return
+    if (duration.value - time.value > sec * 1000) return
+    const target = computeNextIndex(true)
+    if (target === null) return
+    crossfading = true
+    void advanceWithCrossfade(target, sec * 1000)
+  }
+
+  /** 交叉淡化的取址与状态切换。任何失败都静默回退：旧曲放到自然结束走 handleEnded */
+  async function advanceWithCrossfade(target: number, fadeMs: number): Promise<void> {
+    const song = queue.value[target]
+    if (!song) {
+      crossfading = false
+      return
+    }
+    const app = useAppStore()
+    const token = playGate.next()
+    try {
+      const resolved = await window.api.resolveTrack({
+        song: plain(song),
+        autoSwitch: app.settings?.autoSwitchSource !== false,
+        forceSwitch: false
+      })
+      if (!playGate.isCurrent(token)) {
+        crossfading = false
+        return
+      }
+      // 取址期间旧曲被暂停/切走：交给自然 ended 的老路处理
+      if (audio.paused) {
+        crossfading = false
+        return
+      }
+      const ok = await audio.crossfadeTo(resolved.stream.url, fadeMs)
+      if (!ok) {
+        crossfading = false
+        return
+      }
+      // 淡化已起：状态切换与 playAt 的成功路径对齐，只是提前到淡入开始这一刻
+      resolvedSong.value = sanitizeSongs([resolved.song])[0]
+      streamLabel.value = resolved.stream.label
+      if (resolved.switchedFrom) {
+        notice.value = resolved.notice ?? '已自动切换音源'
+        window.setTimeout(() => {
+          notice.value = ''
+        }, 6000)
+      }
+      index.value = target
+      loadedUid = song.uid
+      saveQueuePos()
+      failureStreak = 0
+      pushRecent(song)
+      useStatsStore().recordPlay(song)
+      void loadLyric(resolved.song)
+      updateMediaSession(song)
+      time.value = 0
+      duration.value = audio.duration
+      buffered.value = 0
+      // 新元素的 durationchange 在翻转 active 前就发过（被事件门滤掉），
+      // 元数据还没就绪时补一次：多半在淡入的 300ms 里就到了
+      if (!duration.value) {
+        window.setTimeout(() => {
+          duration.value = audio.duration
+        }, 500)
+      }
+      crossfading = false
+    } catch {
+      crossfading = false
+    }
   }
 
   async function prev(): Promise<void> {

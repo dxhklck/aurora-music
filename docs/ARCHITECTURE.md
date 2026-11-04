@@ -39,7 +39,7 @@ UI 层 ── window.api ──▶ 数据层 ──▶ 音源层 ──▶ muse:
 | 层  | 位置                           | 职责                              | 禁止事项                |
 | -- | ---------------------------- | ------------------------------- | ------------------- |
 | UI | `renderer/`                  | 渲染、交互、动画、播放时钟、队列展示              | 不直接发网络请求、不解析平台 JSON |
-| 播放 | `renderer/src/core/audio.ts` | 封装 `HTMLAudioElement`、淡入淡出、事件总线 | 不关心歌曲来自哪个平台         |
+| 播放 | `renderer/src/core/audio.ts` | 封装双 `HTMLAudioElement`（交叉淡化）、淡入淡出、事件总线 | 不关心歌曲来自哪个平台         |
 | 数据 | `main/services/`             | 缓存、搜索聚合、换源、下载队列、本地库、设置          | 不拼 UI 文案以外的展示逻辑     |
 | 音源 | `main/providers/`            | 请求签名、字段归一化、音质映射、可用性探测           | 不写磁盘、不发 IPC         |
 | 传输 | `main/protocol.ts`           | 自定义协议、Referer 注入、Range 透传       | 不含业务判断              |
@@ -419,7 +419,7 @@ Range；GitHub 直连与 ghproxy 镜像降为后备。上次验证可用的渠�
 
 ### 7.1 音量必须写两个地方（Web Audio 接管陷阱）
 
-「正在播放」舞台打开时 `core/wave.ts` 会执行 `createMediaElementSource(el)` 取频谱。  
+「正在播放」舞台打开时 `core/wave.ts` 会执行 `createMediaElementSource(el)` 取频谱（两个元素都挂，交叉淡化各自走分支增益）。  
 **这一步会让浏览器彻底忽略元素的 `volume` 与 `muted`**——声音改由音频图输出，元素上的两个属性只是两个没人读的字段。
 
 症状很具体：滑块能拖、喇叭图标变成静音、`player.volume` 也变了，但声音一点没变。只在前端改 `el.volume` 的写法在「打开过舞台」之后必然失效，且在没有打开舞台时又是好的，所以极易被误判成偶发。
@@ -572,7 +572,7 @@ MusicdlProvider.search → musicdl.searchStream / resolve / lyric / tag
 | 均衡器 / 可视化 | 已完成：`core/wave.ts` 在 source 与 gain 之间串 5 个 `BiquadFilter`；可视化是 `AudioWave.vue` 读 analyser |
 | 下载并发 / 重试策略 | 已完成：`settings.downloadConcurrency` / `downloadRetries` |
 | 封面补全（酷我无封面） | 已完成：`CoverService` 跨平台搜封面 + 24h 缓存 + 去后缀主干匹配 |
-| 新增音效（混响、压缩） | 接在 `wave.ts` 的 EQ 链尾部，注意 `analyser` 必须仍直连 source |
+| 新增音效（混响、压缩） | 接在 `wave.ts` 的 EQ 链尾部，注意 `analyser` 必须仍接在混合后、用户音量之前（现在从 `bands[0]` 取样） |
 | 重拍文档截图 | `npm run shots`（`scripts/shots.mjs`，用真实界面驱动，见 [README.md](README.md)） |
 | 打包分发 | `electron-builder.yml`（`extraResources` 只带 `resources/demo` 与图标） |
 

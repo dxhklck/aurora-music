@@ -14,12 +14,19 @@
  *    这样静音时可视化仍在起伏——符合播放器习惯；若串在增益后，
  *    一静音波形就变直线，2 秒后还会被判成「analyser 失效」而降级成假波形。
  *
- * 输出链：`source → b0..b4（均衡器） → gain → destination`；可视链：`source → analyser`。
+ * 输出链：`sourceA/B → 分支增益 → b0..b4（均衡器） → limiter → norm → master → destination`；
+ * 可视链：`均衡器首段 → analyser`（两路混合后取样，静音时照样动）。
+ *
+ * 双源是交叉淡化用的：两个分支增益分别控制两个元素，淡化时一个降一个升，
+ * 用户的音量在末端的 master 上，两层互不干扰。单元素场景分支增益恒 1，等价于原来的链路。
  */
 
 const FFT_SIZE = 2048
 /** 连续全 0 超过此时长（ms）即判定 analyser 失效 */
 const FLAT_TIMEOUT = 2000
+
+/** 响度均衡的目标短时响度（RMS dBFS）。偏保守：太亮会把安静的歌整体抬高失真 */
+const TARGET_RMS_DB = -18
 
 /** 五段均衡器的中心频率（Hz），与 UI 的滑块一一对应 */
 export const EQ_BANDS = [60, 230, 910, 3600, 14000] as const
@@ -37,6 +44,11 @@ class WaveEngine {
   /** 夜间限幅器（压缩动态）；关闭时参数置中性，常驻链路但不改声音 */
   private limiter: DynamicsCompressorNode | null = null
   private limiterOn = false
+  /** 响度均衡（AGC）：慢速把实测响度拉到目标水平；关闭时增益恒 1，不改声音 */
+  private norm: GainNode | null = null
+  private normOn = false
+  private normTimer: number | null = null
+  private normValue = 1
   /** 均衡器参数的缓存：挂接可能晚于用户调参，创建节点时要按当前值初始化 */
   private eqGains: number[] = EQ_BANDS.map(() => 0)
   private eqEnabled = false
@@ -45,13 +57,15 @@ class WaveEngine {
   private muted = false
   /** 输出设备 id（'' = 系统默认）。挂接音频图后输出由 AudioContext 决定 */
   private sinkId = ''
+  /** 两个元素的分支增益（交叉淡化分别控制；未传第二个元素时下标 1 为 null） */
+  private branches: [GainNode | null, GainNode | null] = [null, null]
   private freqData = new Uint8Array(0)
   private timeData = new Uint8Array(0)
   private flatSince = 0
   private simulated = false
 
   /** 挂接 analyser；多次调用幂等 */
-  attach(el: HTMLAudioElement): void {
+  attach(elA: HTMLAudioElement, elB?: HTMLAudioElement): void {
     if (this.source) {
       this.resume()
       return
@@ -60,21 +74,30 @@ class WaveEngine {
       const Ctor: typeof AudioContext | undefined =
         window.AudioContext ??
         (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      if (!Ctor || !el.src) return
+      if (!Ctor || !elA.src) return
       const ctx = new Ctor()
-      const source = ctx.createMediaElementSource(el)
+      const sourceA = ctx.createMediaElementSource(elA)
       const analyser = ctx.createAnalyser()
       analyser.fftSize = FFT_SIZE
       analyser.smoothingTimeConstant = 0.82
-      // 可视旁路：增益前取样，静音时波形照样动
-      source.connect(analyser)
-      // 输出链：必须经 gain 再到 destination，否则元素 volume/muted 被接管后无处可调
-      const gain = ctx.createGain()
+      // 输出链：必须经 master 再到 destination，否则元素 volume/muted 被接管后无处可调
+      const master = ctx.createGain()
       // 挂接可能晚于设音量（舞台在播放中途才打开），用元素当前状态初始化
-      this.volume = el.volume
-      this.muted = el.muted
-      gain.gain.value = this.muted ? 0 : this.volume
-      // 均衡器：五个 peaking 滤波器串在 source 与 gain 之间。
+      this.volume = elA.volume
+      this.muted = elA.muted
+      master.gain.value = this.muted ? 0 : this.volume
+      // 分支增益：每个源一个，交叉淡化在这里升降；平时恒 1
+      const gainA = ctx.createGain()
+      gainA.gain.value = 1
+      sourceA.connect(gainA)
+      let gainB: GainNode | null = null
+      if (elB) {
+        const sourceB = ctx.createMediaElementSource(elB)
+        gainB = ctx.createGain()
+        gainB.gain.value = 1
+        sourceB.connect(gainB)
+      }
+      // 均衡器：五个 peaking 滤波器串在分支与 master 之间。
       // 关闭时不拆链（拆了再接极易踩到「接了没通」的静音），只把增益归零。
       const bands = EQ_BANDS.map((freq) => {
         const band = ctx.createBiquadFilter()
@@ -84,7 +107,8 @@ class WaveEngine {
         band.gain.value = 0
         return band
       })
-      source.connect(bands[0])
+      gainA.connect(bands[0])
+      gainB?.connect(bands[0])
       for (let i = 0; i < bands.length - 1; i += 1) bands[i].connect(bands[i + 1])
       const limiter = ctx.createDynamicsCompressor()
       limiter.threshold.value = 0
@@ -92,22 +116,31 @@ class WaveEngine {
       limiter.ratio.value = 1
       limiter.attack.value = 0.003
       limiter.release.value = 0.25
+      const norm = ctx.createGain()
+      norm.gain.value = this.normValue
       bands[bands.length - 1].connect(limiter)
-      limiter.connect(gain)
-      gain.connect(ctx.destination)
+      limiter.connect(norm)
+      norm.connect(master)
+      master.connect(ctx.destination)
+      // 可视旁路：接在均衡器首段输出（两路已混合、用户音量之前），静音时波形照样动
+      bands[0].connect(analyser)
       this.ctx = ctx
-      this.source = source
+      this.source = sourceA
       this.analyser = analyser
-      this.gain = gain
+      this.gain = master
+      this.branches = [gainA, gainB]
       this.bands = bands
       this.limiter = limiter
+      this.norm = norm
       this.applyEqualizer()
       this.applyLimiter()
+      // 挂接可能晚于开关响度均衡（与 EQ / 限幅器同一时机问题）
+      this.setLoudnessNorm(this.normOn)
       // 挂接可能晚于选设备（用户可能先设了输出设备再打开播放舞台）
       this.applySink()
       this.freqData = new Uint8Array(analyser.frequencyBinCount)
       this.timeData = new Uint8Array(analyser.fftSize)
-      if (!el.paused) this.resume()
+      if (!elA.paused) this.resume()
     } catch {
       // 挂接失败（如元素已被其它 Graph 接管）：停留在无 analyser 状态，
       // 可视化走模拟波形，播放完全不受影响
@@ -132,6 +165,16 @@ class WaveEngine {
   setMuted(muted: boolean): void {
     this.muted = Boolean(muted)
     this.applyGain()
+  }
+
+  /**
+   * 分支增益（0~1 的比例）：交叉淡化时分别驱动两个元素。
+   * 与 master（用户音量）相乘才是实际输出；未传第二个元素挂接时下标 1 是空操作。
+   */
+  setBranch(index: number, level: number): void {
+    const node = this.branches[index === 1 ? 1 : 0]
+    if (!node) return
+    node.gain.value = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 1))
   }
 
   private applyGain(): void {
@@ -214,13 +257,69 @@ class WaveEngine {
     }
   }
 
+  /**
+   * 响度均衡（AGC 自动音量）。
+   *
+   * 为什么不做整轨 R128：在线流要整曲解码才算准响度，流量与耗时都不现实；
+   * 本地曲目又没有 ReplayGain 标签可读。所以用 VLC 同款的实时 AGC：
+   * 从 analyser 旁路测 250ms 窗口的 RMS，慢速把增益拉向目标响度。
+   *
+   * 防抽吸（pumping）的三道闸：
+   * 1. 步进慢：每次最多动 0.4 dB（≈1.6 dB/s），跟得上歌间落差、跟不上人声起伏；
+   * 2. 静音段不调：RMS 低于 -50dBFS 时冻结（否则会把间奏、尾音越拉越大）；
+   * 3. 总量限幅：0.25~2.0（-12~+6 dB），再离谱的歌也只在这个范围里找平。
+   */
+  setLoudnessNorm(on: boolean): void {
+    this.normOn = Boolean(on)
+    if (this.normTimer !== null) {
+      window.clearInterval(this.normTimer)
+      this.normTimer = null
+    }
+    if (!this.normOn) {
+      this.normValue = 1
+      this.applyNorm()
+      return
+    }
+    this.normTimer = window.setInterval(() => this.normStep(), 250)
+  }
+
+  private normStep(): void {
+    const ctx = this.ctx
+    const analyser = this.analyser
+    if (!ctx || !analyser || !this.norm || this.simulated) return
+    analyser.getByteTimeDomainData(this.timeData)
+    let sum = 0
+    for (let i = 0; i < this.timeData.length; i += 1) {
+      const v = (this.timeData[i] - 128) / 128
+      sum += v * v
+    }
+    const rms = Math.sqrt(sum / this.timeData.length)
+    if (rms < 0.003) return // -50dBFS 以下视为无声，冻结
+    const db = 20 * Math.log10(rms)
+    const error = TARGET_RMS_DB - db
+    // 每步最多 0.4 dB
+    const delta = Math.max(-0.4, Math.min(0.4, error))
+    const next = Math.max(0.25, Math.min(2, this.normValue * Math.pow(10, delta / 20)))
+    if (next === this.normValue) return
+    this.normValue = next
+    this.norm.gain.setTargetAtTime(next, ctx.currentTime, 1.0)
+  }
+
+  private applyNorm(): void {
+    const ctx = this.ctx
+    if (!ctx || !this.norm) return
+    this.norm.gain.setTargetAtTime(this.normValue, ctx.currentTime, 0.2)
+  }
+
   /** 诊断/测试用：当前均衡器参数与是否已挂接 */
-  get eq(): { attached: boolean; enabled: boolean; gains: number[]; limiter: boolean } {
+  get eq(): { attached: boolean; enabled: boolean; gains: number[]; limiter: boolean; norm: boolean; normValue: number } {
     return {
       attached: this.bands.length > 0,
       enabled: this.eqEnabled,
       gains: [...this.eqGains],
-      limiter: this.limiterOn
+      limiter: this.limiterOn,
+      norm: this.normOn,
+      normValue: this.normValue
     }
   }
 

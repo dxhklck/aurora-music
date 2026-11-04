@@ -287,6 +287,10 @@ export interface AppSettings {
    * 只影响顺序，不做白名单：没被选中的源仍然会被尝试，只是排后面。
    */
   preferredSources: string[]
+  /** 响度均衡（AGC 自动音量）：把各歌曲的响度慢慢拉到同一水平 */
+  loudnessNorm: boolean
+  /** 交叉淡化时长（秒，0 = 关）；切歌时上一首淡出、下一首淡入同时进行 */
+  crossfadeSec: number
   /** 桌面歌词是否锁定（锁定 = 鼠标穿透，不挡桌面操作） */
   desktopLyricLocked: boolean
   /** 桌面歌词形态：mini 单行迷你条 / full 大字多行 */

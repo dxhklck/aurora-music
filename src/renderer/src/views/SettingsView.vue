@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
+import { wave } from '../core/wave'
 import { useAppStore } from '../stores/app'
 import { useDownloadStore } from '../stores/download'
 import { useLibraryStore } from '../stores/library'
@@ -237,6 +238,17 @@ async function patch(patchValue: Parameters<typeof app.patchSettings>[0]): Promi
     await app.reloadProviders()
     await probe()
   }
+}
+
+/** 响度均衡：写设置的同时立即作用到音频图（若已挂接），不等下次重启 */
+function patchLoudness(on: boolean): void {
+  wave.setLoudnessNorm(on)
+  void patch({ loudnessNorm: on })
+}
+
+/** 交叉淡化时长（秒，0 = 关）；播放器会在下一次选曲时读取新值 */
+function patchCrossfade(sec: number): void {
+  void patch({ crossfadeSec: sec })
 }
 
 async function probe(): Promise<void> {
@@ -628,6 +640,31 @@ onBeforeUnmount(() => {
         </select>
       </div>
       <p v-if="outputGone" class="hint">上次选择的输出设备已断开，当前走系统默认。</p>
+
+      <div class="row">
+        <label>响度均衡</label>
+        <button
+          class="switch"
+          :class="{ on: settings?.loudnessNorm }"
+          title="歌与歌之间音量忽大忽小时打开：自动把响度拉到同一水平"
+          @click="patchLoudness(!settings?.loudnessNorm)"
+        >
+          <i />
+        </button>
+      </div>
+
+      <div class="row">
+        <label>交叉淡化</label>
+        <select
+          class="sel"
+          :value="settings?.crossfadeSec ?? 0"
+          @change="patchCrossfade(Number(($event.target as HTMLSelectElement).value))"
+        >
+          <option :value="0">关</option>
+          <option v-for="sec in [2, 4, 6, 8, 12]" :key="sec" :value="sec">{{ sec }} 秒</option>
+        </select>
+      </div>
+      <p class="hint">交叉淡化在歌曲自然临近结束时生效；手动切歌、暂停与拖进度条不参与。</p>
 
       <div class="row">
         <label>每次搜索条数</label>

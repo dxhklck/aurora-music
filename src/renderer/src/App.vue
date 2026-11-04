@@ -145,6 +145,8 @@ onMounted(async () => {
       wave.setEqualizer(eq.gains, eq.enabled)
       wave.setNightLimiter(eq.night === true)
     }
+    // 响度均衡同样是「设置先于音频图创建」的场景，启动时灌一次
+    wave.setLoudnessNorm(app.settings.loudnessNorm === true)
   }
   player.bindEngine()
   // 把上次关掉时的队列摆回来：只还原队列与选中项，不取址也不出声，
