@@ -77,7 +77,7 @@ npm run shots       # 重拍文档截图（见 scripts/shots.mjs，需先 npm ru
 
 ```bash
 npm run dist                        # 本机出包（产物在 release/）
-git tag v1.4.0 && git push origin v1.4.0   # 打 tag 触发 CI 三平台构建并发布 GitHub Release
+git tag v1.7.0 && git push origin v1.7.0   # 打 tag 触发 CI 三平台构建并发布 GitHub Release
 ```
 
 - CI（`.github/workflows/build.yml`）在 Windows / macOS / Ubuntu 上分别构建，前置四道关口：
@@ -111,7 +111,7 @@ src/
   shared/               IPC 常量、类型、歌词解析（主进程与渲染层共用）
   renderer/src/
     views/              路由页面 + 两个独立窗口（桌面歌词、音量气泡）
-    components/         19 个组件（播放条、歌词、均衡器、队列、歌曲表…）
+    components/         21 个组件（播放条、歌词、均衡器、队列、歌曲表…）
     stores/             7 个 Pinia store（app / player / search / download / library / playlists / stats）
     core/               audio / wave（Web Audio 图）/ latest（异步门闩）/ plain（IPC 拷贝）
 scripts/
