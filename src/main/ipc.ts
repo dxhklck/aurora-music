@@ -311,6 +311,7 @@ export function registerIpc(): void {
   handle(IPC.backupImport, () => importBackup())
   handle(IPC.appRelaunch, () => relaunchApp())
   handle(IPC.clipboardWrite, (text: string) => clipboard.writeText(String(text ?? '')))
+  handle(IPC.clipboardRead, () => clipboard.readText())
 
   // ---------- 设置 ----------
   handle(IPC.settingsGet, () => settings.get())

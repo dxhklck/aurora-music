@@ -152,6 +152,8 @@ export const IPC = {
   // 通知
   /** 写系统剪贴板（复制文件路径用；渲染层的 navigator.clipboard 在部分环境不可靠） */
   clipboardWrite: 'app:clipboard-write',
+  /** 读系统剪贴板文本（剪贴板搜索：复制了歌名直接搜，省一次手打） */
+  clipboardRead: 'app:clipboard-read',
   /** 渲染层未捕获错误 / 手动上报日志（写 userData/logs） */
   logWrite: 'log:write',
   /** 导出诊断报告（系统信息 + 设置摘要 + 音源健康 + 最近日志） */

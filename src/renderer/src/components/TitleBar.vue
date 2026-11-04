@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import Icon from './Icon.vue'
 import { useSearchStore } from '../stores/search'
 import { useAppStore } from '../stores/app'
+import { clipboardKeyword } from '@shared/clipboard-text'
 import type { ThemeMode } from '@shared/types'
 
 const router = useRouter()
@@ -65,6 +66,20 @@ async function toggleDesktopLyric(): Promise<void> {
 function openGuide(): void {
   void router.push('/guide')
 }
+
+/* ---------- 剪贴板搜索 ----------
+   复制了歌名却懒得手打：点按钮读剪贴板，清洗后直接搜。
+   只做「省打字」这一件事，不猜歌名、不做音频识别。 */
+async function searchClipboard(): Promise<void> {
+  const keyword = clipboardKeyword(await window.api.readClipboard())
+  if (!keyword) {
+    app.toast('剪贴板里没有可搜的文字', 'info')
+    return
+  }
+  query.value = keyword
+  void router.push({ name: 'search' })
+  void search.run(keyword)
+}
 </script>
 
 <template>
@@ -95,6 +110,14 @@ function openGuide(): void {
 
     <button
       class="icon-btn no-drag"
+      title="从剪贴板搜索（先复制歌名）"
+      @click="searchClipboard"
+    >
+      <Icon name="copy" :size="17" />
+    </button>
+
+    <button
+      class="icon-btn no-drag"
       :title="`主题：${THEME_META[themeMode].label}（点击切换）`"
       @click="cycleTheme"
     >
@@ -102,11 +125,11 @@ function openGuide(): void {
     </button>
 
     <button class="icon-btn no-drag" title="桌面歌词" @click="toggleDesktopLyric">
-      <Icon name="monitor" :size="18" />
+      <span class="glyph">词</span>
     </button>
 
     <button class="icon-btn no-drag" title="迷你播放器" @click="app.patchSettings({ miniMode: true })">
-      <Icon name="expand" :size="17" />
+      <span class="glyph">迷</span>
     </button>
 
     <button class="icon-btn no-drag" title="使用指南（F1）" @click="openGuide">
@@ -239,6 +262,14 @@ function openGuide(): void {
 
 .spacer {
   flex: 1;
+}
+
+/** 标题栏用单字代替图标：中文方块字比线性图标更好认 */
+.glyph {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  transform: translateY(-0.5px);
 }
 
 .win-controls {

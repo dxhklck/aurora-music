@@ -197,6 +197,8 @@ export interface AuroraApi {
 
   /** 写系统剪贴板（复制文件路径） */
   copyText(text: string): Promise<void>
+  /** 读系统剪贴板文本（剪贴板搜索：复制歌名后一键搜） */
+  readClipboard(): Promise<string>
   /** 上报一条运行日志到 userData/logs（渲染层未捕获错误走这里） */
   logWrite(level: 'info' | 'warn' | 'error', scope: string, message: string): Promise<void>
   /** 导出诊断报告；返回保存路径，用户取消时为 null */

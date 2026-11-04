@@ -80,6 +80,7 @@ const api: AuroraApi = {
 
   logWrite: (level, scope, message) => ipcRenderer.invoke(IPC.logWrite, { level, scope, message }),
   copyText: (text) => ipcRenderer.invoke(IPC.clipboardWrite, text),
+  readClipboard: () => ipcRenderer.invoke(IPC.clipboardRead),
   exportDiagnostics: () => ipcRenderer.invoke(IPC.diagExport),
   exportBackup: (local) => ipcRenderer.invoke(IPC.backupExport, local),
   importBackup: () => ipcRenderer.invoke(IPC.backupImport),
