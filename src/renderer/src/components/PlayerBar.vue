@@ -118,7 +118,7 @@ function setVolume(event: Event): void {
             title="播放队列"
             @click="player.showQueue = !player.showQueue"
           >
-            <Icon name="list" :size="18" />
+            <Icon name="queue" :size="18" />
           </button>
         </div>
 

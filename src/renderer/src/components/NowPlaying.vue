@@ -446,7 +446,7 @@ onBeforeUnmount(() => {
         </button>
         <button class="round" @click="player.next()"><Icon name="next" :size="22" /></button>
         <button class="icon-btn" @click="player.showQueue = !player.showQueue">
-          <Icon name="list" :size="20" />
+          <Icon name="queue" :size="20" />
         </button>
       </div>
     </div>

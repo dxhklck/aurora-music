@@ -23,6 +23,11 @@ const ICONS: Record<string, IconDef> = {
   pencil: { paths: ['M4 20h4L19.5 8.5 15.5 4.5 4 16z', 'M13.5 6.5l4 4'], fill: false },
   download: { paths: ['M12 4v10', 'M8 11l4 4 4-4', 'M5 19h14'], fill: false },
   list: { paths: ['M4 7h11M4 12h11M4 17h7', 'M18 9v7', 'M16 14l2 2 2-2'], fill: false },
+  /**
+   * 队列专用：三条横线 + 播放三角。
+   * 和 lyrics（四条参差横线）区分开——两者都放 18px 时，纯横线根本分不出谁是谁。
+   */
+  queue: { paths: ['M4 6h11', 'M4 12h11', 'M4 18h7', 'M17 8.5l4 3.5-4 3.5z'], fill: false },
   lyrics: { paths: ['M5 6h14', 'M5 11h9', 'M5 16h12', 'M5 21h7'], fill: false },
   shuffle: { paths: ['M4 7h3l7 10h4', 'M4 17h3l7-10h4', 'M16 4.5 19.5 7 16 9.5', 'M16 14.5 19.5 17 16 19.5'], fill: false },
   repeat: { paths: ['M5 9a3 3 0 0 1 3-3h8', 'M13 3.5 16 6l-3 2.5', 'M19 15a3 3 0 0 1-3 3H8', 'M11 20.5 8 18l3-2.5'], fill: false },

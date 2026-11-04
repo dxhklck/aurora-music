@@ -376,7 +376,7 @@ onBeforeUnmount(() => {
           title="播放队列"
           @click="togglePanel('queue')"
         >
-          <Icon name="list" :size="14" />
+          <Icon name="queue" :size="14" />
         </button>
         <button class="abtn" title="隐藏到托盘" @click="closeWindow">
           <Icon name="close" :size="13" />

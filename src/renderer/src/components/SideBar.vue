@@ -76,7 +76,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
     <div class="block">
       <p class="block-title">播放列表</p>
       <button class="nav-item as-button" @click="player.showQueue = !player.showQueue">
-        <Icon name="list" :size="18" />
+        <Icon name="queue" :size="18" />
         <span>当前队列</span>
         <em class="count">{{ player.queue.length }}</em>
       </button>
