@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import type { Song } from '@shared/types'
 import Icon from './Icon.vue'
 import CoverArt from './CoverArt.vue'
@@ -9,6 +10,10 @@ import { useDownloadStore } from '../stores/download'
 import { usePlaylistStore } from '../stores/playlists'
 import { useLibraryStore } from '../stores/library'
 import { useAppStore } from '../stores/app'
+import { useSearchStore } from '../stores/search'
+
+const router = useRouter()
+const search = useSearchStore()
 
 const props = withDefaults(
   defineProps<{
@@ -173,6 +178,18 @@ function addNext(song: Song): void {
 
 function toggleFavorite(song: Song): void {
   void playlists.toggleFavorite(song)
+}
+
+/**
+ * 拿这首歌的歌名 + 歌手跳到搜索页再搜一遍。
+ * 和「在其它音源找这首歌」不同：那个是在当前这首歌的语境里找可播版本，
+ * 这个是把关键词丢回搜索，用来找同名翻唱、其它演绎或同名不同曲。
+ */
+function searchThisSong(song: Song): void {
+  const keyword = [song.name, ...song.artists].filter(Boolean).join(' ').trim()
+  if (!keyword) return
+  void router.push({ name: 'search' })
+  void search.run(keyword)
 }
 
 /** VIP 角标：平台明确标记付费，或平台侧标记不可直接播放 */
@@ -347,6 +364,9 @@ function qualityBadge(song: Song): string {
             @click.stop="onDownloadClick(song)"
           >
             <Icon :name="isDownloaded(song) ? 'check' : 'download'" :size="15" />
+          </button>
+          <button v-if="!moveable" title="搜索这首歌（歌名 + 歌手）" @click.stop="searchThisSong(song)">
+            <Icon name="search" :size="15" />
           </button>
           <button v-if="showAlternative" title="在其它音源找这首歌" @click.stop="emit('alternative', song)">
             <Icon name="refresh" :size="15" />

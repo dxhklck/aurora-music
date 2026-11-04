@@ -57,6 +57,15 @@ watch(
     else search.reset()
   }
 )
+
+// 从歌曲列表的「搜索这首歌」跳过来时，这个页面的输入框要跟着换成新关键词
+watch(
+  () => search.keyword,
+  (value) => {
+    input.value = value
+    suggestOpen.value = false
+  }
+)
 </script>
 
 <template>
