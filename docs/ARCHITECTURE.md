@@ -320,6 +320,8 @@ Aurora 自己实现了网易云/QQ/酷我（需要榜单与逐字歌词），剩
 | `download:progress`                           | main → renderer     | 任务列表快照（节流） |
 | `library:*` / `settings:*`                    | invoke              | 本地库与设置     |
 | `playlist:*`                                  | invoke              | 收藏与歌单（写操作统一返回完整列表） |
+| `backup:export` / `backup:import`             | invoke              | 全量备份与还原（文件名校验 + 凭据脱敏） |
+| `app:relaunch`                                | invoke              | 还原后重启（绕过 quit 的 flush，避免旧值回写） |
 | `win:*`                                       | send/invoke         | 无边框窗口控制    |
 | `lyric-window:toggle/close/lock/push`         | send/invoke         | 桌面歌词       |
 | `lyric-window:state`                          | main → lyric window | 歌词状态推送     |

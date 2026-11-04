@@ -25,7 +25,7 @@ npm run dev           # 开发模式（热更新）
 
 ```bash
 npm run typecheck     # vue-tsc + tsc，零 error
-npm test              # 单元测试（Node 原生 runner，139 例）
+npm test              # 单元测试（Node 原生 runner，184 例）
 npm run engine:test   # 引擎层单元测试（92 例）
 npm run build         # 三端产物必须能出
 ```

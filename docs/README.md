@@ -15,7 +15,8 @@
 | [adding-a-source.md](adding-a-source.md) | 新增音源：模板走查、字段对照、常见问题（搜不到 / 播不了 / 时长错 / 被限流） | 想接一个新音源 |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | 开发环境、四道检查、代码约定、PR 边界 | 准备提 PR |
 | [code-signing.md](code-signing.md) | Windows 代码签名的三条路线、证书接入 CI 的步骤、签名相关的打包坑 | 处理 SmartScreen、配置 CSC_LINK |
-| [bilibili-promo-prompts.md](bilibili-promo-prompts.md) | B 站介绍视频的生图提示词：统一视觉设定、8 条分镜、桌面/移动差异速查 | 做宣传视频、生成封面与演示图 |
+| [bilibili-promo-prompts.md](bilibili-promo-prompts.md) | B 站介绍视频的生图提示词：统一视觉设定、8 条分镜、桌面/移动差异速查 | 做宣传视频、生成演示图 |
+| [bilibili-cover.md](bilibili-cover.md) | B 站封面（1146×717）的文案定稿、两版可直接粘贴的生图提示词、核字清单与自检 | 做封面、改封面标题 |
 
 ## 归档（`archive/`）
 
