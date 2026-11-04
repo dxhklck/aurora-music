@@ -10,6 +10,8 @@ import type { EngineStatusView, SourceHealthView, UpdateStatusView } from '@shar
 import { type QrLoginPlatform, type QrLoginState } from '@shared/types'
 import type { NeteaseAccountInfo } from '@shared/types'
 import type { Quality } from '@shared/types'
+import { audio } from '../core/audio'
+import { listOutputDevices, type OutputDevice } from '../core/output'
 
 const app = useAppStore()
 const download = useDownloadStore()
@@ -34,6 +36,103 @@ const qualities: Array<{ value: Quality; label: string; hint: string }> = [
 ]
 
 const engineSources = computed(() => app.providers.filter((item) => item.id.startsWith('mdl-')))
+
+/* ---------- 备份 / 还原 ---------- */
+const backupPath = ref('')
+const backupBusy = ref(false)
+
+/** 渲染层里值得带走的只有白名单这几项：主进程读不到 localStorage，必须由这边收集 */
+function collectLocal(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const key of ['aurora.stats', 'aurora.recent', 'aurora.lyric-offsets']) {
+    const value = localStorage.getItem(key)
+    if (value) out[key] = value
+  }
+  return out
+}
+
+async function doExportBackup(): Promise<void> {
+  backupBusy.value = true
+  try {
+    const result = await window.api.exportBackup(collectLocal())
+    if (result.canceled) return
+    backupPath.value = `已导出 ${Math.max(1, Math.round(result.bytes / 1024))} KB`
+    app.toast('备份已导出', 'success')
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : String(error), 'error')
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+async function doImportBackup(): Promise<void> {
+  backupBusy.value = true
+  try {
+    const result = await window.api.importBackup()
+    if (result.canceled) return
+    if (!result.applied) {
+      app.toast(result.error ?? '还原失败', 'error')
+      return
+    }
+    for (const [key, value] of Object.entries(result.local)) {
+      localStorage.setItem(key, value)
+    }
+    const failed = result.failedFiles?.length ?? 0
+    app.toast(
+      failed ? `已还原，但有 ${failed} 个文件写入失败` : '已还原，正在重启…',
+      failed ? 'error' : 'success'
+    )
+    // 给 localStorage 一点刷盘时间再重启，否则统计可能丢最后一笔
+    window.setTimeout(() => void window.api.relaunchApp(), 400)
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : String(error), 'error')
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+/* ---------- 换源优先源 ---------- */
+const preferred = computed(() => settings.value?.preferredSources ?? [])
+const preferOpen = ref(false)
+
+async function togglePrefer(id: string): Promise<void> {
+  const current = preferred.value
+  await patch({
+    preferredSources: current.includes(id)
+      ? current.filter((item) => item !== id)
+      : [...current, id]
+  })
+}
+
+/* ---------- 音频输出设备 ----------
+   枚举结果可能晚于首屏（设备服务还没就绪），所以列表是异步刷新的；
+   deviceId 会随 profile 变盐，设置里同时记 label 才能在重启后找回同一只耳机。 */
+const outputs = ref<OutputDevice[]>([])
+/** 记住的设备当前不在列表里：下拉会落到「系统默认」，用一行提示说清为什么 */
+const outputGone = computed(() => {
+  const id = settings.value?.audioOutputId ?? ''
+  return !!id && !outputs.value.some((device) => device.deviceId === id)
+})
+
+async function refreshOutputs(): Promise<void> {
+  outputs.value = await listOutputDevices()
+}
+
+function onDeviceChange(): void {
+  void refreshOutputs()
+}
+
+async function pickOutput(deviceId: string): Promise<void> {
+  const device = outputs.value.find((item) => item.deviceId === deviceId)
+  const ok = await audio.setOutputDevice(deviceId)
+  if (!ok) {
+    app.toast('该输出设备不可用，已退回系统默认', 'error')
+    await patch({ audioOutputId: '', audioOutputLabel: '' })
+    return
+  }
+  await patch({ audioOutputId: deviceId, audioOutputLabel: device?.label ?? '' })
+  app.toast(`输出设备：${device?.label ?? '系统默认'}`, 'success')
+}
 
 /**
  * 上游健康巡检：15 个源全是爬取实现，上游一改版就静默失效，表现是「这个源什么都搜不到」。
@@ -123,8 +222,14 @@ onMounted(() => {
   // 静默拿一次当前状态（不主动发起网络检查；检查由主进程启动后半分钟做）
   update.value = { supported: true, state: 'idle', currentVersion: '' }
   void window.api.checkForUpdate().then((s) => (update.value = s)).catch(() => undefined)
+  // 插拔耳机 / 切换默认设备时刷新列表，否则下拉里永远是进页面那一刻的设备
+  void refreshOutputs()
+  navigator.mediaDevices?.addEventListener('devicechange', onDeviceChange)
 })
-onBeforeUnmount(() => offUpdateStatus?.())
+onBeforeUnmount(() => {
+  offUpdateStatus?.()
+  navigator.mediaDevices?.removeEventListener('devicechange', onDeviceChange)
+})
 
 async function patch(patchValue: Parameters<typeof app.patchSettings>[0]): Promise<void> {
   await app.patchSettings(patchValue)
@@ -489,6 +594,42 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="row">
+        <label>换源优先使用</label>
+        <button class="prefer-btn" @click="preferOpen = !preferOpen">
+          {{ preferred.length ? `已选 ${preferred.length} 个` : '自动（按实测排序）' }}
+        </button>
+      </div>
+      <div v-if="preferOpen" class="prefer">
+        <button
+          v-for="item in app.providers"
+          :key="item.id"
+          class="chip"
+          :class="{ on: preferred.includes(item.id) }"
+          @click="togglePrefer(item.id)"
+        >
+          {{ item.name }}
+        </button>
+      </div>
+      <p v-if="preferOpen" class="hint">
+        选中的音源在换源时排最前；没选中的仍会兜底尝试，只是排在后面。刚失败过的源会被临时跳过，优先设置不会覆盖这条保护。
+      </p>
+
+      <div class="row">
+        <label>音频输出设备</label>
+        <select
+          class="sel"
+          :value="settings?.audioOutputId ?? ''"
+          @change="pickOutput(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">系统默认</option>
+          <option v-for="device in outputs" :key="device.deviceId" :value="device.deviceId">
+            {{ device.label }}
+          </option>
+        </select>
+      </div>
+      <p v-if="outputGone" class="hint">上次选择的输出设备已断开，当前走系统默认。</p>
+
+      <div class="row">
         <label>每次搜索条数</label>
         <input
           class="num"
@@ -557,6 +698,35 @@ onBeforeUnmount(() => {
       <p class="hint">
         已下载 {{ download.finished.length }} 首 · 本地库 {{ library.items.length }} 首 ·
         {{ formatBytes(library.totalSize) }}
+      </p>
+    </section>
+
+    <!-- 数据与备份 -->
+    <section class="card block">
+      <div class="block-head">
+        <span class="ico"><Icon name="export" :size="15" /></span>
+        <div>
+          <strong>数据与备份</strong>
+          <small>设置、本地库索引、歌单、下载记录与收听统计；登录凭据不进备份</small>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>全量备份</label>
+        <div class="path">
+          <span class="truncate">{{ backupPath || '导出为单个 JSON 文件，可换机迁移' }}</span>
+          <button class="btn" :disabled="backupBusy" @click="doExportBackup">导出</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>从备份还原</label>
+        <button class="btn" :disabled="backupBusy" @click="doImportBackup">选择文件…</button>
+      </div>
+
+      <p class="hint">
+        还原会覆盖当前设置、本地库索引、歌单与下载记录，完成后自动重启（当前数据会先自动留一份副本）。
+        本地曲目的绝对路径换机器后会失效，需要到「本地音乐」里重新定位。
       </p>
     </section>
 
@@ -1076,6 +1246,59 @@ onBeforeUnmount(() => {
   color: var(--text);
   font-size: 12px;
   text-align: center;
+}
+
+/* 设备名可能很长，限宽 + 省略号；option 必须显式上色，深色主题下原生下拉默认白底白字 */
+.sel {
+  max-width: 240px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 12px;
+  outline: none;
+}
+.sel option {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+/* 换源优先源：一个折叠入口 + 一排可点选的源标签，20 个源塞进 select 会太难找 */
+.prefer-btn {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.prefer-btn:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.prefer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 10px;
+}
+.chip {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-3);
+  font-size: 11.5px;
+  transition: all 0.18s var(--ease);
+}
+.chip:hover {
+  color: var(--text-2);
+}
+.chip.on {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
 }
 
 .path {

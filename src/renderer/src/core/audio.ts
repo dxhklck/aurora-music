@@ -188,6 +188,24 @@ class AudioEngine {
     wave.setMuted(muted)
   }
 
+  /**
+   * 切换音频输出设备（sinkId，'' = 系统默认）。
+   *
+   * 两条路径必须分开：音频图挂接后输出由 AudioContext 决定，对已接管的元素调
+   * `setSinkId` 会抛 InvalidStateError；未挂接时反过来只有元素能决定输出。
+   * 返回值 = 是否真的切换成功（设备被拔出、系统不支持时为 false）。
+   */
+  async setOutputDevice(deviceId: string): Promise<boolean> {
+    // 先写进音频图缓存：之后才打开播放舞台（attach）时也能按当前设备重新应用
+    if (wave.setSink(deviceId)) return true
+    try {
+      await this.el.setSinkId(deviceId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   private fadeTo(target: number, duration: number): void {
     this.stopFade()
     const from = this.el.volume

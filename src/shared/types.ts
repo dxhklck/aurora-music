@@ -268,6 +268,13 @@ export interface AppSettings {
   platform: PlatformId
   quality: Quality
   volume: number
+  /**
+   * 音频输出设备（Web Audio / MediaElement 的 sinkId，空串 = 系统默认）。
+   * deviceId 由浏览器按会话盐化，跨机器/跨 profile 可能变化，所以同时记 label 用于回退匹配。
+   */
+  audioOutputId: string
+  /** 输出设备名称（deviceId 失效时按它重新匹配；仅用于回显与回退，不影响播放） */
+  audioOutputLabel: string
   playMode: PlayMode
   downloadDir: string
   /** 额外导入的本地音乐目录（与下载目录一起扫描进本地库） */
@@ -275,6 +282,11 @@ export interface AppSettings {
   searchLimit: number
   /** 播放失败时自动到其它平台找同名歌曲 */
   autoSwitchSource: boolean
+  /**
+   * 换源时的优先音源（平台 id 列表，空 = 完全按实测成功率/耗时排序）。
+   * 只影响顺序，不做白名单：没被选中的源仍然会被尝试，只是排后面。
+   */
+  preferredSources: string[]
   /** 桌面歌词是否锁定（锁定 = 鼠标穿透，不挡桌面操作） */
   desktopLyricLocked: boolean
   /** 桌面歌词形态：mini 单行迷你条 / full 大字多行 */
@@ -334,6 +346,42 @@ export interface AppSettings {
 
 /** 界面主题两档 */
 export type ThemeMode = 'dark' | 'light'
+
+/* ---------------- 全量备份 / 还原 ----------------
+   单文件 JSON，各配置文件按**原文**保存：解析再序列化会把未知字段、格式细节
+   抹掉，而备份的首要要求是「还原后和备份前一模一样」。
+   格式常量与校验函数在 `shared/backup-format.ts`（那边没有对 types 的值导入，
+   以便 Node 的原生测试运行器能直接执行）。 */
+
+export interface BackupFilePayload {
+  format: string
+  version: number
+  appVersion: string
+  createdAt: number
+  /** 文件名 → 文件原文（settings.json / library.json / …） */
+  files: Record<string, string>
+  /** 渲染层 localStorage 白名单键值（收听统计、最近播放、歌词对齐） */
+  local: Record<string, string>
+}
+
+export interface BackupExportResult {
+  canceled: boolean
+  path: string
+  bytes: number
+}
+
+export interface BackupImportResult {
+  canceled: boolean
+  /** 文件已写回磁盘；是否生效要重启应用 */
+  applied: boolean
+  /** 还原后的渲染层数据，调用方据此写回 localStorage */
+  local: Record<string, string>
+  /** 还原前自动留下的安全副本目录（空 = 没有可备份的旧文件） */
+  safetyDir: string
+  /** 失败原因；partial 里列出写失败的文件名 */
+  error?: string
+  failedFiles?: string[]
+}
 
 /** 窗口矩形（屏幕坐标） */
 export interface WinRect {

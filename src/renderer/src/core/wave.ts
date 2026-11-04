@@ -43,6 +43,8 @@ class WaveEngine {
   /** 缓存的音量/静音：挂接可能发生在设过音量之后，创建 GainNode 时要按当前值初始化 */
   private volume = 1
   private muted = false
+  /** 输出设备 id（'' = 系统默认）。挂接音频图后输出由 AudioContext 决定 */
+  private sinkId = ''
   private freqData = new Uint8Array(0)
   private timeData = new Uint8Array(0)
   private flatSince = 0
@@ -101,6 +103,8 @@ class WaveEngine {
       this.limiter = limiter
       this.applyEqualizer()
       this.applyLimiter()
+      // 挂接可能晚于选设备（用户可能先设了输出设备再打开播放舞台）
+      this.applySink()
       this.freqData = new Uint8Array(analyser.frequencyBinCount)
       this.timeData = new Uint8Array(analyser.fftSize)
       if (!el.paused) this.resume()
@@ -133,6 +137,28 @@ class WaveEngine {
   private applyGain(): void {
     if (!this.gain) return
     this.gain.gain.value = this.muted ? 0 : this.volume
+  }
+
+  /**
+   * 设置音频输出设备（sinkId，'' = 系统默认）。
+   *
+   * 必须作用在 AudioContext 上：`createMediaElementSource` 一旦执行，元素的输出就改由
+   * 音频图决定，此时对元素调 `setSinkId` 会抛 InvalidStateError。返回 true 表示
+   * 已经应用到 AudioContext（未挂接时只缓存，返回 false，由调用方走元素侧）。
+   */
+  setSink(sinkId: string): boolean {
+    this.sinkId = typeof sinkId === 'string' ? sinkId : ''
+    return this.applySink()
+  }
+
+  private applySink(): boolean {
+    const ctx = this.ctx as
+      | (AudioContext & { setSinkId?: (id: string) => Promise<void> })
+      | null
+    if (!ctx?.setSinkId) return false
+    // 设备已拔出时这里会 reject：保持在当前输出上，不要让一次失败炸掉播放链路
+    void ctx.setSinkId(this.sinkId).catch(() => undefined)
+    return true
   }
 
   /**

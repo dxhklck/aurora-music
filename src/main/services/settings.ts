@@ -19,18 +19,31 @@ function normalizeEqualizer(input: unknown): AppSettings['equalizer'] {
   }
 }
 
+/** 优先源列表：去重 + 只留非空字符串。历史值/手改值不能让排序函数拿到脏数据 */
+function normalizeSources(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  const seen = new Set<string>()
+  for (const item of input) {
+    if (typeof item === 'string' && item) seen.add(item)
+  }
+  return [...seen]
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   // 首次启动落到一个真实音源。demo（离线演示）是 hidden 的，不在切换列表里，
   // 当默认值会让侧栏显示的源与实际使用的源不一致——全新安装打开只有 3 首 40 秒的曲子。
   platform: 'netease',
   quality: 'high',
   volume: 0.75,
+  audioOutputId: '',
+  audioOutputLabel: '',
   playMode: 'loop',
   downloadDir: '',
   /** 额外导入的本地音乐目录（与下载目录一起扫描） */
   musicDirs: [],
   searchLimit: 30,
   autoSwitchSource: true,
+  preferredSources: [],
   desktopLyricLocked: false,
   desktopLyricMode: 'mini',
   nowPlayingStyle: 'vinyl',
@@ -76,7 +89,11 @@ class SettingsService {
     if (!this.cache.downloadDir) this.cache.downloadDir = defaultDownloadDir
     // 老版本 settings.json 没有这个字段，或者只存了一半：统一补成合法形态
     this.cache.equalizer = normalizeEqualizer(this.cache.equalizer)
+    this.cache.preferredSources = normalizeSources(this.cache.preferredSources)
     if (typeof this.cache.updateChannel !== 'string') this.cache.updateChannel = ''
+    // 老版本没有输出设备字段：缺了就是系统默认，别让 undefined 流到 enumerateDevices 的比较里
+    if (typeof this.cache.audioOutputId !== 'string') this.cache.audioOutputId = ''
+    if (typeof this.cache.audioOutputLabel !== 'string') this.cache.audioOutputLabel = ''
     return this.get()
   }
 
@@ -88,7 +105,8 @@ class SettingsService {
     this.cache = {
       ...this.cache,
       ...patch,
-      equalizer: normalizeEqualizer(patch.equalizer ?? this.cache.equalizer)
+      equalizer: normalizeEqualizer(patch.equalizer ?? this.cache.equalizer),
+      preferredSources: normalizeSources(patch.preferredSources ?? this.cache.preferredSources)
     }
     if (this.filePath) {
       // 快照必须在排队前取：串行执行时用的应是「调用那一刻」的完整状态

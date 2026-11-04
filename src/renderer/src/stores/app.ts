@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { AppSettings, PlatformId, ProviderInfo } from '@shared/types'
+import { applySavedOutput } from '../core/output'
 
 export interface Toast {
   id: number
@@ -41,6 +42,8 @@ export const useAppStore = defineStore('app', () => {
     if (!visible && platform.value !== config.platform) {
       await patchSettings({ platform: platform.value })
     }
+    // 恢复输出设备：设备已拔掉时静默退回系统默认，不打扰启动流程
+    void applySavedOutput(config.audioOutputId, config.audioOutputLabel)
     booted.value = true
   }
 

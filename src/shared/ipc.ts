@@ -157,6 +157,12 @@ export const IPC = {
   /** 导出诊断报告（系统信息 + 设置摘要 + 音源健康 + 最近日志） */
   diagExport: 'diag:export',
 
+  // 备份 / 还原（配置 + 本地库索引 + 歌单 + 统计）
+  backupExport: 'backup:export',
+  backupImport: 'backup:import',
+  /** 还原后重启应用（让新配置生效） */
+  appRelaunch: 'app:relaunch',
+
   // 自动更新（Windows）
   updateCheck: 'update:check',
   updateInstall: 'update:install',

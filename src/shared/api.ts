@@ -2,6 +2,8 @@
 import type {
   AlternativeTrack,
   AppSettings,
+  BackupExportResult,
+  BackupImportResult,
   CellphoneLoginArgs,
   CellphoneLoginResult,
   ChartSummary,
@@ -199,6 +201,19 @@ export interface AuroraApi {
   logWrite(level: 'info' | 'warn' | 'error', scope: string, message: string): Promise<void>
   /** 导出诊断报告；返回保存路径，用户取消时为 null */
   exportDiagnostics(): Promise<string | null>
+
+  /**
+   * 导出全量备份（设置 / 本地库索引 / 歌单 / 下载记录 / 统计）。
+   * `local` 是渲染层 localStorage 里的白名单数据——主进程读不到 localStorage。
+   */
+  exportBackup(local: Record<string, string>): Promise<BackupExportResult>
+  /**
+   * 还原备份。applied 为 true 时必须：写回 local → 立刻 relaunchApp()。
+   * 不重启的话内存里的旧配置会在下一次落盘时覆盖刚还原的文件。
+   */
+  importBackup(): Promise<BackupImportResult>
+  /** 重启应用（还原备份后调用） */
+  relaunchApp(): Promise<void>
 
   /** 检查更新（仅打包后的 Windows 有效，其余环境返回 supported=false） */
   checkForUpdate(): Promise<UpdateStatusView>

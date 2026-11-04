@@ -16,6 +16,7 @@ import { exportPlaylistToM3u, importM3uFromFile } from './services/m3u-io'
 import { settings } from './services/settings'
 import { logger } from './services/logger'
 import { exportDiagnostics } from './services/diagnostics'
+import { exportBackup, importBackup, relaunchApp } from './services/backup'
 import {
   cancelQrLogin,
   onLoginSuccess,
@@ -306,6 +307,9 @@ export function registerIpc(): void {
     else logger.info(scope, message)
   })
   handle(IPC.diagExport, () => exportDiagnostics())
+  handle(IPC.backupExport, (local: Record<string, string>) => exportBackup(local))
+  handle(IPC.backupImport, () => importBackup())
+  handle(IPC.appRelaunch, () => relaunchApp())
   handle(IPC.clipboardWrite, (text: string) => clipboard.writeText(String(text ?? '')))
 
   // ---------- 设置 ----------

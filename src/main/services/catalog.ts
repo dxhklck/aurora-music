@@ -323,11 +323,15 @@ class CatalogService {
 
     // 候选排序：原生适配器优先（快、有榜单），引擎音源放后面且最多试 2 个。
     // 引擎单次搜索可能几十秒，无节制地遍历 15 个源会让「换源」变成「卡死」。
+    // 用户显式指定的优先源压在最前——实测分数只是默认排序，不能盖过人工偏好。
+    const preferred = new Set(settings.get().preferredSources)
     const candidates = providers
       .streamCandidates(song.platform)
       .filter((candidate) => candidate.info.capabilities.search)
       .sort((a, b) => {
-        // 先按实测性价比（成功率 ÷ 中位耗时）；分数接近时回到「原生优先、引擎在后」。
+        const byPrefer = Number(!preferred.has(a.info.id)) - Number(!preferred.has(b.info.id))
+        if (byPrefer !== 0) return byPrefer
+        // 再按实测性价比（成功率 ÷ 中位耗时）；分数接近时回到「原生优先、引擎在后」。
         // 加死区是为了避免两个源分数抖动时来回换顺序，把结果变成随机。
         const diff = scoreboard.score(b.info.id) - scoreboard.score(a.info.id)
         if (Math.abs(diff) > 0.05) return diff

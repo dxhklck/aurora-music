@@ -17,6 +17,7 @@ import { downloads } from './services/download'
 import { runSelfTest } from './selftest'
 import { initUpdater } from './updater'
 import { logger } from './services/logger'
+import { parseJumpCommand, sendPlayCommand, setTaskbarProgress, setupJumpList } from './taskbar'
 
 /**
  * 全局异常兜底：先落盘再决定怎么办。
@@ -139,12 +140,17 @@ async function bootstrapRuntime(): Promise<void> {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    // 跳转列表的命令：参数由第二个进程带进来，这里代它执行。
+    // 这类唤起是「后台控制」，不要顺手把窗口弹出来打扰用户。
+    const command = parseJumpCommand(argv)
     const win = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed())
-    if (win) {
+    if (win && !command) {
       if (win.isMinimized()) win.restore()
+      if (!win.isVisible()) win.show()
       win.focus()
     }
+    if (command) sendPlayCommand(command)
   })
 
   app.whenReady().then(async () => {
@@ -163,13 +169,21 @@ if (!app.requestSingleInstanceLock()) {
     )
     await bootstrapRuntime()
 
-    // 权限收口：Electron 默认**放行全部权限请求**，而这个应用一个都用不到
-    // （无摄像头/麦克风/定位/通知/串口/HID）。显式全拒，比给 100 个通道做校验
+    // 权限收口：Electron 默认**放行全部权限请求**，而这个应用只需要
+    // `speaker-selection`（选择音频输出设备，见设置页「音频输出设备」）。
+    // 其余（摄像头/麦克风/定位/通知/串口/HID）全部拒绝——显式全拒比给 100 个通道做校验
     // 更直接地关掉一整类攻击面。登录窗的独立 partition 在 weblogin.ts 里单独设。
-    session.defaultSession.setPermissionRequestHandler((_contents, _permission, done) =>
-      done(false)
+    //
+    // 为什么必须放行这一项：拒绝之后 enumerateDevices 只会返回一个 id 和 label 都为空的
+    // 默认设备，输出设备下拉里就永远只有「系统默认」——功能看着有、实际用不了。
+    // speaker-selection 只影响「声音往哪个设备送」，不涉及任何采集。
+    const allowedPermissions: ReadonlySet<string> = new Set(['speaker-selection'])
+    session.defaultSession.setPermissionRequestHandler((_contents, permission, done) =>
+      done(allowedPermissions.has(permission))
     )
-    session.defaultSession.setPermissionCheckHandler(() => false)
+    session.defaultSession.setPermissionCheckHandler((_contents, permission) =>
+      allowedPermissions.has(permission)
+    )
 
     // 渲染/GPU 子进程崩溃：白屏、画面冻结最常见的两种真因，必须留痕
     app.on('render-process-gone', (_event, _contents, details) => {
@@ -196,10 +210,12 @@ if (!app.requestSingleInstanceLock()) {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IPC.downloadProgress, tasks)
       }
+      setTaskbarProgress(tasks)
     })
 
     const win = createMainWindow()
     createTray()
+    setupJumpList()
     registerGlobalShortcuts()
 
     // 截图模式（用于文档/回归检查）
