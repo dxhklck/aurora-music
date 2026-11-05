@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { LyricLine } from '@shared/types'
+import type { DesktopLyricStyle, LyricLine } from '@shared/types'
 import Icon from '../components/Icon.vue'
 import { findLyricIndex } from '@shared/lyric'
 
@@ -19,7 +19,32 @@ const artist = ref('')
 const locked = ref(false)
 const index = ref(-1)
 const closed = ref(false)
-const fontScale = ref(1)
+/**
+ * 外观全部来自设置；空串表示「跟随主题」，不是某个具体颜色。
+ * 这里留一份默认值，主窗口还没推 settings 时也能正常显示。
+ */
+const DEFAULT_STYLE: DesktopLyricStyle = {
+  scale: 1,
+  fontFamily: '',
+  color: '',
+  strokeWidth: 0.8,
+  strokeColor: '',
+  bilingual: 'stack',
+  karaokeColor: ''
+}
+const lyricStyle = ref<DesktopLyricStyle>({ ...DEFAULT_STYLE })
+const fontScale = computed(() => lyricStyle.value.scale)
+
+/** 把外观折成 CSS 变量；空项不写，交给主题默认值 */
+const lineVars = computed<Record<string, string>>(() => {
+  const style = lyricStyle.value
+  const vars: Record<string, string> = { '--ly-stroke-w': `${style.strokeWidth}px` }
+  if (style.fontFamily) vars.fontFamily = style.fontFamily
+  if (style.strokeColor) vars['--ly-stroke'] = style.strokeColor
+  if (style.color) vars['--ly-user'] = style.color
+  if (style.karaokeColor) vars['--ly-kara'] = style.karaokeColor
+  return vars
+})
 const karaoke = ref(false)
 const lineEl = ref<HTMLElement | null>(null)
 
@@ -58,6 +83,9 @@ function onState(payload: any): void {
     baseTime = Number(payload.time ?? 0)
     baseSentAt = Number(payload.sentAt ?? Date.now())
     if (typeof payload.locked === 'boolean') locked.value = payload.locked
+    if (payload.style && typeof payload.style === 'object') {
+      lyricStyle.value = { ...DEFAULT_STYLE, ...(payload.style as DesktopLyricStyle) }
+    }
     karaoke.value = lines.value.some((line) => Boolean(line.words?.length))
     tick()
   }
@@ -191,12 +219,21 @@ function ctxCloseLyric(): void {
   close()
 }
 
+function setScale(next: number): void {
+  // 与设置里的归一化精度一致（0.05），否则 1.15 会被存成 1.2
+  const scale = Math.min(1.6, Math.max(0.7, Math.round(next * 20) / 20))
+  if (scale === lyricStyle.value.scale) return
+  lyricStyle.value = { ...lyricStyle.value, scale }
+  // 立即落盘：以前字号只存在这个窗口的内存里，关掉重开就回到 1.0
+  void window.api.setSettings({ desktopLyricStyle: lyricStyle.value })
+}
+
 function bigger(): void {
-  fontScale.value = Math.min(1.6, fontScale.value + 0.1)
+  setScale(lyricStyle.value.scale + 0.1)
 }
 
 function smaller(): void {
-  fontScale.value = Math.max(0.7, fontScale.value - 0.1)
+  setScale(lyricStyle.value.scale - 0.1)
 }
 
 onMounted(async () => {
@@ -229,7 +266,7 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   <div
     class="lyric-window"
     :class="{ locked }"
-    :style="{ '--scale': fontScale }"
+    :style="{ '--scale': fontScale, ...lineVars }"
     @contextmenu="onDomContextMenu"
     @mousedown="onDragStart"
     @mousemove="onWinMouseMove"
@@ -270,7 +307,11 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
       </p>
       <template v-else>
         <p class="ghost prev">{{ prev?.text ?? '' }}</p>
-        <p ref="lineEl" class="line" :class="{ kara: karaoke && !!current.words }">
+        <p
+          ref="lineEl"
+          class="line"
+          :class="{ kara: karaoke && !!current.words, custom: !!lyricStyle.color }"
+        >
           <template v-if="karaoke && current.words">
             <span
               v-for="(w, wi) in current.words"
@@ -283,8 +324,14 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
             </span>
           </template>
           <template v-else>{{ current.text || '♪' }}</template>
+          <span
+            v-if="lyricStyle.bilingual === 'inline' && current.translation"
+            class="trans-inline"
+          >{{ current.translation }}</span>
         </p>
-        <p v-if="current.translation" class="trans">{{ current.translation }}</p>
+        <p v-if="lyricStyle.bilingual === 'stack' && current.translation" class="trans">
+          {{ current.translation }}
+        </p>
         <p class="ghost next">{{ next?.text ?? '' }}</p>
       </template>
     </div>
@@ -515,13 +562,22 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
      text-shadow 会画在背景之上——四个 1px 偏移的阴影副本等于把整个字形盖成实心块
      （实测字直接变黑板）；连环 drop-shadow 又会把光晕反复叠加，同样糊死。
      stroke 只画 1px 边缘、且可继承到逐字的 w-base / w-fill 子层，字心仍然是渐变。 */
-  -webkit-text-stroke: 0.8px var(--ly-outline);
+  -webkit-text-stroke: var(--ly-stroke-w, 0.8px) var(--ly-stroke, var(--ly-outline));
   paint-order: stroke fill;
   filter: drop-shadow(0 2px 6px var(--ly-glow-soft));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+}
+
+/* 自定义主色：关掉渐变，改纯色填充；描边仍然保留 */
+.line.custom {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  color: var(--ly-user);
+  -webkit-text-fill-color: var(--ly-user);
 }
 
 /* 逐字：关掉整行渐变，改由字层 clip-path 驱动 */
@@ -552,15 +608,23 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
   color: var(--ly-wbase);
   -webkit-text-fill-color: var(--ly-wbase);
 }
+/* 自定义主色时，未唱到的字也用它（否则逐字分行下主色设置会失效） */
+.line.custom .w-base {
+  color: var(--ly-user);
+  -webkit-text-fill-color: var(--ly-user);
+}
 .w-fill {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   left: 0;
-  /* 已唱部分带主题强调色：跟随音源/主题实时变化 */
-  color: color-mix(in srgb, var(--accent, #7c6cff) 42%, var(--ly-line-1));
-  -webkit-text-fill-color: color-mix(in srgb, var(--accent, #7c6cff) 42%, var(--ly-line-1));
+  /* 已唱部分：默认跟随强调色，可在设置里指定固定色 */
+  color: var(--ly-kara, color-mix(in srgb, var(--accent, #7c6cff) 42%, var(--ly-line-1)));
+  -webkit-text-fill-color: var(
+    --ly-kara,
+    color-mix(in srgb, var(--accent, #7c6cff) 42%, var(--ly-line-1))
+  );
   text-shadow: 0 2px 10px var(--ly-glow-soft);
   clip-path: inset(0 100% 0 0);
 }
@@ -583,6 +647,17 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
     0 0.8px 0 var(--ly-outline-soft),
     0 -0.8px 0 var(--ly-outline-soft),
     0 2px 10px var(--ly-glow);
+}
+
+/* 同行双语：跟在原文后面，字号收一半。父级是渐变字，必须显式给实色 */
+.trans-inline {
+  margin-left: 0.6em;
+  font-size: 0.52em;
+  font-weight: 500;
+  letter-spacing: 0;
+  background: none;
+  color: var(--ly-fg-2);
+  -webkit-text-fill-color: var(--ly-fg-2);
 }
 
 .ghost {

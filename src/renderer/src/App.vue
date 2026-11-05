@@ -51,6 +51,7 @@ function pushLyricState(): void {
     title: song?.name ?? '',
     artist: song?.artists.join(' / ') ?? '',
     locked: app.settings?.desktopLyricLocked ?? false,
+    style: app.settings?.desktopLyricStyle,
     // 强调色随 250ms 推送实时联动桌面歌词窗口（独立窗口拿不到 shellStyle；
     // 歌词窗口恒定深色，不推 themeMode）
     accent: app.accent[0],

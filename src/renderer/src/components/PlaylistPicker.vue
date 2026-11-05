@@ -10,13 +10,15 @@ const name = ref('')
 const input = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
 
-const song = computed(() => playlists.pickerSong)
+const songs = computed(() => playlists.pickerSongs)
+/** 只有一首时才在标题下显示歌名带动词，多首显示数量 */
+const single = computed(() => (songs.value.length === 1 ? songs.value[0] : null))
 
 async function addTo(id: string): Promise<void> {
-  if (!song.value || busy.value) return
+  if (!songs.value.length || busy.value) return
   busy.value = true
   try {
-    await playlists.addSongs(id, [song.value])
+    await playlists.addSongs(id, songs.value)
     playlists.closePicker()
   } finally {
     busy.value = false
@@ -25,11 +27,17 @@ async function addTo(id: string): Promise<void> {
 
 async function createAndAdd(): Promise<void> {
   const value = name.value.trim()
-  if (!value || !song.value || busy.value) return
+  if (!value || !songs.value.length || busy.value) return
   busy.value = true
   try {
-    const created = await playlists.create(value, [song.value])
-    if (created) app.toast(`已新建《${created.name}》并加入`, 'success')
+    const count = songs.value.length
+    const created = await playlists.create(value, songs.value)
+    if (created) {
+      app.toast(
+        count > 1 ? `已新建《${created.name}》并加入 ${count} 首` : `已新建《${created.name}》并加入`,
+        'success'
+      )
+    }
     name.value = ''
     playlists.closePicker()
   } finally {
@@ -38,11 +46,13 @@ async function createAndAdd(): Promise<void> {
 }
 
 function onKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && song.value) playlists.closePicker()
+  if (event.key === 'Escape' && songs.value.length) playlists.closePicker()
 }
 
-watch(song, async (value) => {
-  if (!value) return
+/* 每次打开都换成一个新数组，按引用监听才能覆盖「上一次也是单曲」的情况 */
+watch(songs, async (list) => {
+  name.value = ''
+  if (!list.length) return
   await nextTick()
   input.value?.focus()
 })
@@ -54,12 +64,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 <template>
   <Teleport to="body">
     <transition name="fade">
-      <div v-if="song" class="backdrop" @click.self="playlists.closePicker()">
+      <div v-if="songs.length" class="backdrop" @click.self="playlists.closePicker()">
         <div class="picker glass">
           <header>
             <div class="head-text">
-              <strong>加入歌单</strong>
-              <small class="truncate">{{ song.name }} · {{ song.artists.join(' / ') || '未知歌手' }}</small>
+              <strong>{{ songs.length > 1 ? `加入歌单（${songs.length} 首）` : '加入歌单' }}</strong>
+              <small class="truncate">
+                {{ single ? `${single.name} · ${single.artists.join(' / ') || '未知歌手'}` : '选择已有歌单追加，或在下方新建一个' }}
+              </small>
             </div>
             <button class="close" title="关闭" @click="playlists.closePicker()">
               <Icon name="close" :size="15" />
@@ -122,6 +134,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   flex-direction: column;
   gap: 14px;
   box-shadow: var(--shadow);
+  /* .glass 只有 4.5% 白（浅色主题是 5% 黑），叠在 60% 黑的遮罩上等于没有面板：
+     深色主题下糊成一片灰，浅色主题下更是深字压深底。这里改成近实心底。 */
+  background: var(--overlay-bg);
+  border: 1px solid var(--overlay-border);
 }
 
 header {
@@ -142,7 +158,7 @@ header {
 }
 .head-text small {
   font-size: 11.5px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .close {
@@ -151,10 +167,10 @@ header {
   border-radius: 8px;
   display: grid;
   place-items: center;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .close:hover {
-  background: var(--panel-strong);
+  background: var(--row-hover);
   color: var(--text);
 }
 
@@ -176,7 +192,7 @@ header {
   transition: background 0.15s;
 }
 .option:hover:not(:disabled) {
-  background: var(--panel-strong);
+  background: var(--row-hover);
   color: var(--text);
 }
 .option:disabled {
@@ -190,7 +206,8 @@ header {
 .option em {
   font-style: normal;
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--text-2);
+  opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
 
@@ -198,7 +215,7 @@ header {
   display: flex;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--overlay-border);
 }
 .create input {
   flex: 1;
@@ -206,14 +223,19 @@ header {
   height: 34px;
   padding: 0 12px;
   border-radius: 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  /* 输入框必须有可见的框：直接用 --panel 在实心面板上看不出边界 */
+  background: var(--input-bg);
+  border: 1px solid var(--border-strong);
   color: var(--text);
   font-size: 12.5px;
   outline: none;
 }
+.create input::placeholder {
+  color: var(--text-2);
+  opacity: 0.7;
+}
 .create input:focus {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: var(--panel-strong);
+  background: var(--input-bg);
 }
 </style>

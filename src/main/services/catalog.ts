@@ -13,6 +13,7 @@ import { ProviderError } from '../providers/types'
 import { TtlCache } from './cache'
 import { settings } from './settings'
 import { SourceScoreboard } from './source-score'
+import { snapshot as sourceHealthSnapshot } from './source-health'
 import { dedupeAlternatives, normalize, rankMatches } from './match'
 
 const searchCache = new TtlCache<SearchPage>(3 * 60_000, 120)
@@ -59,6 +60,29 @@ const BREAKER_MAX = 5 * 60_000
  * 没有它就只能按固定的「原生优先、引擎在后」猜。
  */
 const scoreboard = new SourceScoreboard()
+
+/**
+ * 巡检结果的降权（不是熔断）。
+ *
+ * 设置页每 12 小时给每个引擎源发一次最小搜索；连续两次「请求失败」说明源大概率挂了。
+ * 这里把它在换源候选里排到最后 30 分钟——**仍然会试**，只是不再排前面白等超时。
+ * 只认 fail 不认 empty：英文源搜不到中文词是正常的，不能因此降权。
+ */
+const HEALTH_DEMOTE_MS = 30 * 60_000
+let demotedCache = { at: 0, ids: new Set<string>() }
+
+function demotedSources(): Set<string> {
+  const now = Date.now()
+  if (now - demotedCache.at < 60_000) return demotedCache.ids
+  const ids = new Set<string>()
+  for (const item of sourceHealthSnapshot().items) {
+    if (item.state === 'fail' && item.streak >= 2 && now - item.checkedAt < HEALTH_DEMOTE_MS) {
+      ids.add(`mdl-${item.key}`)
+    }
+  }
+  demotedCache = { at: now, ids }
+  return ids
+}
 
 export interface SearchInput {
   platform: string
@@ -325,12 +349,16 @@ class CatalogService {
     // 引擎单次搜索可能几十秒，无节制地遍历 15 个源会让「换源」变成「卡死」。
     // 用户显式指定的优先源压在最前——实测分数只是默认排序，不能盖过人工偏好。
     const preferred = new Set(settings.get().preferredSources)
+    const demoted = demotedSources()
     const candidates = providers
       .streamCandidates(song.platform)
       .filter((candidate) => candidate.info.capabilities.search)
       .sort((a, b) => {
         const byPrefer = Number(!preferred.has(a.info.id)) - Number(!preferred.has(b.info.id))
         if (byPrefer !== 0) return byPrefer
+        // 巡检判定挂掉的源排最后：人工指定优先源仍然压过这条
+        const byHealth = Number(demoted.has(a.info.id)) - Number(demoted.has(b.info.id))
+        if (byHealth !== 0) return byHealth
         // 再按实测性价比（成功率 ÷ 中位耗时）；分数接近时回到「原生优先、引擎在后」。
         // 加死区是为了避免两个源分数抖动时来回换顺序，把结果变成随机。
         const diff = scoreboard.score(b.info.id) - scoreboard.score(a.info.id)

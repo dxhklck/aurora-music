@@ -109,6 +109,8 @@ export interface AuroraApi {
   enqueueDownloads(songs: Song[]): Promise<DownloadTask[]>
   listDownloads(): Promise<DownloadTask[]>
   cancelDownload(id: string): Promise<void>
+  pauseDownload(id: string): Promise<void>
+  resumeDownload(id: string): Promise<void>
   retryDownload(id: string): Promise<void>
   retryFailedDownloads(): Promise<number>
   removeDownload(id: string): Promise<void>
@@ -173,6 +175,12 @@ export interface AuroraApi {
   listPlaylists(): Promise<Playlist[]>
   createPlaylist(name: string, songs?: Song[]): Promise<Playlist[]>
   renamePlaylist(id: string, name: string): Promise<Playlist[]>
+  updatePlaylistMeta(
+    id: string,
+    patch: { name?: string; description?: string; cover?: string }
+  ): Promise<Playlist[]>
+  /** 选一张本地图片当封面，返回 muse://local 地址；取消返回空串 */
+  choosePlaylistCover(): Promise<string>
   removePlaylist(id: string): Promise<Playlist[]>
   addPlaylistSongs(id: string, songs: Song[]): Promise<Playlist[]>
   removePlaylistSong(id: string, platform: string, songId: string): Promise<Playlist[]>
@@ -190,10 +198,12 @@ export interface AuroraApi {
    */
   exportPlaylistM3u(args: { id: string; name: string }): Promise<M3uExportResult>
   /** 从 M3U 导入成新歌单（会弹选择对话框），按路径匹配库内条目 */
-  importPlaylistM3u(): Promise<M3uImportResult>
+  importPlaylistM3u(targetId?: string): Promise<M3uImportResult>
 
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+  /** 重新注册全局快捷键（设置写完后调用），返回注册失败的组合键 */
+  applyShortcuts(): Promise<{ failed: string[] }>
 
   /** 写系统剪贴板（复制文件路径） */
   copyText(text: string): Promise<void>

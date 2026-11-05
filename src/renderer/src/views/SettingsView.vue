@@ -9,7 +9,8 @@ import { useLibraryStore } from '../stores/library'
 import { formatBytes } from '@shared/lyric'
 import type { EngineStatusView, SourceHealthView, UpdateStatusView } from '@shared/api'
 import { type QrLoginPlatform, type QrLoginState } from '@shared/types'
-import type { NeteaseAccountInfo } from '@shared/types'
+import type { DesktopLyricStyle, NeteaseAccountInfo } from '@shared/types'
+import type { AppSettings } from '@shared/types'
 import type { Quality } from '@shared/types'
 import { audio } from '../core/audio'
 import { listOutputDevices, type OutputDevice } from '../core/output'
@@ -45,7 +46,7 @@ const backupBusy = ref(false)
 /** 渲染层里值得带走的只有白名单这几项：主进程读不到 localStorage，必须由这边收集 */
 function collectLocal(): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const key of ['aurora.stats', 'aurora.recent', 'aurora.lyric-offsets']) {
+  for (const key of ['aurora.stats', 'aurora.recent', 'aurora.lyric-offsets', 'aurora.lyric-picks']) {
     const value = localStorage.getItem(key)
     if (value) out[key] = value
   }
@@ -249,6 +250,170 @@ function patchLoudness(on: boolean): void {
 /** 交叉淡化时长（秒，0 = 关）；播放器会在下一次选曲时读取新值 */
 function patchCrossfade(sec: number): void {
   void patch({ crossfadeSec: sec })
+}
+
+/* ---------- 桌面歌词外观 ----------
+   每次都提交完整对象：主进程按整体替换处理，只发半截会被 normalize 补成默认值。 */
+const LYRIC_FONTS: Array<{ value: string; label: string }> = [
+  { value: '', label: '系统默认' },
+  {
+    value: '"Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif',
+    label: '无衬线（黑体）'
+  },
+  {
+    value: '"Songti SC", SimSun, "Source Han Serif SC", serif',
+    label: '衬线（宋体）'
+  },
+  { value: 'KaiTi, "Kaiti SC", STKaiti, serif', label: '楷体' },
+  {
+    value: '"HarmonyOS Sans SC", "MiSans", "Microsoft YaHei", sans-serif',
+    label: '圆润无衬线'
+  }
+]
+
+function patchLyricStyle(next: Partial<DesktopLyricStyle>): void {
+  const current = settings.value?.desktopLyricStyle
+  if (!current) return
+  void patch({ desktopLyricStyle: { ...current, ...next } })
+}
+
+const EMPTY_LYRIC_STYLE: DesktopLyricStyle = {
+  scale: 1,
+  fontFamily: '',
+  color: '',
+  strokeWidth: 0.8,
+  strokeColor: '',
+  bilingual: 'stack',
+  karaokeColor: ''
+}
+const lyricStyle = computed(() => settings.value?.desktopLyricStyle ?? EMPTY_LYRIC_STYLE)
+
+/* ---------- 全局快捷键 ----------
+   录制而不是让用户手打 accelerator：手打拼错一个字母就静默不生效。 */
+type ShortcutKey = keyof AppSettings['shortcuts']
+const SHORTCUT_ITEMS: Array<{ key: ShortcutKey; label: string }> = [
+  { key: 'toggle', label: '播放 / 暂停' },
+  { key: 'prev', label: '上一首' },
+  { key: 'next', label: '下一首' }
+]
+const capturing = ref<ShortcutKey | ''>('')
+const isMac = window.api.platform === 'darwin'
+
+/** 设置里为空时显示平台默认值（实际注册也用它，见 main/shortcuts.ts） */
+function effectiveShortcut(key: ShortcutKey): string {
+  const saved = settings.value?.shortcuts?.[key]
+  if (saved) return saved
+  const mod = isMac ? 'Control+Command' : 'Control+Alt'
+  if (key === 'toggle') return `${mod}+P`
+  return key === 'prev' ? `${mod}+,` : `${mod}+.`
+}
+
+const ACCEL_LABELS: Record<string, string> = {
+  CommandOrControl: isMac ? '⌘' : 'Ctrl',
+  Control: 'Ctrl',
+  Command: '⌘',
+  Alt: isMac ? '⌥' : 'Alt',
+  Shift: 'Shift',
+  Left: '←',
+  Right: '→',
+  Up: '↑',
+  Down: '↓',
+  Space: '空格',
+  Comma: ',',
+  Period: '.'
+}
+
+function formatAccelerator(accelerator: string): string {
+  return accelerator
+    .split('+')
+    .map((part) => ACCEL_LABELS[part] ?? part)
+    .join(' + ')
+}
+
+function startCapture(key: ShortcutKey): void {
+  capturing.value = key
+}
+
+function keyName(event: KeyboardEvent): string | null {
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3)
+  if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5)
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(event.code)) return event.code
+  if (event.key.startsWith('Media')) return event.key
+  const map: Record<string, string> = {
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ' ': 'Space',
+    Enter: 'Return',
+    Backspace: 'Backspace',
+    Delete: 'Delete',
+    Tab: 'Tab',
+    ',': ',',
+    '.': '.',
+    '/': '/',
+    ';': ';',
+    "'": "'",
+    '[': '[',
+    ']': ']',
+    '\\': '\\',
+    '`': '`',
+    '-': '-',
+    '=': '='
+  }
+  return map[event.key] ?? null
+}
+
+function acceleratorFromEvent(event: KeyboardEvent): string | null {
+  if (['Control', 'Alt', 'Shift', 'Meta', 'ContextMenu'].includes(event.key)) return null
+  const parts: string[] = []
+  if (event.ctrlKey || event.metaKey) parts.push('CommandOrControl')
+  if (event.altKey) parts.push('Alt')
+  if (event.shiftKey) parts.push('Shift')
+  const key = keyName(event)
+  if (!key) return null
+  // 没有修饰键时只接受功能键与媒体键：把 A 设成全局播放键会吞掉所有输入
+  if (!parts.length && !/^(F\d{1,2}|Media\w+)$/.test(key)) return null
+  return [...parts, key].join('+')
+}
+
+async function onCaptureKey(event: KeyboardEvent): Promise<void> {
+  if (!capturing.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.key === 'Escape') {
+    capturing.value = ''
+    return
+  }
+  const accelerator = acceleratorFromEvent(event)
+  if (!accelerator) return
+  const key = capturing.value
+  capturing.value = ''
+  await saveShortcut(key, accelerator)
+}
+
+async function saveShortcut(key: ShortcutKey, accelerator: string): Promise<void> {
+  const current = settings.value?.shortcuts ?? { toggle: '', next: '', prev: '' }
+  // 与另外两项撞车时直接拒绝：同一个组合注册两次必然有一项失效
+  for (const item of SHORTCUT_ITEMS) {
+    if (item.key !== key && effectiveShortcut(item.key) === accelerator) {
+      app.toast(`与「${item.label}」重复，换一个组合`, 'error')
+      return
+    }
+  }
+  await patch({ shortcuts: { ...current, [key]: accelerator } })
+  const result = await window.api.applyShortcuts()
+  if (result.failed.length) {
+    app.toast(`注册失败（可能被其它软件占用）：${result.failed.join('、')}`, 'error')
+    return
+  }
+  app.toast(`快捷键已更新：${formatAccelerator(accelerator)}`, 'success')
+}
+
+async function resetShortcuts(): Promise<void> {
+  await patch({ shortcuts: { toggle: '', next: '', prev: '' } })
+  await window.api.applyShortcuts()
+  app.toast('已恢复默认快捷键', 'info')
 }
 
 async function probe(): Promise<void> {
@@ -573,6 +738,41 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <!-- 全局快捷键 -->
+    <section class="card block">
+      <div class="block-head">
+        <span class="ico"><Icon name="settings" :size="15" /></span>
+        <div>
+          <strong>全局快捷键</strong>
+          <small>任意应用中生效；点一下按钮再按下新组合，Esc 取消</small>
+        </div>
+      </div>
+
+      <div v-for="item in SHORTCUT_ITEMS" :key="item.key" class="row">
+        <label>{{ item.label }}</label>
+        <button
+          class="shortcut"
+          :class="{ capturing: capturing === item.key }"
+          @click="startCapture(item.key)"
+          @keydown="onCaptureKey"
+          @blur="capturing = ''"
+        >
+          {{
+            capturing === item.key ? '按下新组合键…' : formatAccelerator(effectiveShortcut(item.key))
+          }}
+        </button>
+      </div>
+
+      <div class="row">
+        <label>恢复默认</label>
+        <button class="btn" @click="resetShortcuts">恢复默认组合</button>
+      </div>
+
+      <p class="hint">
+        不带修饰键时只接受 F1–F12 与键盘媒体键，避免把普通字母变成全局热键。被其它软件占用的组合会提示注册失败。
+      </p>
+    </section>
+
     <!-- 播放 -->
     <section class="card block">
       <div class="block-head">
@@ -677,6 +877,142 @@ onBeforeUnmount(() => {
           @change="patch({ searchLimit: Number(($event.target as HTMLInputElement).value) })"
         />
       </div>
+    </section>
+
+    <!-- 桌面歌词外观 -->
+    <section class="card block">
+      <div class="block-head">
+        <span class="ico"><Icon name="lyrics" :size="15" /></span>
+        <div>
+          <strong>桌面歌词</strong>
+          <small>字号、字体、配色与描边，改动实时推送到歌词窗口</small>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>字号</label>
+        <div class="seg">
+          <button
+            v-for="item in [0.85, 1, 1.15, 1.3]"
+            :key="item"
+            :class="{ on: lyricStyle.scale === item }"
+            @click="patchLyricStyle({ scale: item })"
+          >
+            {{ Math.round(item * 100) }}%
+          </button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>字体</label>
+        <select
+          class="sel"
+          :value="lyricStyle.fontFamily"
+          @change="patchLyricStyle({ fontFamily: ($event.target as HTMLSelectElement).value })"
+        >
+          <option v-for="font in LYRIC_FONTS" :key="font.label" :value="font.value">
+            {{ font.label }}
+          </option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>文字颜色</label>
+        <div class="path">
+          <input
+            class="color"
+            type="color"
+            :value="lyricStyle.color || '#ffffff'"
+            title="选择文字颜色"
+            @input="patchLyricStyle({ color: ($event.target as HTMLInputElement).value })"
+          />
+          <button class="btn" :disabled="!lyricStyle.color" @click="patchLyricStyle({ color: '' })">
+            跟随主题
+          </button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>描边</label>
+        <div class="path">
+          <input
+            class="range"
+            type="range"
+            min="0"
+            max="3"
+            step="0.1"
+            :value="lyricStyle.strokeWidth"
+            @input="
+              patchLyricStyle({ strokeWidth: Number(($event.target as HTMLInputElement).value) })
+            "
+          />
+          <span class="val">{{ lyricStyle.strokeWidth.toFixed(1) }} px</span>
+          <input
+            class="color"
+            type="color"
+            :value="lyricStyle.strokeColor || '#000000'"
+            title="描边颜色"
+            @input="patchLyricStyle({ strokeColor: ($event.target as HTMLInputElement).value })"
+          />
+          <button
+            class="btn"
+            :disabled="!lyricStyle.strokeColor"
+            @click="patchLyricStyle({ strokeColor: '' })"
+          >
+            默认
+          </button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>双语排布</label>
+        <div class="seg">
+          <button
+            :class="{ on: lyricStyle.bilingual === 'stack' }"
+            @click="patchLyricStyle({ bilingual: 'stack' })"
+          >
+            上下
+          </button>
+          <button
+            :class="{ on: lyricStyle.bilingual === 'inline' }"
+            @click="patchLyricStyle({ bilingual: 'inline' })"
+          >
+            同行
+          </button>
+          <button
+            :class="{ on: lyricStyle.bilingual === 'off' }"
+            @click="patchLyricStyle({ bilingual: 'off' })"
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>逐字扫光颜色</label>
+        <div class="path">
+          <input
+            class="color"
+            type="color"
+            :value="lyricStyle.karaokeColor || '#7c6cff'"
+            title="逐字歌词已唱部分的颜色"
+            @input="
+              patchLyricStyle({ karaokeColor: ($event.target as HTMLInputElement).value })
+            "
+          />
+          <button
+            class="btn"
+            :disabled="!lyricStyle.karaokeColor"
+            @click="patchLyricStyle({ karaokeColor: '' })"
+          >
+            跟随强调色
+          </button>
+        </div>
+      </div>
+
+      <p class="hint">
+        空着的颜色一律「跟随主题」，切深浅色时不会留下写死的白字。逐字扫光只对带逐字时间轴的歌词生效（网易云 / QQ）。
+      </p>
     </section>
 
     <!-- 下载 -->
@@ -1283,6 +1619,61 @@ onBeforeUnmount(() => {
   color: var(--text);
   font-size: 12px;
   text-align: center;
+}
+
+/* 颜色选择器：原生彩块默认又厚又圆，压成和按钮同高的小方片 */
+.color {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+.color::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.color::-webkit-color-swatch {
+  border: none;
+  border-radius: 5px;
+}
+
+/* 描边滑块：默认轨道在深色下几乎看不见，自己画 */
+.range {
+  width: 132px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.val {
+  min-width: 42px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+/* 快捷键录制按钮：平时像输入框，录制中给出明确的强调色边框 */
+.shortcut {
+  min-width: 168px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  transition: all 0.16s var(--ease);
+}
+.shortcut:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.shortcut.capturing {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* 设备名可能很长，限宽 + 省略号；option 必须显式上色，深色主题下原生下拉默认白底白字 */

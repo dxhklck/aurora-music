@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import type { Song } from '@shared/types'
 import Icon from './Icon.vue'
 import CoverArt from './CoverArt.vue'
 import { usePlayerStore } from '../stores/player'
+import { usePlaylistStore } from '../stores/playlists'
+import { useDownloadStore } from '../stores/download'
+import { useSearchStore } from '../stores/search'
 import { formatDuration } from '@shared/lyric'
 
 const player = usePlayerStore()
+const playlists = usePlaylistStore()
+const download = useDownloadStore()
+const search = useSearchStore()
+const router = useRouter()
 
 /**
  * 用 uid 判断「正在播的那行」，不用 platform:id——
@@ -42,20 +51,83 @@ function onDragEnd(): void {
   dragOver.value = null
 }
 
-/* ---------------- 存为歌单 ---------------- */
-const saving = ref(false)
-const saveName = ref('')
-const nameInput = ref<HTMLInputElement | null>(null)
+/* ---------------- 行内操作 ----------------
+   和歌曲列表同一套图标语义：收藏 / 加入歌单 / 下载 / 搜索 / 移出队列 */
 
-function startSave(): void {
-  if (!player.queue.length) return
-  saving.value = true
-  saveName.value = ''
-  void nextTick(() => nameInput.value?.focus())
+function downloadSong(song: Song): void {
+  void download.enqueue(song)
 }
 
-async function confirmSave(): Promise<void> {
-  if (await player.saveQueueAsPlaylist(saveName.value)) saving.value = false
+/** 拿歌名 + 歌手回搜索页再搜一遍（找同名翻唱、其它演绎） */
+function searchSong(song: Song): void {
+  const keyword = [song.name, ...song.artists].filter(Boolean).join(' ').trim()
+  if (!keyword) return
+  player.showQueue = false
+  void router.push({ name: 'search' })
+  void search.run(keyword)
+}
+
+/**
+ * 整批存歌单：走和单曲「加入歌单」同一个面板，
+ * 既能追加到已有歌单，也能在面板里新建一个，不再只有「新建」一条路。
+ * uid 是会话内的定位标记，落盘前剥掉。
+ */
+function saveToPlaylist(): void {
+  if (!player.queue.length) return
+  playlists.openPicker(player.queue.map(({ uid: _uid, ...song }) => song))
+}
+
+/* ---------------- 多选 ----------------
+   队列里同一首歌可以出现多次，选中项按 uid 记，不按 platform:id。 */
+const selecting = ref(false)
+const selected = ref(new Set<string>())
+
+const selectedCount = computed(() => selected.value.size)
+const allSelected = computed(
+  () => player.queue.length > 0 && selected.value.size === player.queue.length
+)
+
+function toggleSelecting(): void {
+  selecting.value = !selecting.value
+  if (!selecting.value) selected.value.clear()
+}
+
+function togglePick(uid: string): void {
+  if (!selecting.value) return
+  if (selected.value.has(uid)) selected.value.delete(uid)
+  else selected.value.add(uid)
+}
+
+function toggleAll(): void {
+  if (allSelected.value) selected.value.clear()
+  else selected.value = new Set(player.queue.map((song) => song.uid))
+}
+
+/** 选中项转成干净 Song（剥掉 uid），三个批量动作共用 */
+function pickedSongs(): Song[] {
+  return player.queue
+    .filter((song) => selected.value.has(song.uid))
+    .map(({ uid: _uid, ...song }) => song)
+}
+
+function removePicked(): void {
+  if (!selected.value.size) return
+  player.removeMany([...selected.value])
+  selected.value.clear()
+}
+
+function downloadPicked(): void {
+  const songs = pickedSongs()
+  if (!songs.length) return
+  void download.enqueueMany(songs)
+  selected.value.clear()
+}
+
+function savePicked(): void {
+  const songs = pickedSongs()
+  if (!songs.length) return
+  playlists.openPicker(songs)
+  selected.value.clear()
 }
 </script>
 
@@ -68,7 +140,15 @@ async function confirmSave(): Promise<void> {
           <small>{{ player.queue.length }} 首</small>
         </div>
         <div class="row" style="gap: 4px">
-          <button class="icon-btn" title="存为歌单" @click="startSave">
+          <button
+            class="icon-btn"
+            :class="{ on: selecting }"
+            :title="selecting ? '退出多选' : '多选'"
+            @click="toggleSelecting"
+          >
+            <Icon name="check" :size="16" />
+          </button>
+          <button class="icon-btn" title="存为歌单" @click="saveToPlaylist">
             <Icon name="plus" :size="16" />
           </button>
           <button class="icon-btn" title="清空" @click="player.clearQueue()">
@@ -80,17 +160,16 @@ async function confirmSave(): Promise<void> {
         </div>
       </header>
 
-      <div v-if="saving" class="save-row">
-        <input
-          ref="nameInput"
-          v-model="saveName"
-          placeholder="歌单名称"
-          maxlength="40"
-          @keydown.enter="confirmSave"
-          @keydown.esc="saving = false"
-        />
-        <button class="save-btn" @click="confirmSave">保存</button>
-        <button class="save-btn ghost" @click="saving = false">取消</button>
+      <div v-if="selecting" class="bulk">
+        <button class="bulk-all" @click="toggleAll">
+          {{ allSelected ? '取消全选' : '全选' }}
+        </button>
+        <span class="bulk-count">已选 {{ selectedCount }} 首</span>
+        <div class="bulk-acts">
+          <button :disabled="!selectedCount" @click="removePicked">移出</button>
+          <button :disabled="!selectedCount" @click="downloadPicked">下载</button>
+          <button :disabled="!selectedCount" @click="savePicked">存歌单</button>
+        </div>
       </div>
 
       <div class="list">
@@ -101,21 +180,27 @@ async function confirmSave(): Promise<void> {
           :class="{
             playing: song.uid === currentUid,
             dragging: dragFrom === index,
-            'drop-target': dragOver === index && dragFrom !== index
+            'drop-target': dragOver === index && dragFrom !== index,
+            selecting,
+            picked: selected.has(song.uid)
           }"
-          draggable="true"
+          :draggable="!selecting"
           @dragstart="onDragStart(index, $event)"
           @dragover.prevent="onDragOver(index)"
           @drop.prevent="onDrop(index)"
           @dragend="onDragEnd"
-          @dblclick="player.playAt(index)"
+          @click="togglePick(song.uid)"
+          @dblclick="!selecting && player.playAt(index)"
         >
-          <button class="idx" @click="player.playAt(index)">
+          <button v-if="!selecting" class="idx" @click.stop="player.playAt(index)">
             <span v-if="song.uid === currentUid && player.playing" class="eq">
               <i /><i /><i />
             </span>
             <Icon v-else name="play" :size="12" />
           </button>
+          <span v-else class="pick" :class="{ on: selected.has(song.uid) }">
+            <Icon v-if="selected.has(song.uid)" name="check" :size="11" />
+          </span>
           <CoverArt
             :src="song.coverUrl"
             :seed="`${song.platform}:${song.id}`"
@@ -128,9 +213,28 @@ async function confirmSave(): Promise<void> {
             <small class="truncate">{{ song.artists.join(' / ') }}</small>
           </div>
           <span class="dur">{{ formatDuration(song.duration) }}</span>
-          <button class="remove" @click.stop="player.removeAt(index)">
-            <Icon name="close" :size="13" />
-          </button>
+          <span v-if="!selecting" class="acts">
+            <button
+              class="act fav"
+              :class="{ on: playlists.isFavorite(song) }"
+              :title="playlists.isFavorite(song) ? '取消收藏' : '收藏到我喜欢'"
+              @click.stop="playlists.toggleFavorite(song)"
+            >
+              <Icon :name="playlists.isFavorite(song) ? 'heart-filled' : 'heart'" :size="14" />
+            </button>
+            <button class="act" title="加入歌单" @click.stop="playlists.openPicker(song)">
+              <Icon name="playlist-add" :size="14" />
+            </button>
+            <button class="act" title="下载" @click.stop="downloadSong(song)">
+              <Icon name="download" :size="14" />
+            </button>
+            <button class="act" title="搜索这首歌（歌名 + 歌手）" @click.stop="searchSong(song)">
+              <Icon name="search" :size="14" />
+            </button>
+            <button class="act" title="移出队列" @click.stop="player.removeAt(index)">
+              <Icon name="trash" :size="14" />
+            </button>
+          </span>
         </div>
 
         <div v-if="!player.queue.length" class="empty">
@@ -147,7 +251,8 @@ async function confirmSave(): Promise<void> {
   position: fixed;
   right: 16px;
   bottom: calc(var(--player) + 6px);
-  width: 380px;
+  /* 420：留出行内 5 个操作图标的位置后，歌名仍有 150px 左右 */
+  width: 420px;
   /* 手机窄屏（≤640px）不能超出视口，留出左右 12px 呼吸 */
   max-width: calc(100vw - 24px);
   max-height: min(62vh, 560px);
@@ -156,8 +261,9 @@ async function confirmSave(): Promise<void> {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);
-  /* 跟随深浅主题：--bg-elev 在浅色下是白色系，深色下是深色面板 */
-  background: var(--bg-elev);
+  /* 近实心底：0.72 的半透明叠在亮色页面上会糊成灰，正文对比度直接掉没 */
+  background: var(--overlay-bg);
+  border: 1px solid var(--overlay-border);
   backdrop-filter: blur(26px) saturate(1.4);
   -webkit-backdrop-filter: blur(26px) saturate(1.4);
   overflow: hidden;
@@ -176,7 +282,12 @@ async function confirmSave(): Promise<void> {
 .head small {
   margin-left: 8px;
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--text-2);
+}
+/* 头部图标按钮的「开启」态（多选） */
+.icon-btn.on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .list {
@@ -186,6 +297,7 @@ async function confirmSave(): Promise<void> {
 }
 
 .item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -194,11 +306,25 @@ async function confirmSave(): Promise<void> {
   transition: background 0.16s;
 }
 .item:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: var(--row-hover);
+}
+/* 正在播放：整行强调色底 + 左侧竖条。只染歌名时在一片灰里根本指不出是哪一行 */
+.item.playing {
+  background: var(--row-active);
+}
+.item.playing::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
 }
 .item.playing .text strong {
   /* 混 text 而不是纯白：浅色主题下才不会糊成一片浅色 */
-  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
 }
 
 /* 拖拽重排：拖动项淡出，落点在顶部画一条高亮线（比整块描边更接近「插到这里」） */
@@ -212,43 +338,79 @@ async function confirmSave(): Promise<void> {
   box-shadow: inset 0 2px 0 var(--accent);
 }
 
-/* 存为歌单的内联输入行 */
-.save-row {
-  display: flex;
-  gap: 6px;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
+/* 多选态：整行可点，选中行用强调色底标出来 */
+.item.selecting {
+  cursor: pointer;
 }
-.save-row input {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--text);
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
+.item.picked {
+  background: var(--row-active);
 }
-.save-row input:focus {
+.item.picked .text strong {
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
+}
+
+.pick {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  transition: background 0.12s, border-color 0.12s;
+}
+.pick.on {
+  background: var(--accent);
   border-color: var(--accent);
 }
-.save-btn {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  background: var(--accent);
-  color: #fff;
-  white-space: nowrap;
+
+/* 批量条：和头部区分开，只在多选时出现 */
+.bulk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
 }
-.save-btn.ghost {
-  background: transparent;
+.bulk-all {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
   border: 1px solid var(--border);
   color: var(--text-2);
+  font-size: 11px;
 }
+.bulk-all:hover {
+  background: var(--panel-strong);
+  color: var(--text);
+}
+.bulk-count {
+  color: var(--text-3);
+}
+.bulk-acts {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.bulk-acts button {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.bulk-acts button:hover:not(:disabled) {
+  background: var(--panel-strong);
+  color: var(--text);
+}
+.bulk-acts button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
 
 .idx {
   width: 22px;
@@ -304,30 +466,43 @@ async function confirmSave(): Promise<void> {
 }
 .text small {
   font-size: 10.5px;
-  color: var(--text-3);
+  /* 歌手从 0.4 提到 0.66：小字再叠低透明度，等于看不见 */
+  color: var(--text-2);
 }
 
 .dur {
   font-size: 10.5px;
-  color: var(--text-3);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
-.remove {
+/* 行内操作：与歌曲列表同一套图标，悬停才浮出（行宽只够 5 个 22px） */
+.acts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 1px;
   opacity: 0;
-  color: var(--text-3);
+  transition: opacity 0.14s;
+}
+.item:hover .acts {
+  opacity: 1;
+}
+.act {
   width: 22px;
   height: 22px;
   border-radius: 6px;
   display: grid;
   place-items: center;
+  color: var(--text-2);
+  transition: color 0.14s, background 0.14s;
 }
-.item:hover .remove {
-  opacity: 1;
-}
-.remove:hover {
-  background: var(--panel-strong);
+.act:hover {
   color: var(--text);
+  background: var(--panel-strong);
+}
+.act.fav.on {
+  color: var(--accent);
 }
 
 .slide-enter-active,

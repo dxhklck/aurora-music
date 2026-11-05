@@ -94,6 +94,11 @@ class DownloadManager extends EventEmitter {
     if (existing && (existing.status === 'downloading' || existing.status === 'queued')) {
       return this.publicTask(existing)
     }
+    // 暂停过的任务再点一次下载 = 接着下，不要新建一个把进度重置掉
+    if (existing && existing.status === 'paused') {
+      this.resume(id)
+      return this.publicTask(existing)
+    }
     if (existing && existing.status === 'done' && existing.filePath && existsSync(existing.filePath)) {
       return this.publicTask(existing)
     }
@@ -141,15 +146,54 @@ class DownloadManager extends EventEmitter {
   cancel(id: string): void {
     const task = this.tasks.get(id)
     if (!task) return
-    if (task.status === 'queued') {
+    if (task.status === 'queued' || task.status === 'paused') {
       this.queue = this.queue.filter((item) => item !== id)
       task.status = 'canceled'
+      task.speed = 0
+      // 暂停中的半截文件没人接管了，顺手清掉，避免磁盘上留垃圾
+      void safeUnlink(task.partPath ?? '')
       this.scheduleEmit(true)
       this.schedulePersist()
       return
     }
     task.status = 'canceled'
     task.controller?.abort()
+    this.scheduleEmit(true)
+    this.schedulePersist()
+  }
+
+  /**
+   * 暂停：保留 `.part`，恢复时按 Range 从断点续；排队中的直接移出队列。
+   * 与取消的区别只有一件事——文件留不留。
+   */
+  pause(id: string): void {
+    const task = this.tasks.get(id)
+    if (!task) return
+    if (task.status === 'queued') {
+      this.queue = this.queue.filter((item) => item !== id)
+      task.status = 'paused'
+      this.scheduleEmit(true)
+      this.schedulePersist()
+      return
+    }
+    if (task.status !== 'downloading') return
+    task.status = 'paused'
+    task.speed = 0
+    task.controller?.abort()
+    this.scheduleEmit(true)
+    this.schedulePersist()
+  }
+
+  /** 恢复：回到排队，transfer 会从已有 `.part` 的长度接着要数据 */
+  resume(id: string): void {
+    const task = this.tasks.get(id)
+    if (!task || task.status !== 'paused') return
+    task.status = 'queued'
+    task.error = undefined
+    task.attempt = 0
+    task.speed = 0
+    if (!this.queue.includes(id)) this.queue.push(id)
+    this.pump()
     this.scheduleEmit(true)
     this.schedulePersist()
   }
@@ -195,6 +239,7 @@ class DownloadManager extends EventEmitter {
   remove(id: string): void {
     const task = this.tasks.get(id)
     if (task && (task.status === 'downloading' || task.status === 'queued')) this.cancel(id)
+    if (task && task.status === 'paused') void safeUnlink(task.partPath ?? '')
     this.tasks.delete(id)
     this.scheduleEmit(true)
     this.schedulePersist()
@@ -223,6 +268,8 @@ class DownloadManager extends EventEmitter {
         await safeUnlink(task.partPath ?? '')
         return
       }
+      // pump 取走任务与 pause 之间有个窗口：已暂停就别再开下载
+      if (task.status === 'paused') return
       task.attempt = attempt
       task.status = 'downloading'
       task.error = undefined
@@ -231,8 +278,16 @@ class DownloadManager extends EventEmitter {
         await this.transfer(task)
         return
       } catch (error) {
+        // 状态可能被 cancel()/pause() 在 await 期间改掉，TS 的窄化不适用
         if ((task.status as string) === 'canceled') {
           await safeUnlink(task.partPath ?? '')
+          this.scheduleEmit(true)
+          this.schedulePersist()
+          return
+        }
+        // 暂停也会 abort，但半截文件要留着——交给 resume 续传，不当失败处理
+        if ((task.status as string) === 'paused') {
+          task.speed = 0
           this.scheduleEmit(true)
           this.schedulePersist()
           return

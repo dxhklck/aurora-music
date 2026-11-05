@@ -66,7 +66,8 @@ export const GUIDE: GuideSection[] = [
           '↑ / ↓　音量 ±5%',
           'F1　打开本指南',
           'Ctrl + Alt + P　全局播放 / 暂停（macOS 为 Control + Command）',
-          'Ctrl + Alt + ← / →　全局上一首 / 下一首',
+          'Ctrl + Alt + , / .　全局上一首 / 下一首',
+          '设置 → 全局快捷键　可以把上面三条改成自己的组合',
           '键盘媒体键　播放 / 上一首 / 下一首'
         ]
       }

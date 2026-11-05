@@ -92,13 +92,17 @@ export async function exportPlaylistToM3u(id: string, filePath: string): Promise
 }
 
 /**
- * 从 M3U 导入成新歌单。
+ * 从 M3U 导入。
  *
+ * 给了 `targetId` 就追加到那个歌单（收藏夹也允许），否则新建一个。
  * 路径匹配优先按完整路径（大小写与分隔符不敏感），失败再按「同目录 + 同文件名」
  * 兜一次——用户在另一台机器上导出的 M3U 往往目录不同但文件名不变。
  * 两次都匹配不上就算 missing，并在返回值里如实报数量。
  */
-export async function importM3uFromFile(filePath: string): Promise<M3uImportResult> {
+export async function importM3uFromFile(
+  filePath: string,
+  targetId?: string
+): Promise<M3uImportResult> {
   const text = await readFile(filePath, 'utf8')
   const entries = parseM3u(text)
   const baseDir = dirname(resolve(filePath))
@@ -138,7 +142,19 @@ export async function importM3uFromFile(filePath: string): Promise<M3uImportResu
 
   const rawName = basename(filePath, extname(filePath)).trim() || '导入的歌单'
   if (!songs.length) {
-    return { playlistId: null, name: rawName, total: entries.length, matched: 0, missing }
+    return { playlistId: targetId ?? null, name: rawName, total: entries.length, matched: 0, missing }
+  }
+
+  const target = targetId ? playlists.list().find((item) => item.id === targetId) : null
+  if (target) {
+    await playlists.addSongs(target.id, songs)
+    return {
+      playlistId: target.id,
+      name: target.name,
+      total: entries.length,
+      matched: songs.length,
+      missing
+    }
   }
 
   const before = new Set(playlists.list().map((item) => item.id))

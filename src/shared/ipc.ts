@@ -19,6 +19,8 @@ export const IPC = {
   downloadEnqueueMany: 'download:enqueue-many',
   downloadList: 'download:list',
   downloadCancel: 'download:cancel',
+  downloadPause: 'download:pause',
+  downloadResume: 'download:resume',
   downloadRetry: 'download:retry',
   downloadRetryFailed: 'download:retry-failed',
   downloadRemove: 'download:remove',
@@ -76,6 +78,8 @@ export const IPC = {
   playlistList: 'playlist:list',
   playlistCreate: 'playlist:create',
   playlistRename: 'playlist:rename',
+  playlistUpdateMeta: 'playlist:update-meta',
+  playlistChooseCover: 'playlist:choose-cover',
   playlistRemove: 'playlist:remove',
   playlistAddSongs: 'playlist:add-songs',
   playlistRemoveSong: 'playlist:remove-song',
@@ -89,6 +93,7 @@ export const IPC = {
   // 设置
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  shortcutsApply: 'shortcuts:apply',
   settingsChanged: 'settings:changed',
 
   // 窗口

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, globalShortcut, session } from 'electron'
+import { app, BrowserWindow, Menu, session } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { writeFile, readFile } from 'node:fs/promises'
@@ -18,6 +18,7 @@ import { runSelfTest } from './selftest'
 import { initUpdater } from './updater'
 import { logger } from './services/logger'
 import { parseJumpCommand, sendPlayCommand, setTaskbarProgress, setupJumpList } from './taskbar'
+import { clearShortcuts, reregisterShortcuts } from './shortcuts'
 
 /**
  * 全局异常兜底：先落盘再决定怎么办。
@@ -74,29 +75,12 @@ if (process.env.AURORA_SELFTEST) {
 
 /**
  * 全局媒体快捷键：在任意应用中控制播放。
- * 与托盘菜单复用同一条 IPC 命令通道（命令由渲染进程的 player store 执行）。
- * 组合键被其它程序占用时单个跳过并告警，不阻塞启动；用户可在对应软件里改键位。
+ * 具体组合键来自设置（可改），默认值与历史行为一致。
  */
 function registerGlobalShortcuts(): void {
-  const mod = process.platform === 'darwin' ? 'Control+Command' : 'Control+Alt'
-  const bindings: Array<[string, 'toggle' | 'next' | 'prev']> = [
-    [`${mod}+P`, 'toggle'],
-    [`${mod}+Left`, 'prev'],
-    [`${mod}+Right`, 'next'],
-    // 键盘媒体键：笔记本/耳机的播放暂停键，无需组合键
-    ['MediaPlayPause', 'toggle'],
-    ['MediaPreviousTrack', 'prev'],
-    ['MediaNextTrack', 'next']
-  ]
-  for (const [accelerator, command] of bindings) {
-    const ok = globalShortcut.register(accelerator, () => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-          win.webContents.send(IPC.trayCommand, command)
-        }
-      }
-    })
-    if (!ok) process.stdout.write(`[shortcut] 注册失败（可能被占用）：${accelerator}\n`)
+  const failed = reregisterShortcuts()
+  for (const accelerator of failed) {
+    process.stdout.write(`[shortcut] 注册失败（可能被占用）：${accelerator}\n`)
   }
 }
 
@@ -275,7 +259,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     if (quitting) return
     quitting = true
-    globalShortcut.unregisterAll()
+    clearShortcuts()
     event.preventDefault()
     void (async () => {
       await downloads.flush().catch(() => undefined)

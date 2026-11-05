@@ -9,6 +9,13 @@
   --panel-strong: rgba(255, 255, 255, 0.08);
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
+  /* 浮层底色（队列抽屉 / 迷你播放器面板）：半透明叠在亮色页面或壁纸上会糊成一片灰，
+     0.96 近乎实心，既保留一点透光感，又让正文对比度回到可读范围 */
+  --overlay-bg: rgba(17, 17, 24, 0.96);
+  --overlay-border: rgba(255, 255, 255, 0.1);
+  /* 列表行：悬停用中性提亮、正在播放用强调色，两者才区分得开 */
+  --row-hover: rgba(255, 255, 255, 0.1);
+  --row-active: color-mix(in srgb, var(--accent) 18%, transparent);
   --text: #f4f5f9;
   --text-2: rgba(244, 245, 249, 0.66);
   --text-3: rgba(244, 245, 249, 0.4);
@@ -68,6 +75,10 @@ html[data-theme='light'] {
   --panel-strong: rgba(20, 24, 40, 0.1);
   --border: rgba(20, 24, 40, 0.12);
   --border-strong: rgba(20, 24, 40, 0.22);
+  --overlay-bg: rgba(252, 252, 255, 0.97);
+  --overlay-border: rgba(20, 24, 40, 0.12);
+  --row-hover: rgba(20, 24, 40, 0.07);
+  --row-active: color-mix(in srgb, var(--accent) 14%, transparent);
   --text: #1c1f2a;
   --text-2: rgba(28, 31, 42, 0.68);
   --text-3: rgba(28, 31, 42, 0.42);

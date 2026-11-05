@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { readFile, writeFile, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import type { AppSettings } from '@shared/types'
+import type { AppSettings, DesktopLyricStyle } from '@shared/types'
 
 /** 均衡器固定五段，增益必须恒为 5 个数字：长度不对时 setEqualizer 会静默不生效 */
 const EQ_BANDS = 5
@@ -29,6 +29,39 @@ function normalizeSources(input: unknown): string[] {
   return [...seen]
 }
 
+/**
+ * 桌面歌词外观。范围与枚举都收一遍：settings.json 被手改过时
+ * 不能让 NaN 或 'stackk' 流进 CSS/模板（表现是整行字消失或译文不显示）。
+ */
+function normalizeLyricStyle(input: unknown): DesktopLyricStyle {  const source = (input ?? {}) as Partial<DesktopLyricStyle>
+  const scale = Number(source.scale)
+  const strokeWidth = Number(source.strokeWidth)
+  const color = typeof source.color === 'string' ? source.color.trim().slice(0, 32) : ''
+  const strokeColor =
+    typeof source.strokeColor === 'string' ? source.strokeColor.trim().slice(0, 32) : ''
+  const karaokeColor =
+    typeof source.karaokeColor === 'string' ? source.karaokeColor.trim().slice(0, 32) : ''
+  return {
+    // 0.05 一档：界面里有 115%，按 0.1 取整会把用户的选择改成 120%
+    scale: Number.isFinite(scale) ? Math.min(1.6, Math.max(0.7, Math.round(scale * 20) / 20)) : 1,
+    fontFamily: typeof source.fontFamily === 'string' ? source.fontFamily.slice(0, 80) : '',
+    color: /^#[0-9a-f]{6}$/i.test(color) ? color : '',
+    strokeWidth: Number.isFinite(strokeWidth)
+      ? Math.min(3, Math.max(0, Math.round(strokeWidth * 10) / 10))
+      : 0.8,
+    strokeColor: /^#[0-9a-f]{6}$/i.test(strokeColor) ? strokeColor : '',
+    bilingual: source.bilingual === 'inline' || source.bilingual === 'off' ? source.bilingual : 'stack',
+    karaokeColor: /^#[0-9a-f]{6}$/i.test(karaokeColor) ? karaokeColor : ''
+  }
+}
+
+/** 快捷键：空串是合法值（= 平台默认），但不能让非字符串流进去 */
+function normalizeShortcuts(input: unknown): AppSettings['shortcuts'] {
+  const source = (input ?? {}) as Record<string, unknown>
+  const pick = (value: unknown): string => (typeof value === 'string' ? value.trim().slice(0, 60) : '')
+  return { toggle: pick(source.toggle), next: pick(source.next), prev: pick(source.prev) }
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   // 首次启动落到一个真实音源。demo（离线演示）是 hidden 的，不在切换列表里，
   // 当默认值会让侧栏显示的源与实际使用的源不一致——全新安装打开只有 3 首 40 秒的曲子。
@@ -48,6 +81,16 @@ const DEFAULT_SETTINGS: AppSettings = {
   crossfadeSec: 0,
   desktopLyricLocked: false,
   desktopLyricMode: 'mini',
+  desktopLyricStyle: {
+    scale: 1,
+    fontFamily: '',
+    color: '',
+    strokeWidth: 0.8,
+    strokeColor: '',
+    bilingual: 'stack',
+    karaokeColor: ''
+  },
+  shortcuts: { toggle: '', next: '', prev: '' },
   nowPlayingStyle: 'vinyl',
   playerTheme: 'aurora',
   themeMode: 'dark',
@@ -92,6 +135,8 @@ class SettingsService {
     // 老版本 settings.json 没有这个字段，或者只存了一半：统一补成合法形态
     this.cache.equalizer = normalizeEqualizer(this.cache.equalizer)
     this.cache.preferredSources = normalizeSources(this.cache.preferredSources)
+    this.cache.desktopLyricStyle = normalizeLyricStyle(this.cache.desktopLyricStyle)
+    this.cache.shortcuts = normalizeShortcuts(this.cache.shortcuts)
     if (typeof this.cache.updateChannel !== 'string') this.cache.updateChannel = ''
     // 老版本没有输出设备字段：缺了就是系统默认，别让 undefined 流到 enumerateDevices 的比较里
     if (typeof this.cache.audioOutputId !== 'string') this.cache.audioOutputId = ''
@@ -114,6 +159,10 @@ class SettingsService {
       ...patch,
       equalizer: normalizeEqualizer(patch.equalizer ?? this.cache.equalizer),
       preferredSources: normalizeSources(patch.preferredSources ?? this.cache.preferredSources),
+      desktopLyricStyle: normalizeLyricStyle(
+        patch.desktopLyricStyle ?? this.cache.desktopLyricStyle
+      ),
+      shortcuts: normalizeShortcuts(patch.shortcuts ?? this.cache.shortcuts),
       loudnessNorm: patch.loudnessNorm === undefined ? this.cache.loudnessNorm : Boolean(patch.loudnessNorm),
       crossfadeSec: (() => {
         const incoming = patch.crossfadeSec ?? this.cache.crossfadeSec

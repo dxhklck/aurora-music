@@ -14,8 +14,8 @@ const keyOf = (song: Song): string => `${song.platform}:${song.id}`
 export const usePlaylistStore = defineStore('playlists', () => {
   const items = ref<Playlist[]>([])
   const loaded = ref(false)
-  /** 待加入歌单的歌曲：非空时弹出选择器 */
-  const pickerSong = ref<Song | null>(null)
+  /** 待加入歌单的歌曲：非空时弹出选择器。队列整批存歌单也走这里 */
+  const pickerSongs = ref<Song[]>([])
 
   const favorites = computed(() => items.value.find((item) => item.id === FAVORITES_ID))
   const custom = computed(() => items.value.filter((item) => item.id !== FAVORITES_ID))
@@ -44,6 +44,17 @@ export const usePlaylistStore = defineStore('playlists', () => {
 
   async function rename(id: string, name: string): Promise<void> {
     items.value = await window.api.renamePlaylist(id, name)
+  }
+
+  async function updateMeta(
+    id: string,
+    patch: { name?: string; description?: string; cover?: string }
+  ): Promise<void> {
+    items.value = await window.api.updatePlaylistMeta(id, patch)
+  }
+
+  async function chooseCover(): Promise<string> {
+    return window.api.choosePlaylistCover()
   }
 
   async function remove(id: string): Promise<void> {
@@ -75,18 +86,22 @@ export const usePlaylistStore = defineStore('playlists', () => {
     items.value = result.list
   }
 
-  function openPicker(song: Song): void {
-    pickerSong.value = song
+  /**
+   * 打开「加入歌单」面板。单曲与整批（队列、多选行）共用：
+   * 面板里既能追加到已有歌单，也能现场新建一个。
+   */
+  function openPicker(songs: Song | Song[]): void {
+    pickerSongs.value = plain(Array.isArray(songs) ? songs : [songs])
   }
 
   function closePicker(): void {
-    pickerSong.value = null
+    pickerSongs.value = []
   }
 
   return {
     items,
     loaded,
-    pickerSong,
+    pickerSongs,
     favorites,
     custom,
     favoriteKeys,
@@ -95,6 +110,8 @@ export const usePlaylistStore = defineStore('playlists', () => {
     load,
     create,
     rename,
+    updateMeta,
+    chooseCover,
     remove,
     addSongs,
     removeSong,

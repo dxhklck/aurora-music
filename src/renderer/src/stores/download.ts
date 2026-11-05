@@ -14,6 +14,7 @@ export const useDownloadStore = defineStore('download', () => {
   const active = computed(() =>
     tasks.value.filter((task) => task.status === 'downloading' || task.status === 'queued')
   )
+  const paused = computed(() => tasks.value.filter((task) => task.status === 'paused'))
   const finished = computed(() => tasks.value.filter((task) => task.status === 'done'))
   const failed = computed(() => tasks.value.filter((task) => task.status === 'error'))
 
@@ -57,6 +58,14 @@ export const useDownloadStore = defineStore('download', () => {
     await window.api.cancelDownload(id)
   }
 
+  async function pause(id: string): Promise<void> {
+    await window.api.pauseDownload(id)
+  }
+
+  async function resume(id: string): Promise<void> {
+    await window.api.resumeDownload(id)
+  }
+
   async function retry(id: string): Promise<void> {
     await window.api.retryDownload(id)
   }
@@ -82,12 +91,15 @@ export const useDownloadStore = defineStore('download', () => {
     tasks,
     ready,
     active,
+    paused,
     finished,
     failed,
     init,
     enqueue,
     enqueueMany,
     cancel,
+    pause,
+    resume,
     retry,
     retryFailed,
     remove,

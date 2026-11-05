@@ -23,6 +23,8 @@ const api: AuroraApi = {
   enqueueDownloads: (songs) => ipcRenderer.invoke(IPC.downloadEnqueueMany, songs),
   listDownloads: () => ipcRenderer.invoke(IPC.downloadList),
   cancelDownload: (id) => ipcRenderer.invoke(IPC.downloadCancel, id),
+  pauseDownload: (id) => ipcRenderer.invoke(IPC.downloadPause, id),
+  resumeDownload: (id) => ipcRenderer.invoke(IPC.downloadResume, id),
   retryDownload: (id) => ipcRenderer.invoke(IPC.downloadRetry, id),
   retryFailedDownloads: () => ipcRenderer.invoke(IPC.downloadRetryFailed),
   removeDownload: (id) => ipcRenderer.invoke(IPC.downloadRemove, id),
@@ -65,6 +67,8 @@ const api: AuroraApi = {
   listPlaylists: () => ipcRenderer.invoke(IPC.playlistList),
   createPlaylist: (name, songs) => ipcRenderer.invoke(IPC.playlistCreate, { name, songs }),
   renamePlaylist: (id, name) => ipcRenderer.invoke(IPC.playlistRename, { id, name }),
+  updatePlaylistMeta: (id, patch) => ipcRenderer.invoke(IPC.playlistUpdateMeta, { id, patch }),
+  choosePlaylistCover: () => ipcRenderer.invoke(IPC.playlistChooseCover),
   removePlaylist: (id) => ipcRenderer.invoke(IPC.playlistRemove, id),
   addPlaylistSongs: (id, songs) => ipcRenderer.invoke(IPC.playlistAddSongs, { id, songs }),
   removePlaylistSong: (id, platform, songId) =>
@@ -73,10 +77,11 @@ const api: AuroraApi = {
     ipcRenderer.invoke(IPC.playlistMoveSong, { id, platform, songId, direction }),
   toggleFavorite: (song) => ipcRenderer.invoke(IPC.playlistToggleFavorite, song),
   exportPlaylistM3u: (args) => ipcRenderer.invoke(IPC.playlistExportM3u, args),
-  importPlaylistM3u: () => ipcRenderer.invoke(IPC.playlistImportM3u),
+  importPlaylistM3u: (targetId) => ipcRenderer.invoke(IPC.playlistImportM3u, targetId),
 
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),
+  applyShortcuts: () => ipcRenderer.invoke(IPC.shortcutsApply),
 
   logWrite: (level, scope, message) => ipcRenderer.invoke(IPC.logWrite, { level, scope, message }),
   copyText: (text) => ipcRenderer.invoke(IPC.clipboardWrite, text),

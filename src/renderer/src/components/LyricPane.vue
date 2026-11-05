@@ -4,6 +4,7 @@ import type { Lyric } from '@shared/types'
 import { findLyricIndex } from '@shared/lyric'
 import { audio } from '../core/audio'
 import { usePlayerStore } from '../stores/player'
+import LyricPicker from './LyricPicker.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -24,6 +25,8 @@ const active = ref(-1)
 const offsetY = ref(0)
 const hasLines = ref(false)
 const karaoke = ref(false)
+/** 「匹配歌词」弹窗：歌词对不上时换一个正确版本 */
+const pickerOpen = ref(false)
 let raf = 0
 
 /**
@@ -165,6 +168,9 @@ onBeforeUnmount(() => {
           {{ offsetLabel }}
         </button>
         <button @click="player.nudgeLyric(500)" title="歌词提前 0.5 秒">+0.5s</button>
+        <button class="pick" title="歌词对不上？手动搜索一个正确版本" @click="pickerOpen = true">
+          匹配歌词
+        </button>
       </div>
     </template>
 
@@ -175,8 +181,11 @@ onBeforeUnmount(() => {
     <div v-else class="hint">
       <span class="disc">♪</span>
       <strong>暂无歌词</strong>
-      <small>该曲目没有可用的时间轴歌词</small>
+      <small>该曲目没有可用的时间轴歌词，也可以手动搜一个</small>
+      <button class="pick-btn" @click="pickerOpen = true">搜索歌词</button>
     </div>
+
+    <LyricPicker v-if="pickerOpen" @close="pickerOpen = false" />
   </div>
 </template>
 
@@ -400,6 +409,19 @@ onBeforeUnmount(() => {
 .hint small {
   font-size: 12px;
   color: var(--text-3);
+}
+.pick-btn {
+  margin-top: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, #fff);
+  font-size: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.pick-btn:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .disc {

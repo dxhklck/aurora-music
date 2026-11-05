@@ -52,6 +52,11 @@ const ICONS: Record<string, IconDef> = {
     fill: false
   },
   clock: { paths: ['M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z', 'M12 8v4.4l3 1.8'], fill: false },
+  /** 播放历史：时钟 + 回溯箭头，和纯时钟的「收听报告」区分开 */
+  history: {
+    paths: ['M4.6 10.4a7.7 7.7 0 1 1 1.7 6.2', 'M4 5.4v5h5', 'M12 8.4V13l3.2 1.9'],
+    fill: false
+  },
   check: { paths: ['M5 12.5 9.5 17 19 7'], fill: false },
   close: { paths: ['M6 6l12 12M18 6 6 18'], fill: false },
   minimize: { paths: ['M5 12h14'], fill: false },

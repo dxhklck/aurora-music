@@ -18,13 +18,14 @@ const panel = ref<HTMLElement | null>(null)
 
 const navs = [
   { name: 'discover', to: '/', label: '发现音乐', icon: 'home' },
-  { name: 'search', to: '/search', label: '搜索', icon: 'search' },
-  { name: 'charts', to: '/charts', label: '排行榜', icon: 'chart' },
+  { name: 'search', to: '/search', label: '搜索音乐', icon: 'search' },
+  { name: 'charts', to: '/charts', label: '排行榜单', icon: 'chart' },
   { name: 'favorites', to: '/favorites', label: '我的收藏', icon: 'heart' },
   { name: 'library', to: '/library', label: '本地音乐', icon: 'folder' },
   { name: 'downloads', to: '/downloads', label: '下载管理', icon: 'download' },
+  { name: 'history', to: '/history', label: '播放历史', icon: 'history' },
   { name: 'stats', to: '/stats', label: '收听报告', icon: 'clock' },
-  { name: 'settings', to: '/settings', label: '设置', icon: 'settings' }
+  { name: 'settings', to: '/settings', label: '应用设置', icon: 'settings' }
 ]
 
 const activeName = computed(() => route.name as string)

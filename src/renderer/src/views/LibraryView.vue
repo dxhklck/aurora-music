@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import type { DuplicateGroup, LibraryOpReport, LibraryTrack, Song } from '@shared/types'
 import SongTable from '../components/SongTable.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import CoverArt from '../components/CoverArt.vue'
 import Icon from '../components/Icon.vue'
 import { useLibraryStore } from '../stores/library'
 import { useDownloadStore } from '../stores/download'
@@ -113,6 +114,102 @@ const filtered = computed(() => {
   })
   return sortTracks(rows, sortKey.value, sortDir.value, collator)
 })
+
+/* ---------------- 聚合视图 ----------------
+   专辑墙 / 歌手页只是「换个入口看同一批数据」：点卡片就是设置筛选并回到列表，
+   不新增查询路径，也不用担心两个视图的数字对不上。 */
+const viewMode = ref<'list' | 'album' | 'artist'>('list')
+
+/** 聚合时不看歌手/专辑筛选（否则点进专辑只剩一张卡），其余条件照旧 */
+const groupBase = computed(() =>
+  applyFilters(library.items, {
+    keyword: keyword.value,
+    artist: '',
+    album: '',
+    ext: filterExt.value,
+    folder: filterFolder.value,
+    source: sourceFilter.value
+  })
+)
+
+interface AlbumGroup {
+  key: string
+  name: string
+  artist: string
+  cover: string
+  count: number
+  duration: number
+}
+
+const albumGroups = computed<AlbumGroup[]>(() => {
+  const map = new Map<string, AlbumGroup>()
+  for (const item of groupBase.value) {
+    const name = item.song.album?.trim()
+    if (!name) continue
+    const artist = item.song.artists[0] ?? ''
+    const key = `${name}\u0000${artist}`
+    const group = map.get(key)
+    if (group) {
+      group.count += 1
+      group.duration += item.song.duration
+      if (!group.cover) group.cover = item.song.coverUrl ?? ''
+      continue
+    }
+    map.set(key, {
+      key,
+      name,
+      artist,
+      cover: item.song.coverUrl ?? '',
+      count: 1,
+      duration: item.song.duration
+    })
+  }
+  return [...map.values()].sort((a, b) => collator.compare(a.name, b.name))
+})
+
+interface ArtistGroup {
+  name: string
+  cover: string
+  count: number
+  duration: number
+}
+
+const artistGroups = computed<ArtistGroup[]>(() => {
+  const map = new Map<string, ArtistGroup>()
+  for (const item of groupBase.value) {
+    const names = item.song.artists.length ? item.song.artists : ['未知歌手']
+    for (const name of names) {
+      const group = map.get(name)
+      if (group) {
+        group.count += 1
+        group.duration += item.song.duration
+        if (!group.cover) group.cover = item.song.coverUrl ?? ''
+        continue
+      }
+      map.set(name, {
+        name,
+        cover: item.song.coverUrl ?? '',
+        count: 1,
+        duration: item.song.duration
+      })
+    }
+  }
+  return [...map.values()].sort((a, b) => collator.compare(a.name, b.name))
+})
+
+function openAlbum(group: AlbumGroup): void {
+  filterAlbum.value = group.name
+  filterArtist.value = group.artist
+  onArtistChange()
+  viewMode.value = 'list'
+}
+
+function openArtist(group: ArtistGroup): void {
+  filterArtist.value = group.name
+  // 切到某个歌手时，专辑筛选若不属于他就清掉，避免两个条件互相打架
+  if (filterAlbum.value && !albums.value.includes(filterAlbum.value)) filterAlbum.value = ''
+  viewMode.value = 'list'
+}
 
 const songs = computed<Song[]>(() =>
   filtered.value.map((item) => ({
@@ -606,6 +703,12 @@ function openTargetDir(): void {
 
       <button v-if="hasFilter" class="btn ghost" @click="clearFilters">清除</button>
 
+      <div class="seg" title="切换视图">
+        <button :class="{ on: viewMode === 'list' }" @click="viewMode = 'list'">列表</button>
+        <button :class="{ on: viewMode === 'album' }" @click="viewMode = 'album'">专辑</button>
+        <button :class="{ on: viewMode === 'artist' }" @click="viewMode = 'artist'">歌手</button>
+      </div>
+
       <div class="sorter">
         <select v-model="sortKey" class="sel" title="排序字段">
           <option v-for="(label, key) in SORT_LABELS" :key="key" :value="key">{{ label }}</option>
@@ -626,6 +729,7 @@ function openTargetDir(): void {
     </div>
 
     <SongTable
+      v-if="viewMode === 'list'"
       ref="tableRef"
       :songs="songs"
       :loading="library.loading"
@@ -683,6 +787,31 @@ function openTargetDir(): void {
         <button class="btn ghost" @click="clear">取消选择</button>
       </template>
     </SongTable>
+
+    <!-- 专辑墙：点卡片 = 按这张专辑筛选并回到列表 -->
+    <div v-else-if="viewMode === 'album'" class="grid">
+      <button v-for="group in albumGroups" :key="group.key" class="tile" @click="openAlbum(group)">
+        <CoverArt :src="group.cover" :seed="group.key" :size="132" :radius="12" />
+        <strong class="truncate">{{ group.name }}</strong>
+        <small class="truncate">{{ group.artist || '未知歌手' }} · {{ group.count }} 首</small>
+      </button>
+      <p v-if="!albumGroups.length" class="grid-empty">当前筛选下没有带专辑信息的曲目</p>
+    </div>
+
+    <!-- 歌手页 -->
+    <div v-else class="grid">
+      <button
+        v-for="group in artistGroups"
+        :key="group.name"
+        class="tile"
+        @click="openArtist(group)"
+      >
+        <CoverArt :src="group.cover" :seed="`artist:${group.name}`" :size="132" :radius="66" />
+        <strong class="truncate">{{ group.name }}</strong>
+        <small class="truncate">{{ group.count }} 首</small>
+      </button>
+      <p v-if="!artistGroups.length" class="grid-empty">当前筛选下没有曲目</p>
+    </div>
 
     <!-- 行菜单：右键整行或点「更多」打开；右键已选中的行时对整批生效 -->
     <div v-if="menu" ref="menuEl" class="menu" :style="menuStyle" @click.stop>
@@ -1473,6 +1602,46 @@ function openTargetDir(): void {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+/* 专辑墙 / 歌手页：卡片本身是一个按钮，点哪里都能进 */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 18px 14px;
+  padding: 4px 2px 24px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 8px 12px;
+  border-radius: 14px;
+  text-align: center;
+  transition: background 0.16s, transform 0.16s var(--ease);
+}
+.tile:hover {
+  background: var(--row-hover);
+  transform: translateY(-2px);
+}
+.tile strong {
+  max-width: 100%;
+  margin-top: 3px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.tile small {
+  max-width: 100%;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.grid-empty {
+  grid-column: 1 / -1;
+  margin: 30px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-3);
 }
 
 @media (max-width: 1100px) {

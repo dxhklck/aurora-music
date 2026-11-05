@@ -528,7 +528,10 @@ onBeforeUnmount(() => {
 
 /* ---------------- 悬停态：播放控制 ----------------
    右侧留出动作组的宽度（6 个 23px 按钮 + 间隙 + 内边距 ≈ 158px），
-   否则绝对定位的控制组会和动作组叠在一起（下一首被播放键压住）。 */
+   否则绝对定位的控制组会和动作组叠在一起（下一首被播放键压住）。
+   这一层铺满整条，早先整层是 no-drag：指针一进窗口拖拽区就被它吃干净，
+   面板展开后指针本来就在窗口里，于是「一开面板就拖不动」。
+   现在层本身可拖，按钮单独 no-drag。 */
 .transport {
   position: absolute;
   top: 0;
@@ -543,7 +546,7 @@ onBeforeUnmount(() => {
   transform: translateY(3px);
   pointer-events: none;
   transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 .transport.visible {
   opacity: 1;
@@ -555,6 +558,8 @@ onBeforeUnmount(() => {
   width: 26px;
   height: 26px;
   border-radius: 50%;
+  /* 按钮自身不参与拖拽，否则点播放键会变成拖窗口 */
+  -webkit-app-region: no-drag;
   display: grid;
   place-items: center;
   color: var(--text-2);
@@ -610,7 +615,7 @@ onBeforeUnmount(() => {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 .actions.visible {
   opacity: 1;
@@ -626,6 +631,7 @@ onBeforeUnmount(() => {
   place-items: center;
   color: var(--text-2);
   transition: color 0.15s, background 0.15s;
+  -webkit-app-region: no-drag;
 }
 .abtn:hover:not(:disabled) {
   color: var(--text);
@@ -647,12 +653,14 @@ onBeforeUnmount(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
-  background: rgba(10, 10, 16, 0.72);
+  border-top: 1px solid var(--overlay-border);
+  /* 近实心底：0.72 让它和迷你条底纹混成一片灰，歌词/队列都显脏 */
+  background: var(--overlay-bg);
   backdrop-filter: blur(18px);
-  -webkit-app-region: no-drag;
 }
 
+/* 标题行可拖动（面板展开时迷你条不好抓，这里补一块）；
+   收起按钮与列表内容单独排除，避免点不动/滚不动 */
 .panel-head {
   flex: none;
   height: 28px;
@@ -660,9 +668,11 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   padding: 0 8px 0 12px;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: 10px;
   letter-spacing: 0.04em;
+  cursor: move;
+  -webkit-app-region: drag;
 }
 .panel-head small {
   font-size: 9px;
@@ -675,7 +685,8 @@ onBeforeUnmount(() => {
   border-radius: 5px;
   display: grid;
   place-items: center;
-  color: var(--text-3);
+  color: var(--text-2);
+  -webkit-app-region: no-drag;
 }
 .panel-head .collapse:hover {
   color: var(--text);
@@ -689,6 +700,8 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 2px 8px 10px;
+  /* 面板不再整体 no-drag（标题行要能拖窗口），列表自己排除拖拽区 */
+  -webkit-app-region: no-drag;
   /* 顶部/底部渐隐，滚动时不会硬切 */
   mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 12px), transparent 100%);
 }
@@ -710,7 +723,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   border-radius: 7px;
   text-align: left;
-  color: var(--text-3);
+  color: var(--text-2);
   transition: color 0.16s, background 0.16s, transform 0.16s;
 }
 .lyric-row span {
@@ -724,12 +737,12 @@ onBeforeUnmount(() => {
   line-height: 1.3;
 }
 .lyric-row:hover {
-  color: var(--text-2);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+  background: var(--row-hover);
 }
 .lyric-row.active {
   color: color-mix(in srgb, var(--accent) 78%, #fff);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--row-active);
 }
 .lyric-row.active span {
   font-size: 12.5px;
@@ -768,7 +781,7 @@ onBeforeUnmount(() => {
 }
 /* color-mix 用 --text：深色主题下是白光，浅色主题下自动变成黑，不会两边都看不见 */
 .queue-row:hover {
-  background: color-mix(in srgb, var(--text) 10%, transparent);
+  background: var(--row-hover);
   color: var(--text);
 }
 .queue-row:hover::before {
@@ -779,7 +792,7 @@ onBeforeUnmount(() => {
 }
 .queue-row.active {
   color: color-mix(in srgb, var(--accent) 82%, #fff);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: var(--row-active);
 }
 .queue-row.active::before {
   width: 3px;
@@ -809,7 +822,7 @@ onBeforeUnmount(() => {
   flex: none;
   max-width: 84px;
   font-size: 9.5px;
-  color: var(--text-3);
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -819,7 +832,8 @@ onBeforeUnmount(() => {
   width: 30px;
   text-align: right;
   font-size: 9px;
-  color: var(--text-3);
+  color: var(--text-2);
+  opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
 

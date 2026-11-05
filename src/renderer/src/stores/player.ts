@@ -7,7 +7,6 @@ import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
 import { useStatsStore } from './stats'
-import { usePlaylistStore } from './playlists'
 import { createLatestGate } from '../core/latest'
 import { artworkSrc } from '../core/artwork'
 import { createUidFactory, moveIndex, moveItem, type QueueItem } from '../core/queue'
@@ -17,6 +16,8 @@ const HISTORY_KEY = 'aurora.recent'
 const RESUME_KEY = 'aurora.hero.resume'
 /** 歌词手动对齐记忆：{ "platform:id": 毫秒偏移 }，只记用户调过的歌 */
 const LYRIC_OFFSET_KEY = 'aurora.lyric-offsets'
+/** 手动指定的歌词来源：{ "platform:id": Song }，用于音源自带歌词匹配错时改绑 */
+const LYRIC_PICK_KEY = 'aurora.lyric-picks'
 /**
  * 整个队列的快照（任意来源，不限于首页榜单）与播放位置。
  * 拆成两个 key：队列内容只在结构变化时写，进度每 5 秒写一次——
@@ -174,8 +175,14 @@ export const usePlayerStore = defineStore('player', () => {
 
   function pushRecent(song: Song): void {
     const next = [song, ...recent.value.filter((item) => !(item.id === song.id && item.platform === song.platform))]
-    recent.value = next.slice(0, 24)
+    // 200 条足够撑起「播放历史」页，又不会把 localStorage 撑爆（每条约 300 字节）
+    recent.value = next.slice(0, 200)
     localStorage.setItem(HISTORY_KEY, JSON.stringify(recent.value))
+  }
+
+  function clearRecent(): void {
+    recent.value = []
+    localStorage.removeItem(HISTORY_KEY)
   }
 
   function bindEngine(): void {
@@ -361,12 +368,50 @@ export const usePlayerStore = defineStore('player', () => {
     lyricLoading.value = true
     lyricOffsetAdj.value = loadLyricOffsetAdj(song)
     try {
-      lyric.value = await window.api.lyric(plain(song))
+      const picked = lyricPicks.value[`${song.platform}:${song.id}`]
+      // 手动指定过就按指定那首取歌词；没指定才用播放中的这首
+      lyric.value = await window.api.lyric(plain(picked ?? song))
     } catch {
       lyric.value = null
     } finally {
       lyricLoading.value = false
     }
+  }
+
+  /* ---------------- 歌词手动匹配 ----------------
+     「这首歌的歌词对不上」是长尾问题：音源给的歌词可能是另一版编曲。
+     允许搜一个正确版本改绑，按歌记忆，下次播放仍然用它。 */
+  function loadLyricPicks(): Record<string, Song> {
+    try {
+      const raw = localStorage.getItem(LYRIC_PICK_KEY)
+      const parsed = raw ? (JSON.parse(raw) as unknown) : null
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, Song>) : {}
+    } catch {
+      return {}
+    }
+  }
+
+  const lyricPicks = ref<Record<string, Song>>(loadLyricPicks())
+
+  function lyricPickOf(song: Song | null): Song | null {
+    return song ? lyricPicks.value[`${song.platform}:${song.id}`] ?? null : null
+  }
+
+  /** picked = null 表示恢复自动匹配 */
+  async function applyLyricPick(picked: Song | null): Promise<void> {
+    const song = current.value
+    if (!song) return
+    const key = `${song.platform}:${song.id}`
+    const next = { ...lyricPicks.value }
+    if (picked) next[key] = plain(picked)
+    else delete next[key]
+    lyricPicks.value = next
+    try {
+      localStorage.setItem(LYRIC_PICK_KEY, JSON.stringify(next))
+    } catch {
+      /* 存不下只影响记忆，本首仍然生效 */
+    }
+    await loadLyric(song)
   }
 
   /** 队列内容变化时写快照（不含播放进度，进度见 saveQueuePos） */
@@ -536,6 +581,36 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   /**
+   * 批量移出队列（多选）。按 uid 删，重复曲目不会误伤。
+   * 正在播的那首也在选中里时，删完接着播「原位」那一首；删空了就停。
+   */
+  function removeMany(uids: string[]): void {
+    const set = new Set(uids)
+    if (!set.size || !queue.value.length) return
+    const currentUid = queue.value[index.value]?.uid
+    const wasCurrent = !!currentUid && set.has(currentUid)
+    const removedBefore = queue.value.reduce(
+      (count, item, i) => (i < index.value && set.has(item.uid) ? count + 1 : count),
+      0
+    )
+    queue.value = queue.value.filter((item) => !set.has(item.uid))
+    if (wasCurrent) {
+      if (!queue.value.length) {
+        stop()
+        saveQueue()
+        return
+      }
+      index.value = Math.min(index.value, queue.value.length - 1)
+      loadedUid = null
+      saveQueue()
+      void playAt(index.value)
+      return
+    }
+    index.value = Math.max(0, index.value - removedBefore)
+    saveQueue()
+  }
+
+  /**
    * 拖拽重排。index 必须跟着动，否则「拖一下队列，正在播的变成别的歌」。
    * 下标换算在 core/queue.ts 里，有单测。
    */
@@ -551,17 +626,6 @@ export const usePlayerStore = defineStore('player', () => {
     queue.value = []
     saveQueue()
     stop()
-  }
-
-  /** 把当前队列存成歌单；uid 是会话内的定位标记，落盘前剥掉，别写进 playlists.json */
-  async function saveQueueAsPlaylist(name: string): Promise<boolean> {
-    const trimmed = name.trim()
-    if (!trimmed || !queue.value.length) return false
-    const songs = queue.value.map(({ uid: _uid, ...song }) => song)
-    const created = await usePlaylistStore().create(trimmed, songs)
-    if (!created) return false
-    useAppStore().toast(`已存为歌单「${created.name}」`, 'success')
-    return true
   }
 
   /**
@@ -961,11 +1025,14 @@ export const usePlayerStore = defineStore('player', () => {
     totalLyricOffset,
     nudgeLyric,
     resetLyricOffset,
+    lyricPickOf,
+    applyLyricPick,
     streamLabel,
     resolvedSong,
     showNowPlaying,
     showQueue,
     recent,
+    clearRecent,
     current,
     displaySong,
     hasNext,
@@ -983,11 +1050,11 @@ export const usePlayerStore = defineStore('player', () => {
     playNext,
     appendToQueue,
     removeAt,
+    removeMany,
     clearQueue,
     moveQueueItem,
     restoreQueue,
     saveQueue,
-    saveQueueAsPlaylist,
     alternatives,
     alternativesLoading,
     alternativesOpen,

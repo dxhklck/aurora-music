@@ -7,6 +7,7 @@ import { ensureDir } from '../utils'
 import { createWriteQueue, writeAtomic } from './atomic-write'
 
 const MAX_NAME = 40
+const MAX_DESCRIPTION = 120
 
 const keyOf = (song: Song): string => `${song.platform}:${song.id}`
 
@@ -97,6 +98,34 @@ class PlaylistService {
     const target = this.find(id)
     if (!target || target.builtin) return this.list()
     target.name = this.normalizeName(name)
+    target.updatedAt = Date.now()
+    await this.persist()
+    return this.list()
+  }
+
+  /**
+   * 改封面与简介。空字符串表示「清掉」，回落行为由界面决定（首曲封面 / 隐藏）。
+   * 封面只接受图片类地址，避免把任意路径写进播放列表。
+   */
+  async updateMeta(
+    id: string,
+    patch: { name?: string; description?: string; cover?: string }
+  ): Promise<Playlist[]> {
+    const target = this.find(id)
+    if (!target || target.builtin) return this.list()
+    if (typeof patch.name === 'string' && patch.name.trim()) {
+      target.name = this.normalizeName(patch.name)
+    }
+    if (typeof patch.description === 'string') {
+      const text = patch.description.trim().slice(0, MAX_DESCRIPTION)
+      if (text) target.description = text
+      else delete target.description
+    }
+    if (typeof patch.cover === 'string') {
+      const cover = patch.cover.trim()
+      if (!cover) delete target.cover
+      else if (/^(muse:\/\/|https?:\/\/)/i.test(cover)) target.cover = cover
+    }
     target.updatedAt = Date.now()
     await this.persist()
     return this.list()

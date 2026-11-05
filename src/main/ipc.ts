@@ -28,6 +28,7 @@ import { musicdl } from './engine/musicdl'
 import { refresh as refreshSourceHealth, snapshot as sourceHealthSnapshot } from './services/source-health'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
 import { checkForUpdate, installUpdate } from './updater'
+import { reregisterShortcuts } from './shortcuts'
 import { sanitizeFileName } from './utils'
 import {
   createLyricWindow,
@@ -133,6 +134,8 @@ export function registerIpc(): void {
   handle(IPC.downloadEnqueueMany, (songs: Song[]) => downloads.enqueueMany(songs))
   handle(IPC.downloadList, () => downloads.list())
   handle(IPC.downloadCancel, (id: string) => downloads.cancel(id))
+  handle(IPC.downloadPause, (id: string) => downloads.pause(id))
+  handle(IPC.downloadResume, (id: string) => downloads.resume(id))
   handle(IPC.downloadRetry, (id: string) => downloads.retry(id))
   handle(IPC.downloadRetryFailed, () => downloads.retryFailed())
   handle(IPC.downloadRemove, (id: string) => downloads.remove(id))
@@ -258,6 +261,20 @@ export function registerIpc(): void {
   handle(IPC.playlistRename, (args: { id: string; name: string }) =>
     playlists.rename(args.id, args.name)
   )
+  handle(IPC.playlistUpdateMeta, (args: { id: string; patch: Record<string, string> }) =>
+    playlists.updateMeta(args.id, args.patch)
+  )
+  handle(IPC.playlistChooseCover, async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择歌单封面',
+      properties: ['openFile'],
+      filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
+    })
+    const picked = result.filePaths[0]
+    if (result.canceled || !picked) return ''
+    // 不复制文件：用户换图后旧副本会变成孤儿。路径失效时界面回落到首曲封面。
+    return `muse://local/?p=${encodeURIComponent(picked)}`
+  })
   handle(IPC.playlistRemove, (id: string) => playlists.remove(id))
   handle(IPC.playlistAddSongs, (args: { id: string; songs: Song[] }) =>
     playlists.addSongs(args.id, args.songs)
@@ -283,7 +300,7 @@ export function registerIpc(): void {
     const result = await exportPlaylistToM3u(args.id, picked.filePath)
     return { canceled: false, ...result }
   })
-  handle(IPC.playlistImportM3u, async () => {
+  handle(IPC.playlistImportM3u, async (targetId?: string) => {
     const win = BrowserWindow.getFocusedWindow() ?? undefined
     const options: Electron.OpenDialogOptions = {
       title: '导入 M3U 播放列表',
@@ -294,7 +311,7 @@ export function registerIpc(): void {
     if (picked.canceled || !picked.filePaths.length) {
       return { canceled: true, playlistId: null, name: '', total: 0, matched: 0, missing: 0 }
     }
-    const result = await importM3uFromFile(picked.filePaths[0])
+    const result = await importM3uFromFile(picked.filePaths[0], targetId)
     return { canceled: false, ...result }
   })
 
@@ -340,6 +357,8 @@ export function registerIpc(): void {
     broadcastSettings(next)
     return next
   })
+  // 快捷键改完立刻重注册：不重启也能生效，失败项（被别的软件占用）如实回报
+  handle(IPC.shortcutsApply, () => ({ failed: reregisterShortcuts() }))
 
   // ---------- 音源引擎 ----------
   handle(IPC.engineStatus, () => musicdl.status())

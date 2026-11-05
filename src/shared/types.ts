@@ -148,6 +148,7 @@ export interface ProviderInfo {
 
 export type DownloadStatus =
   | 'queued'
+  | 'paused'
   | 'downloading'
   | 'done'
   | 'error'
@@ -259,9 +260,34 @@ export interface Playlist {
   name: string
   /** 内置收藏夹 */
   builtin?: boolean
+  /** 自定义封面（muse://local 或远端地址）；空 = 用首曲封面兜底 */
+  cover?: string
+  /** 一句话简介 */
+  description?: string
   songs: Song[]
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * 桌面歌词外观。空字符串一律表示「跟随默认主题」，不是「黑色」——
+ * 这样切深浅主题时用户没动过的项仍然会跟着变。
+ */
+export interface DesktopLyricStyle {
+  /** 字号倍率 0.7 - 1.6 */
+  scale: number
+  /** CSS font-family；空 = 系统默认 */
+  fontFamily: string
+  /** 主文字颜色；空 = 主题渐变字 */
+  color: string
+  /** 描边宽度 0 - 3 px */
+  strokeWidth: number
+  /** 描边颜色；空 = 主题描边色 */
+  strokeColor: string
+  /** 双语排布：stack 下一行 / inline 同一行 / off 不显示译文 */
+  bilingual: 'stack' | 'inline' | 'off'
+  /** 逐字扫光颜色；空 = 跟随强调色 */
+  karaokeColor: string
 }
 
 export interface AppSettings {
@@ -295,6 +321,13 @@ export interface AppSettings {
   desktopLyricLocked: boolean
   /** 桌面歌词形态：mini 单行迷你条 / full 大字多行 */
   desktopLyricMode: 'mini' | 'full'
+  /** 桌面歌词外观（字号、字体、配色、描边、双语、扫光） */
+  desktopLyricStyle: DesktopLyricStyle
+  /**
+   * 全局快捷键（Electron accelerator 字符串，如 Control+Alt+P）。
+   * 空字符串 = 用平台默认值，这样老配置升级后仍然是原来那套组合键。
+   */
+  shortcuts: { toggle: string; next: string; prev: string }
   /** 播放页样式：vinyl 黑胶经典 / lyrics 歌词大屏 / cover 封面沉浸 */
   nowPlayingStyle: 'vinyl' | 'lyrics' | 'cover'
   /** 播放页炫彩皮肤：aurora 默认 / neon 流光 / ocean 碧海 / sunset 熔金 / galaxy 星河 */
@@ -417,6 +450,8 @@ export interface LyricWindowState {
   title: string
   artist: string
   locked: boolean
+  /** 桌面歌词外观（主窗口按设置推送，旧推送可缺省） */
+  style?: DesktopLyricStyle
   /** 主窗口强调色：桌面歌词窗口据此实时联动（旧推送可缺省） */
   accent?: string
   accent2?: string

@@ -16,6 +16,7 @@ const dir = ref('')
 
 const counts = computed(() => ({
   active: store.active.length,
+  paused: store.paused.length,
   done: store.finished.length,
   failed: store.failed.length
 }))
@@ -28,6 +29,8 @@ function statusText(task: DownloadTask): string {
   switch (task.status) {
     case 'queued':
       return '排队中'
+    case 'paused':
+      return task.progress > 0 ? `已暂停 · ${Math.round(percent(task) * 100)}%` : '已暂停'
     case 'downloading':
       return task.total
         ? `${formatBytes(task.received)} / ${formatBytes(task.total)}`
@@ -120,6 +123,7 @@ onMounted(async () => {
 
     <div class="summary">
       <div class="sum"><strong>{{ counts.active }}</strong><span>进行中</span></div>
+      <div v-if="counts.paused" class="sum"><strong>{{ counts.paused }}</strong><span>已暂停</span></div>
       <div class="sum"><strong>{{ counts.done }}</strong><span>已完成</span></div>
       <div class="sum"><strong>{{ counts.failed }}</strong><span>失败</span></div>
       <div v-if="engineCount" class="sum"><strong>{{ engineCount }}</strong><span>引擎音源</span></div>
@@ -160,7 +164,31 @@ onMounted(async () => {
           <button
             v-if="task.status === 'downloading' || task.status === 'queued'"
             class="icon-btn"
-            title="取消"
+            title="暂停（保留已下载部分）"
+            @click="store.pause(task.id)"
+          >
+            <Icon name="pause" :size="15" />
+          </button>
+          <button
+            v-if="task.status === 'paused'"
+            class="icon-btn"
+            title="继续下载"
+            @click="store.resume(task.id)"
+          >
+            <Icon name="play" :size="15" />
+          </button>
+          <button
+            v-if="task.status === 'downloading' || task.status === 'queued'"
+            class="icon-btn"
+            title="取消（丢弃已下载部分）"
+            @click="store.cancel(task.id)"
+          >
+            <Icon name="close" :size="16" />
+          </button>
+          <button
+            v-if="task.status === 'paused'"
+            class="icon-btn"
+            title="取消并删除半截文件"
             @click="store.cancel(task.id)"
           >
             <Icon name="close" :size="16" />
@@ -340,6 +368,9 @@ onMounted(async () => {
 }
 .status.downloading {
   color: var(--text-2);
+}
+.status.paused {
+  color: color-mix(in srgb, var(--accent) 62%, var(--text));
 }
 
 .meta {
