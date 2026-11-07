@@ -17,6 +17,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
+    "lint": "eslint .",
     "demo:audio": "node scripts/make-demo-audio.mjs",
     "shots": "node scripts/shots.mjs",
     "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
@@ -37,13 +38,18 @@
     "vue-router": "4.6.4"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "6.0.10",
     "electron": "^45.2.1",
     "electron-builder": "^26.18.0",
     "electron-vite": "6.0.0",
+    "eslint": "^10.14.0",
+    "eslint-plugin-vue": "^10.12.0",
+    "globals": "^17.14.0",
     "typescript": "5.9.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.4",
     "vue-tsc": "3.3.13"
   }

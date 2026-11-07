@@ -29,6 +29,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
       - name: Unit tests
         run: npm test
 
@@ -53,6 +56,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
 
       - name: Unit tests
         run: npm test
@@ -127,12 +133,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      # 主更新源：同步到 GitCode。checkout（全量，含 tags）供脚本与代码镜像两步使用。
-      - name: Checkout for GitCode sync
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -248,62 +248,8 @@ jobs:
           done
           echo "已同步到 s3://$COS_BUCKET/"
 
-      # 主更新源：同步到 GitCode。
-      # 版本 release（tag=vX.Y.Z）放三件套供人下载；指针 release（tag=stable）
-      # 的同名附件每次被覆盖，应用更新器固定拉 releases/download/stable/<file>。
-      # 2026-10-30 实测：tag 路径匿名可下、Range 206；latest/download 别名返回 HTML 不可用。
-      # continue-on-error：GitHub 美国 runner 到 GitCode 的连通性不可控（实测 fetch failed），
-      # 同步失败只告警不红——发布主体（GitHub Release）已在前面完成，GitCode 侧可由
-      # 本机手动补跑 scripts/publish-gitcode.mjs 兜底（见 docs/update-feed-setup.md）。
-      # 更新资产投到**公开仓库** aurora_music_release：代码仓库可以是私有的，
-      # 但 GitCode 的资产下载口只认「仓库公开」，私有仓库时匿名下载一律 403。
-      - name: Sync update files to GitCode
-        continue-on-error: true
-        env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          REPO: dxhklck/aurora_music_release
-          TAG: ${{ github.ref_name }}
-        run: |
-          # 这一步刻意 continue-on-error：GitHub Release 已经成功，不该因为主源没同步
-          # 就让整次发版变红。但也绝不能让它**静默**失败——写进 job 摘要页，
-          # 发版时打开 Actions 就能看见，不用去翻注解。
-          warn_summary() {
-            {
-              echo "## ⚠ 主更新源未同步（${TAG}）"
-              echo ""
-              echo "GitHub Release 已发布，但 GitCode 的 \`stable\` 指针没有更新，"
-              echo "已安装旧版的用户会一直拿到「已是最新」。"
-              echo ""
-              echo "**处理**：按 \`docs/update-feed-setup.md\` 的「本机补跑」执行，"
-              echo "然后跑 \`npm run release:verify\` 确认两源一致。"
-            } >> "$GITHUB_STEP_SUMMARY"
-          }
-
-          if [ -z "$GITCODE_TOKEN" ]; then
-            echo "::error::缺 GITCODE_TOKEN secret（GitCode 私人令牌），无法同步主更新源"
-            warn_summary
-            exit 1
-          fi
-
-          if node scripts/publish-gitcode.mjs; then
-            echo "✅ 主更新源已同步到 ${TAG}" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::error::GitCode 同步失败，主更新源仍停在旧版本"
-            warn_summary
-            exit 1
-          fi
-
-      # 代码镜像：main 与标签推到 GitCode（GitHub 仍是 CI 与主开发仓库，GitCode 为镜像备份）
-      # --follow-tags 已经把 main 可达的附注标签一起推走（本项目的发版标签一定在 main 上），
-      # 所以不再单独跑一次 `git push --tags`：实测 v1.3.8~v1.3.12 在 GitCode 上都已存在，
-      # 那条命令只会以 "already exists" 全部被拒，把这一步染红却不影响镜像完整性（v1.3.12 实测）。
-      - name: Mirror code to GitCode
-        continue-on-error: true
-        env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-        run: |
-          if [ -z "$GITCODE_TOKEN" ]; then
-            echo "::error::缺 GITCODE_TOKEN secret，无法镜像代码"
-            exit 1
-          fi
-          git push "https://oauth2:$GITCODE_TOKEN@gitcode.com/dxhklck/aurora_music.git" "origin/main:main" --follow-tags
+      # GitCode 同步与代码镜像已从 CI 移除（2026-11-07）：
+      # 美国 runner 到 api.gitcode.com 几乎必然 fetch failed，两步 continue-on-error
+      # 白白烧 Actions 额度，且「CI 全绿」会掩盖主源没更新的真相。
+      # 主源同步改由发版后本机跑 scripts/publish-gitcode.mjs 兜底
+      # （见 docs/update-feed-setup.md），代码镜像手动 git push --follow-tags。

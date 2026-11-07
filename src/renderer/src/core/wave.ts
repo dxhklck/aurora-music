@@ -32,6 +32,8 @@ const TARGET_RMS_DB = -18
 export const EQ_BANDS = [60, 230, 910, 3600, 14000] as const
 /** 单段可调范围（dB），正负对称 */
 export const EQ_MAX_GAIN = 12
+/** 总增益补偿（preamp）范围（dB），比单段更保守 */
+export const PREAMP_MAX = 6
 
 class WaveEngine {
   private ctx: AudioContext | null = null
@@ -52,6 +54,9 @@ class WaveEngine {
   /** 均衡器参数的缓存：挂接可能晚于用户调参，创建节点时要按当前值初始化 */
   private eqGains: number[] = EQ_BANDS.map(() => 0)
   private eqEnabled = false
+  /** 总增益补偿（preamp，dB）：给安静的音源补音量，作用在 AGC 之后 */
+  private preampDb = 0
+  private preamp: GainNode | null = null
   /** 缓存的音量/静音：挂接可能发生在设过音量之后，创建 GainNode 时要按当前值初始化 */
   private volume = 1
   private muted = false
@@ -118,9 +123,12 @@ class WaveEngine {
       limiter.release.value = 0.25
       const norm = ctx.createGain()
       norm.gain.value = this.normValue
+      const preamp = ctx.createGain()
+      preamp.gain.value = Math.pow(10, this.preampDb / 20)
       bands[bands.length - 1].connect(limiter)
       limiter.connect(norm)
-      norm.connect(master)
+      norm.connect(preamp)
+      preamp.connect(master)
       master.connect(ctx.destination)
       // 可视旁路：接在均衡器首段输出（两路已混合、用户音量之前），静音时波形照样动
       bands[0].connect(analyser)
@@ -132,6 +140,7 @@ class WaveEngine {
       this.bands = bands
       this.limiter = limiter
       this.norm = norm
+      this.preamp = preamp
       this.applyEqualizer()
       this.applyLimiter()
       // 挂接可能晚于开关响度均衡（与 EQ / 限幅器同一时机问题）
@@ -230,6 +239,17 @@ class WaveEngine {
   }
 
   /**
+   * 总增益补偿（dB，±6）。挂在 AGC（norm）之后、master 之前：
+   * analyser 旁路在 EQ 首段，测不到这里，所以响度均衡不会把 preamp 自动拉回来，
+   * 它就是「最后再整体提/压一点音量」。
+   */
+  setPreamp(db: number): void {
+    if (!Number.isFinite(db)) return
+    this.preampDb = Math.max(-PREAMP_MAX, Math.min(PREAMP_MAX, db))
+    if (this.preamp) this.preamp.gain.value = Math.pow(10, this.preampDb / 20)
+  }
+
+  /**
    * 夜间限幅：压动态、压爆音，深夜外放不吵人。
    * 不拆链，只改参数——ratio=1 + threshold=0 时压缩器完全透明，
    * 所以平时挂着也不影响声音（和 EQ 关闭不拆链是同一个思路）。
@@ -312,14 +332,15 @@ class WaveEngine {
   }
 
   /** 诊断/测试用：当前均衡器参数与是否已挂接 */
-  get eq(): { attached: boolean; enabled: boolean; gains: number[]; limiter: boolean; norm: boolean; normValue: number } {
+  get eq(): { attached: boolean; enabled: boolean; gains: number[]; limiter: boolean; norm: boolean; normValue: number; preamp: number } {
     return {
       attached: this.bands.length > 0,
       enabled: this.eqEnabled,
       gains: [...this.eqGains],
       limiter: this.limiterOn,
       norm: this.normOn,
-      normValue: this.normValue
+      normValue: this.normValue,
+      preamp: this.preampDb
     }
   }
 

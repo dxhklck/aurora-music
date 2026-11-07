@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { readFlacBlocks, writeFlacTags } from '../src/main/engine/ts/tag-flac.ts'
+import { readFlacBlocks, readFlacBlocksFromFile, writeFlacTags } from '../src/main/engine/ts/tag-flac.ts'
 
 let dir = ''
 
@@ -198,6 +198,25 @@ test('成功写入后不残留临时文件（写盘是 tmp + rename）', async (
   )
   assert.equal((await writeFlacTags(path, { TITLE: 'ok' })).ok, true)
   assert.equal(existsSync(`${path}.aurora-tmp`), false)
+})
+
+test('较大文件的音频帧也一字节不少（流式 pipe 搬运）', async () => {
+  const audio = fakeAudio(3 * 1024 * 1024)
+  const path = await writeTemp('large.flac', makeFlac({ withComment: true, audio }))
+  const result = await writeFlacTags(path, { TITLE: '大文件' })
+  assert.equal(result.ok, true)
+  const out = await readFile(path)
+  assert.equal(out.length >= audio.length, true)
+  assert.deepEqual(out.subarray(out.length - audio.length), audio)
+})
+
+test('readFlacBlocksFromFile 与内存版判据一致：越界返回 null', async () => {
+  const header = Buffer.alloc(4)
+  header[0] = 0x80 // STREAMINFO + last
+  header.writeUIntBE(500, 1, 3)
+  const broken = Buffer.concat([Buffer.from('fLaC', 'ascii'), header, Buffer.alloc(34), fakeAudio(64)])
+  const path = await writeTemp('overlong-file.flac', broken)
+  assert.equal(await readFlacBlocksFromFile(path), null)
 })
 
 test.after(async () => {

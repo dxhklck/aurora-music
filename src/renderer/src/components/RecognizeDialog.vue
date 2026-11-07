@@ -113,6 +113,7 @@ function cleanup(): void {
 function reset(): void {
   cancelled = true
   generation += 1
+  void window.api.cancelRecognize()
   cleanup()
   requesting.value = false
   phase.value = 'idle'
@@ -125,6 +126,7 @@ function reset(): void {
 function close(): void {
   cancelled = true
   generation += 1
+  void window.api.cancelRecognize()
   cleanup()
   emit('close')
 }
@@ -412,6 +414,7 @@ onBeforeUnmount(() => {
   unmounted = true
   cancelled = true
   generation += 1
+  void window.api.cancelRecognize()
   if (copiedTimer) clearTimeout(copiedTimer)
   cleanup()
 })

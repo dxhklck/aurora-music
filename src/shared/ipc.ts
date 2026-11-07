@@ -175,6 +175,8 @@ export const IPC = {
   recognizeAudio: 'recognize:audio',
   /** 传本地音频文件路径（拖拽 / 从本地库选） */
   recognizeFile: 'recognize:file',
+  /** 取消当前在飞的识别（关弹窗 / 重新识别时收掉后台请求） */
+  recognizeCancel: 'recognize:cancel',
 
   // 自动更新（Windows）
   updateCheck: 'update:check',

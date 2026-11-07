@@ -32,12 +32,15 @@ const stylePanel = ref(false)
 const eqPanel = ref(false)
 /** 睡眠定时面板，与上面两个面板互斥 */
 const sleepPanel = ref(false)
+/** 播放速率面板，与睡眠/样式/均衡器面板互斥 */
+const ratePanel = ref(false)
 
 function toggleEqualizer(): void {
   eqPanel.value = !eqPanel.value
   if (eqPanel.value) {
     stylePanel.value = false
     sleepPanel.value = false
+    ratePanel.value = false
   }
 }
 
@@ -69,6 +72,18 @@ function pickSleep(id: 'off' | '15' | '30' | '60' | 'eof'): void {
         : `将在 ${id} 分钟后暂停`,
     'info'
   )
+}
+
+/* ---------------- 播放速率 ---------------- */
+
+const rateOptions = [0.5, 0.75, 1, 1.25, 1.5, 2]
+/** 非 1.0 时在按钮上挂角标，一眼看出当前在变速 */
+const rateLabel = computed(() => (player.rate !== 1 ? `${player.rate}×` : ''))
+
+function pickRate(value: number): void {
+  player.setRate(value)
+  ratePanel.value = false
+  app.toast(value === 1 ? '已恢复原速' : `播放速度 ${value}×`, 'info')
 }
 
 async function toggleFav(): Promise<void> {
@@ -252,13 +267,28 @@ onBeforeUnmount(() => {
           @click.stop="
             sleepPanel = !sleepPanel;
             stylePanel = false;
-            eqPanel = false
+            eqPanel = false;
+            ratePanel = false
           "
         >
           <Icon name="clock" :size="18" />
           <em v-if="sleepLabel" class="sleep-badge">{{ sleepLabel }}</em>
         </button>
-        <button class="icon-btn" title="播放器样式" @click.stop="stylePanel = !stylePanel; sleepPanel = false">
+        <button
+          class="icon-btn"
+          :class="{ active: player.rate !== 1 }"
+          title="播放速度"
+          @click.stop="
+            ratePanel = !ratePanel;
+            sleepPanel = false;
+            stylePanel = false;
+            eqPanel = false
+          "
+        >
+          <Icon name="speed" :size="18" />
+          <em v-if="rateLabel" class="sleep-badge">{{ rateLabel }}</em>
+        </button>
+        <button class="icon-btn" title="播放器样式" @click.stop="stylePanel = !stylePanel; sleepPanel = false; ratePanel = false">
           <Icon name="settings" :size="18" />
         </button>
         <button class="icon-btn" :class="{ active: eqPanel }" title="均衡器" @click.stop="toggleEqualizer">
@@ -287,6 +317,21 @@ onBeforeUnmount(() => {
         >
           关闭定时
         </button>
+      </div>
+      <div v-if="ratePanel" class="style-panel" @click.stop>
+        <div class="panel-sec">播放速度</div>
+        <div class="rate-grid">
+          <button
+            v-for="value in rateOptions"
+            :key="value"
+            class="rate-opt"
+            :class="{ active: player.rate === value }"
+            @click="pickRate(value)"
+          >
+            {{ value }}×
+          </button>
+        </div>
+        <p class="panel-note">变速不变调，练听力 / 跟唱 / 快进式听书。</p>
       </div>
       <div v-if="stylePanel" class="style-panel" @click.stop>
         <div class="panel-sec">播放器样式</div>
@@ -932,6 +977,40 @@ onBeforeUnmount(() => {
 .sleep-off:hover {
   background: rgba(255, 255, 255, 0.12);
   color: var(--text);
+}
+
+.rate-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+}
+.rate-opt {
+  flex: 1 1 30%;
+  padding: 8px 0;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.rate-opt:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+.rate-opt.active {
+  color: #6ee7ff;
+  border-color: rgba(110, 231, 255, 0.5);
+  background: rgba(110, 231, 255, 0.14);
+}
+.panel-note {
+  margin: 2px 4px 4px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-3);
 }
 
 .style-panel {

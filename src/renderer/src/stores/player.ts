@@ -105,6 +105,14 @@ export const usePlayerStore = defineStore('player', () => {
   const sleepRemain = ref(0)
   let sleepTick: number | null = null
 
+  /* ---------------- 播放速率 ----------------
+     0.5~2.0，变速不变调。不持久化：每次启动回 1.0，变速是临时的听音需求。 */
+  const rate = ref(1)
+  function setRate(next: number): void {
+    rate.value = Math.max(0.5, Math.min(2, Number.isFinite(next) ? next : 1))
+    audio.setRate(rate.value)
+  }
+
   let engineBound = false
   let volumeTimer: number | null = null
   /** 原生媒体面板位置同步节流 */
@@ -1043,6 +1051,8 @@ export const usePlayerStore = defineStore('player', () => {
     sleepRemain,
     setSleep,
     stopSleep,
+    rate,
+    setRate,
     setQueue,
     startHero,
     playAt,

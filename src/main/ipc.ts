@@ -28,7 +28,7 @@ import { musicdl } from './engine/musicdl'
 import { refresh as refreshSourceHealth, snapshot as sourceHealthSnapshot } from './services/source-health'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
 import { checkForUpdate, installUpdate } from './updater'
-import { recognizeBuffer, recognizeFile } from './services/recognize'
+import { cancelRecognize, recognizeBuffer, recognizeFile } from './services/recognize'
 import { reregisterShortcuts } from './shortcuts'
 import { sanitizeFileName } from './utils'
 import {
@@ -375,6 +375,9 @@ export function registerIpc(): void {
   handle(IPC.recognizeFile, (filePath: string) =>
     recognizeFile(String(filePath ?? ''), settings.get().acoustidKey)
   )
+  handle(IPC.recognizeCancel, () => {
+    cancelRecognize()
+  })
 
   // ---------- 更新 ----------
   handle(IPC.updateCheck, () => checkForUpdate())

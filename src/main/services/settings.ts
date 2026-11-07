@@ -6,16 +6,20 @@ import type { AppSettings, DesktopLyricStyle } from '@shared/types'
 /** 均衡器固定五段，增益必须恒为 5 个数字：长度不对时 setEqualizer 会静默不生效 */
 const EQ_BANDS = 5
 const EQ_MAX_GAIN = 12
+/** 总增益补偿（preamp）范围（dB），比单段更保守，避免整体抬太高削波 */
+const PREAMP_MAX = 6
 
 function normalizeEqualizer(input: unknown): AppSettings['equalizer'] {
-  const source = (input ?? {}) as { enabled?: unknown; gains?: unknown }
+  const source = (input ?? {}) as { enabled?: unknown; gains?: unknown; preamp?: unknown }
   const raw = Array.isArray(source.gains) ? source.gains : []
+  const preamp = Number(source.preamp)
   return {
     enabled: source.enabled === true,
     gains: Array.from({ length: EQ_BANDS }, (_, index) => {
       const value = Number(raw[index])
       return Number.isFinite(value) ? Math.max(-EQ_MAX_GAIN, Math.min(EQ_MAX_GAIN, value)) : 0
-    })
+    }),
+    preamp: Number.isFinite(preamp) ? Math.max(-PREAMP_MAX, Math.min(PREAMP_MAX, preamp)) : 0
   }
 }
 
@@ -107,7 +111,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   writeTags: true,
   engineEnabled: true,
   updateChannel: '',
-  equalizer: { enabled: false, gains: [0, 0, 0, 0, 0] },
+  equalizer: { enabled: false, gains: [0, 0, 0, 0, 0], preamp: 0 },
   closeToTray: true,
   qqCookie: '',
   neteaseCookie: '',

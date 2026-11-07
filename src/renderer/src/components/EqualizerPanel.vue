@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useAppStore } from '../stores/app'
-import { EQ_BANDS, EQ_MAX_GAIN, wave } from '../core/wave'
+import { EQ_BANDS, EQ_MAX_GAIN, PREAMP_MAX, wave } from '../core/wave'
 
 /**
  * 五段图形均衡器 + 内置预设。
@@ -12,13 +12,22 @@ import { EQ_BANDS, EQ_MAX_GAIN, wave } from '../core/wave'
 
 const app = useAppStore()
 
-/** 内置预设（dB，按 EQ_BANDS 顺序 60/230/910/3600/14000）。夜间档附带动态压缩 */
+/**
+ * 内置预设（dB，按 EQ_BANDS 顺序 60/230/910/3600/14000，范围 ±12）。
+ * 夜间档附带动态压缩；其余是常规五段曲线的经验值，起点参考了 Winamp 系预设
+ * 再按本机 5 段中心频率重新折算。
+ */
 const PRESETS: Array<{ name: string; gains: number[] }> = [
   { name: '流行', gains: [2, 0, -1.5, 1.5, 2.5] },
   { name: '摇滚', gains: [4.5, 2, -2, 3, 3.5] },
   { name: '人声', gains: [-2.5, -1, 4, 2.5, -1.5] },
   { name: '低音', gains: [6.5, 4.5, 0.5, -1, -2] },
-  { name: '夜间', gains: [2, 1.5, -0.5, -2, -4.5] }
+  { name: '夜间', gains: [2, 1.5, -0.5, -2, -4.5] },
+  { name: '古典', gains: [3.5, 1.5, -1.5, 2, 3] },
+  { name: '爵士', gains: [3, 2, -1, 1.5, 2] },
+  { name: '电子', gains: [4.5, 2, -2.5, 2.5, 4] },
+  { name: '嘻哈', gains: [5, 3.5, -1, 1, 2.5] },
+  { name: '原声', gains: [2.5, 1, 1, 2, 1.5] }
 ]
 
 function initialGains(): number[] {
@@ -33,11 +42,82 @@ const gains = ref<number[]>(initialGains())
 const enabled = ref(app.settings?.equalizer?.enabled === true)
 /** 夜间限幅（动态压缩）。跟「夜间」预设绑定，也随设置持久化 */
 const night = ref(app.settings?.equalizer?.night === true)
-const flat = computed(() => gains.value.every((value) => value === 0))
+/** 总增益补偿（dB）：独立于五段曲线，给安静的音源补音量 */
+const preamp = ref(Number(app.settings?.equalizer?.preamp) || 0)
+const flat = computed(() => gains.value.every((value) => value === 0) && preamp.value === 0)
+
+/* ---------------- 自定义预设（localStorage 持久化） ---------------- */
+
+interface Preset {
+  name: string
+  gains: number[]
+}
+const CUSTOM_KEY = 'aurora.eq-presets'
+
+function loadCustom(): Preset[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (item): item is Preset =>
+        !!item &&
+        typeof (item as Preset).name === 'string' &&
+        Array.isArray((item as Preset).gains) &&
+        (item as Preset).gains.length === EQ_BANDS.length
+    )
+  } catch {
+    return []
+  }
+}
+
+const customPresets = ref<Preset[]>(loadCustom())
+const saving = ref(false)
+const newName = ref('')
+
+/** 展示顺序：内置在前，自定义在后 */
+const allPresets = computed<Preset[]>(() => [...PRESETS, ...customPresets.value])
+const isCustom = (preset: Preset): boolean => !PRESETS.includes(preset)
+
+function persistCustom(): void {
+  localStorage.setItem(CUSTOM_KEY, JSON.stringify(customPresets.value))
+}
+
+function startSave(): void {
+  if (flat.value) {
+    app.toast('当前是平坦响应，先调好曲线再存为预设', 'info')
+    return
+  }
+  saving.value = true
+  newName.value = ''
+}
+
+function savePreset(): void {
+  const name = newName.value.trim()
+  if (!name) return
+  if (name.length > 8) {
+    app.toast('名字 8 个字以内', 'info')
+    return
+  }
+  if (PRESETS.some((preset) => preset.name === name)) {
+    app.toast('不能覆盖内置预设，换个名字', 'info')
+    return
+  }
+  customPresets.value = [...customPresets.value.filter((preset) => preset.name !== name), { name, gains: [...gains.value] }]
+  persistCustom()
+  saving.value = false
+  newName.value = ''
+}
+
+function removePreset(name: string): void {
+  customPresets.value = customPresets.value.filter((preset) => preset.name !== name)
+  persistCustom()
+}
 
 /** 当前增益是否命中某个预设（容差 0.25，浮点/滑杆步进损耗下也能认出来） */
 const activePreset = computed(() =>
-  PRESETS.find((preset) => preset.gains.every((value, index) => Math.abs(value - gains.value[index]) <= 0.25))
+  allPresets.value.find((preset) =>
+    preset.gains.every((value, index) => Math.abs(value - gains.value[index]) <= 0.25)
+  )
 )
 
 function label(freq: number): string {
@@ -53,7 +133,15 @@ function onInput(index: number, event: Event): void {
 }
 
 function commit(): void {
-  void app.patchSettings({ equalizer: { enabled: enabled.value, gains: [...gains.value], night: night.value } })
+  void app.patchSettings({
+    equalizer: { enabled: enabled.value, gains: [...gains.value], night: night.value, preamp: preamp.value }
+  })
+}
+
+function onPreampInput(event: Event): void {
+  const value = Number((event.target as HTMLInputElement).value)
+  preamp.value = Number.isFinite(value) ? value : 0
+  wave.setPreamp(preamp.value)
 }
 
 function toggle(): void {
@@ -62,7 +150,7 @@ function toggle(): void {
   commit()
 }
 
-function applyPreset(preset: (typeof PRESETS)[number]): void {
+function applyPreset(preset: Preset): void {
   gains.value = [...preset.gains]
   enabled.value = true
   // 只有「夜间」档带限幅；切到任何别的预设都把它收掉
@@ -75,8 +163,10 @@ function applyPreset(preset: (typeof PRESETS)[number]): void {
 function reset(): void {
   gains.value = EQ_BANDS.map(() => 0)
   night.value = false
+  preamp.value = 0
   wave.setEqualizer(gains.value, enabled.value)
   wave.setNightLimiter(false)
+  wave.setPreamp(0)
   commit()
 }
 </script>
@@ -92,14 +182,35 @@ function reset(): void {
 
     <div class="presets">
       <button
-        v-for="preset in PRESETS"
+        v-for="preset in allPresets"
         :key="preset.name"
         :class="{ active: activePreset === preset }"
         :title="preset.name === '夜间' ? '压低动态、收敛高频，深夜听不吵人' : undefined"
         @click="applyPreset(preset)"
       >
-        {{ preset.name }}
+        <span>{{ preset.name }}</span>
+        <span
+          v-if="isCustom(preset)"
+          class="del"
+          title="删除该预设"
+          @click.stop="removePreset(preset.name)"
+        >×</span>
       </button>
+      <button v-if="!saving" class="preset-add" title="把当前曲线存成自己的预设" @click="startSave">
+        ＋存为预设
+      </button>
+    </div>
+
+    <div v-if="saving" class="save-row">
+      <input
+        v-model="newName"
+        class="save-input"
+        placeholder="预设名字（≤8 字）"
+        maxlength="8"
+        @keydown.enter="savePreset"
+      />
+      <button class="save-ok" @click="savePreset">保存</button>
+      <button class="save-cancel" @click="saving = false">取消</button>
     </div>
 
     <div class="eq-bands">
@@ -118,6 +229,22 @@ function reset(): void {
         />
         <span class="freq">{{ label(freq) }}</span>
       </div>
+    </div>
+
+    <div class="eq-preamp">
+      <span class="preamp-label">总增益</span>
+      <input
+        class="preamp-slider"
+        type="range"
+        :min="-PREAMP_MAX"
+        :max="PREAMP_MAX"
+        step="0.5"
+        :value="preamp"
+        aria-label="总增益补偿"
+        @input="onPreampInput"
+        @change="commit"
+      />
+      <span class="preamp-val">{{ preamp > 0 ? '+' : '' }}{{ preamp.toFixed(1) }} dB</span>
     </div>
 
     <div class="eq-foot">
@@ -155,11 +282,17 @@ function reset(): void {
 }
 .presets {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 .presets button {
-  flex: 1;
-  padding: 4.5px 0;
+  flex: 1 1 auto;
+  min-width: 44px;
+  padding: 4.5px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.05);
@@ -167,6 +300,62 @@ function reset(): void {
   font-size: 10.5px;
   cursor: pointer;
   transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+.presets button .del {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+.presets button:hover .del {
+  opacity: 1;
+}
+.presets button .del:hover {
+  color: #ff7b7b;
+}
+.presets .preset-add {
+  border-style: dashed;
+  color: var(--text-3);
+}
+.presets .preset-add:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+  background: rgba(255, 255, 255, 0.05);
+}
+.save-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.save-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-1);
+  font-size: 11px;
+}
+.save-input:focus {
+  outline: none;
+  border-color: rgba(110, 231, 255, 0.5);
+}
+.save-ok,
+.save-cancel {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-2);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.save-ok {
+  color: #6ee7ff;
+  border-color: rgba(110, 231, 255, 0.5);
 }
 .presets button:hover {
   color: var(--text-1);
@@ -236,6 +425,32 @@ function reset(): void {
 .freq {
   font-size: 9.5px;
   color: var(--text-3);
+}
+.eq-preamp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.preamp-label {
+  flex: none;
+}
+.preamp-slider {
+  flex: 1;
+  height: 4px;
+  accent-color: #6ee7ff;
+  cursor: pointer;
+}
+.preamp-val {
+  flex: none;
+  min-width: 46px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.off .eq-preamp {
+  opacity: 0.45;
 }
 .eq-foot {
   display: flex;

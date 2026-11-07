@@ -180,12 +180,57 @@ interface AcoustIdResponse {
   results?: Array<{ score?: number; recordings?: AcoustIdRecording[] }>
 }
 
+/* ---------------- 取消与总超时 ----------------
+   录音识别最多要 8 档时长各打一次 AcoustID，最坏 2 分钟；中途关弹窗 / 点「再试一次」
+   旧的请求还该继续在后台跑。用单例 AbortController：新识别覆盖旧的，取消只作用最后一次。 */
+
+/** 整个识别流程（含阶梯扫描）的总超时 */
+const RECOGNIZE_TOTAL_TIMEOUT_MS = 90_000
+let activeController: AbortController | null = null
+/** 中止原因：cancelRecognize 是用户取消，总超时是时间到——两者文案不同 */
+let abortReason: 'cancel' | 'timeout' = 'cancel'
+
+export function cancelRecognize(): void {
+  abortReason = 'cancel'
+  activeController?.abort()
+}
+
+function abortedResult(): RecognitionResult {
+  return abortReason === 'timeout'
+    ? { ok: false, reason: 'timeout', message: '识别超时了，请重试或换一首再试' }
+    : { ok: false, reason: 'cancelled', message: '识别已取消' }
+}
+
+/** 开启一次可取消的识别流程：新流程会先中止上一个，取消只作用于最后一次 */
+function beginRecognition(): { signal: AbortSignal; end: () => void } {
+  activeController?.abort()
+  const controller = new AbortController()
+  activeController = controller
+  abortReason = 'cancel'
+  const timer = setTimeout(() => {
+    if (activeController === controller) {
+      abortReason = 'timeout'
+      controller.abort()
+    }
+  }, RECOGNIZE_TOTAL_TIMEOUT_MS)
+  return {
+    signal: controller.signal,
+    end: () => {
+      clearTimeout(timer)
+      if (activeController === controller) activeController = null
+    }
+  }
+}
+
 async function lookup(
   fp: Fingerprint,
   client: string,
-  duration: number
+  duration: number,
+  signal?: AbortSignal
 ): Promise<RecognitionResult> {
+  if (signal?.aborted) return abortedResult()
   await waitForSlot()
+  if (signal?.aborted) return abortedResult()
 
   const body = new URLSearchParams({
     client,
@@ -205,9 +250,12 @@ async function lookup(
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
-      signal: AbortSignal.timeout(15000)
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+        : AbortSignal.timeout(15000)
     })
   } catch (e) {
+    if (signal?.aborted) return abortedResult()
     return {
       ok: false,
       reason: 'failed',
@@ -273,12 +321,15 @@ const DURATION_GUESSES = [240, 210, 270, 180, 300, 150, 330, 360]
 /** 录音场景：不知道整首多长，按时长阶梯逐档试，命中即返回 */
 async function lookupAnyDuration(
   fp: Fingerprint,
-  client: string
+  client: string,
+  signal?: AbortSignal
 ): Promise<RecognitionResult> {
   let failure: RecognitionResult | null = null
   for (const guess of DURATION_GUESSES) {
-    const result = await lookup(fp, client, guess)
+    if (signal?.aborted) return abortedResult()
+    const result = await lookup(fp, client, guess, signal)
     if (result.ok) return result
+    if (result.reason === 'cancelled' || result.reason === 'timeout') return result
     // 中途的网络/鉴权错误要留住：后面几档可能只是「库里没有」，不能把它覆盖成 no-match
     if (result.reason === 'failed' && !failure) failure = result
   }
@@ -302,6 +353,7 @@ export async function recognizeBuffer(
   if (!buffer.length) return { ok: false, reason: 'failed', message: '没有收到音频数据' }
   if (!fpcalcAvailable()) return missingBinary()
 
+  const rec = beginRecognition()
   let dir = ''
   try {
     dir = await mkdtemp(join(tmpdir(), 'aurora-recognize-'))
@@ -312,8 +364,9 @@ export async function recognizeBuffer(
     // 直接用它查一次：省掉 7 档白跑，也能覆盖 >360 秒的长曲
     //（DURATION_GUESSES 最大 360，长曲逐档猜必然全落空）。
     // 只有 20 秒录音这类短片段才需要猜整首有多长。
-    if (fp.duration >= 30) return await lookup(fp, client || DEFAULT_CLIENT, fp.duration)
-    return await lookupAnyDuration(fp, client || DEFAULT_CLIENT)
+    const key = client || DEFAULT_CLIENT
+    if (fp.duration >= 30) return await lookup(fp, key, fp.duration, rec.signal)
+    return await lookupAnyDuration(fp, key, rec.signal)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     if (message === 'MISSING_BINARY') return missingBinary()
@@ -322,6 +375,7 @@ export async function recognizeBuffer(
     }
     return { ok: false, reason: 'failed', message: `识别失败：${message.slice(0, 120)}` }
   } finally {
+    rec.end()
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }
 }
@@ -335,13 +389,17 @@ export async function recognizeFile(
     return { ok: false, reason: 'failed', message: `文件不存在：${filePath.slice(0, 120)}` }
   }
   if (!fpcalcAvailable()) return missingBinary()
+  const rec = beginRecognition()
   try {
     const fp = await fingerprint(filePath)
     // 文件是完整的，fpcalc 给出的 duration 就是整首时长，一次到位
-    if (fp.duration >= 30) return await lookup(fp, client || DEFAULT_CLIENT, fp.duration)
-    return await lookupAnyDuration(fp, client || DEFAULT_CLIENT)
+    const key = client || DEFAULT_CLIENT
+    if (fp.duration >= 30) return await lookup(fp, key, fp.duration, rec.signal)
+    return await lookupAnyDuration(fp, key, rec.signal)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return { ok: false, reason: 'failed', message: `识别失败：${message.slice(0, 120)}` }
+  } finally {
+    rec.end()
   }
 }

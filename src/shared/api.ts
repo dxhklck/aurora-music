@@ -219,6 +219,8 @@ export interface AuroraApi {
    * 也让 fpcalc 拿到原始扩展名（任意格式都靠文件内容探测，但别再伪装成 .wav）。
    */
   recognizePickedFile(file: File): Promise<RecognitionResult>
+  /** 取消当前在飞的识别（关弹窗 / 重新识别时收掉后台的阶梯扫描请求） */
+  cancelRecognize(): Promise<void>
 
   /** 写系统剪贴板（复制文件路径） */
   copyText(text: string): Promise<void>

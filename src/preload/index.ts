@@ -86,6 +86,7 @@ const api: AuroraApi = {
   // File 对象不能跨 contextBridge 传给主进程；在 preload 里同步换成绝对路径
   recognizePickedFile: (file) =>
     ipcRenderer.invoke(IPC.recognizeFile, webUtils.getPathForFile(file)),
+  cancelRecognize: () => ipcRenderer.invoke(IPC.recognizeCancel),
   applyShortcuts: () => ipcRenderer.invoke(IPC.shortcutsApply),
 
   logWrite: (level, scope, message) => ipcRenderer.invoke(IPC.logWrite, { level, scope, message }),

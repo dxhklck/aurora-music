@@ -29,6 +29,8 @@ class AudioEngine {
   private xfTimer: number | null = null
   private targetVolume = 0.75
   private muted = false
+  /** 播放速率（0.5~2）。playbackRate 是元素属性，换 src / load 不清零，两个元素各设一次即可 */
+  private rate = 1
   /** 每个元素的当前电平（0~targetVolume）。音频图接管后 el.volume 失效，只能记在引擎里 */
   private levels: [number, number] = [0.75, 0.75]
   private ready = false
@@ -328,6 +330,16 @@ class AudioEngine {
     this.muted = Boolean(muted)
     for (const el of this.els) el.muted = this.muted
     wave.setMuted(this.muted)
+  }
+
+  /**
+   * 播放速率（0.5~2.0）。HTMLAudioElement 的 playbackRate 默认变速不变调
+   * （preservesPitch 走 time-stretch），练听力 / 跟唱 / 快进式听书直接可用。
+   * 两个元素都要设：交叉淡化期间下一曲从另一个元素播放，速率不一致会突然变速。
+   */
+  setRate(rate: number): void {
+    this.rate = Number.isFinite(rate) ? Math.max(0.5, Math.min(2, rate)) : 1
+    for (const el of this.els) el.playbackRate = this.rate
   }
 
   /**

@@ -358,7 +358,14 @@ export interface AppSettings {
    * 五段均衡器。gain 单位为 dB，固定 5 段（60/230/910/3600/14000 Hz），范围 ±12。
    * 关闭时滤波器仍在链路里，只是增益归零——拆链重接极易踩到静音。
    */
-  equalizer: { enabled: boolean; gains: number[]; /** 夜间限幅（压动态） */ night?: boolean }
+  equalizer: {
+    enabled: boolean
+    gains: number[]
+    /** 夜间限幅（压动态） */
+    night?: boolean
+    /** 总增益补偿（dB，±6），给安静的音源补音量，作用在 AGC 之后 */
+    preamp?: number
+  }
   /** 点关闭按钮时最小化到系统托盘（关掉 = 隐藏后台播放）；为 false 时关闭即退出。托盘不可用时始终退出 */
   closeToTray: boolean
   /**
@@ -421,7 +428,7 @@ export type RecognitionResult =
     }
   | {
       ok: false
-      reason: 'no-match' | 'failed' | 'binary-missing'
+      reason: 'no-match' | 'failed' | 'binary-missing' | 'timeout' | 'cancelled'
       message: string
     }
 
