@@ -1,6 +1,6 @@
 {
   "name": "aurora-music",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "engines": {
     "node": ">=22.6.0"
   },

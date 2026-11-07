@@ -107,7 +107,7 @@ src/
     windows.ts          主窗口 / 桌面歌词窗 / 迷你条 / 音量气泡
     taskbar.ts          任务栏进度条与跳转列表（仅 Windows）
     protocol.ts         muse:// 媒体协议（封面代理、本地流式读取）
-    ipc.ts              111 个 IPC 通道的处理器
+    ipc.ts              112 个 IPC 通道的处理器
   preload/              contextBridge 暴露的 window.api
   shared/               IPC 常量、类型、歌词解析（主进程与渲染层共用）
   renderer/src/
