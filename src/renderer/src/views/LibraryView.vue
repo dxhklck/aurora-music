@@ -448,15 +448,29 @@ function preselect(groups: DuplicateGroup[]): Set<string> {
 }
 
 async function openDuplicates(): Promise<void> {
+  // 每次打开都回到快扫：点过一次「指纹深查」不该让以后每次打开都逐首跑 fpcalc
+  dupDeep.value = false
   dupOpen.value = true
-  await scanDuplicates()
+  await scanDuplicates(false)
 }
 
-async function scanDuplicates(): Promise<void> {
+const dupDeep = ref(false)
+
+/**
+ * deep=true 会再按指纹比对一遍：能抓「同曲不同码率」，但要逐首跑 fpcalc（每首约 1 秒）。
+ * 只在该按钮上触发，常规扫描仍然是毫秒级的哈希分组。
+ */
+async function scanDuplicates(deep = false): Promise<void> {
+  dupDeep.value = deep
   dupLoading.value = true
   try {
-    dupGroups.value = await library.findDuplicates()
+    dupGroups.value = await library.findDuplicates(deep)
     dupSelected.value = preselect(dupGroups.value)
+  } catch (error) {
+    dupGroups.value = []
+    dupSelected.value = new Set()
+    // 主进程缺 fpcalc 时会抛错；吞掉就只剩一个空面板，用户不知道发生了什么
+    app.toast(error instanceof Error ? error.message : '重复扫描失败', 'error')
   } finally {
     dupLoading.value = false
   }
@@ -477,9 +491,165 @@ async function cleanDuplicates(): Promise<void> {
     if (player.current && ids.includes(player.current.id)) player.stop()
     const result = await library.deleteFiles(ids)
     if (result?.failed) report.value = result
-    await scanDuplicates()
+    // 清理后重新快扫；深查很慢，不跟着上一轮的模式隐式再跑一遍
+    await scanDuplicates(false)
   } finally {
     busy.value = false
+  }
+}
+
+/* ---------------- 识别补标签 ---------------- */
+
+interface TagProposal {
+  id: string
+  /** 当前歌名，用来和识别结果对照 */
+  before: string
+  /** 识别后要写入的字段，只包含缺失或来自文件名的那几项 */
+  patch: { name?: string; artists?: string; album?: string }
+  /** 展示用：识别到的「歌名 - 歌手」 */
+  after: string
+  checked: boolean
+}
+
+const tagOpen = ref(false)
+const tagScanning = ref(false)
+const tagApplying = ref(false)
+const tagProgress = ref(0)
+const tagTotal = ref(0)
+const tagCurrent = ref('')
+const tagMissed = ref(0)
+const tagItems = ref<TagProposal[]>([])
+let tagCancel = false
+/** 代次：关掉面板 / 换一批歌曲后，上一批后台扫描的结果不能再写进新面板 */
+let tagScanId = 0
+let tagTargets: LibraryTrack[] = []
+
+/** 文件名（去扩展名）：歌名等于它，说明这条从来没被正确打过标签 */
+function fileStem(filePath: string): string {
+  const base = filePath.split(/[\\/]/).pop() ?? ''
+  return base.replace(/\.[^.]+$/u, '')
+}
+
+/**
+ * 只补「明显缺」的字段，不覆盖用户已经整理好的内容：
+ * - 歌名等于文件名（说明是解析出来的占位名）→ 用识别结果替换
+ * - 没有歌手 → 填歌手
+ * - 没有专辑 → 填专辑
+ */
+function buildProposal(track: LibraryTrack, hit: { title: string; artist: string; album: string }): TagProposal | null {
+  const patch: TagProposal['patch'] = {}
+  const title = hit.title.trim()
+  const artist = hit.artist.trim()
+  const album = hit.album.trim()
+  if (title && title !== track.song.name && track.song.name === fileStem(track.filePath)) {
+    patch.name = title
+  }
+  if (artist && !track.song.artists.length) patch.artists = artist
+  if (album && !track.song.album) patch.album = album
+  if (!patch.name && !patch.artists && !patch.album) return null
+  return {
+    id: track.id,
+    before: track.song.name,
+    patch,
+    // 预览要与实际写入的 patch 一致：只补专辑时别显示成「歌名和歌手会被覆盖」
+    after:
+      [patch.name ?? track.song.name, patch.artists ?? track.song.artists.join('/')]
+        .filter(Boolean)
+        .join(' - ') + (patch.album ? ` · ${patch.album}` : ''),
+    checked: true
+  }
+}
+
+function askRecognizeTags(items: LibraryTrack[]): void {
+  closeMenu()
+  if (!items.length) return
+  // 上一批可能还在后台逐首跑 fpcalc；先让它作废，否则新批次会被 tagScanning
+  // 直接 return，面板挂着旧进度/旧结果，用户点「应用」会写到别的歌上
+  tagScanId += 1
+  tagScanning.value = false
+  tagCancel = false
+  tagTargets = [...items]
+  tagOpen.value = true
+  void scanTags()
+}
+
+async function scanTags(): Promise<void> {
+  const id = ++tagScanId
+  const targets = [...tagTargets]
+  tagScanning.value = true
+  tagCancel = false
+  tagItems.value = []
+  tagMissed.value = 0
+  tagProgress.value = 0
+  tagTotal.value = targets.length
+  try {
+    for (const track of targets) {
+      if (tagCancel || id !== tagScanId) break
+      tagCurrent.value = track.song.name
+      try {
+        const hit = await window.api.recognizeFile(track.filePath)
+        if (id !== tagScanId) return
+        const proposal = hit.ok
+          ? buildProposal(track, { title: hit.title, artist: hit.artist, album: hit.album })
+          : null
+        if (proposal) tagItems.value = [...tagItems.value, proposal]
+        else tagMissed.value += 1
+      } catch {
+        if (id !== tagScanId) return
+        // 单首失败（文件被删、格式不支持）不该中断整批
+        tagMissed.value += 1
+      }
+      tagProgress.value += 1
+    }
+  } finally {
+    if (id === tagScanId) {
+      tagScanning.value = false
+      tagCurrent.value = ''
+    }
+  }
+}
+
+function cancelTagScan(): void {
+  tagCancel = true
+}
+
+/** 所有关闭补标签面板的入口都走这里：扫描必须一起停 */
+function closeTagPanel(): void {
+  tagScanId += 1
+  cancelTagScan()
+  tagOpen.value = false
+  tagScanning.value = false
+  tagCurrent.value = ''
+}
+
+function toggleTag(id: string): void {
+  tagItems.value = tagItems.value.map((item) =>
+    item.id === id ? { ...item, checked: !item.checked } : item
+  )
+}
+
+const tagPicked = computed(() => tagItems.value.filter((item) => item.checked).length)
+
+async function applyTags(): Promise<void> {
+  const picked = tagItems.value.filter((item) => item.checked)
+  if (!picked.length) return
+  tagApplying.value = true
+  let done = 0
+  try {
+    for (const item of picked) {
+      // 必须展开成普通对象：item 来自 ref 数组，item.patch 是 Vue 的响应式代理，
+      // 直接交给 IPC 会在结构化克隆时抛 DataCloneError，界面上只表现为「点了没反应」。
+      const updated = await window.api.updateLibraryMeta(item.id, { ...item.patch })
+      if (updated) done += 1
+    }
+    await library.load()
+    closeTagPanel()
+    tableRef.value?.clearSelection()
+    app.toast(done ? `已补全 ${done} 首的标签` : '没有写入任何条目', done ? 'success' : 'info')
+  } catch (error) {
+    app.toast(error instanceof Error ? error.message : '写入失败', 'error')
+  } finally {
+    tagApplying.value = false
   }
 }
 
@@ -838,6 +1008,12 @@ function openTargetDir(): void {
       <span class="sep" />
       <button v-if="menu.items.length === 1" @click="openEditor(menu.song)">编辑歌曲信息</button>
       <button v-else @click="askMeta(menu.items)">批量修改标签（{{ menu.items.length }} 首）</button>
+      <button
+        title="用听歌识曲查 AcoustID，补歌名/歌手/专辑（只补缺的字段）"
+        @click="askRecognizeTags(menu.items)"
+      >
+        识别并补全标签<em v-if="menu.items.length > 1" class="n">{{ menu.items.length }}</em>
+      </button>
       <span class="sep" />
       <button @click="requestRemove(menu.items); closeMenu()">从库移除（保留文件）</button>
       <button v-if="menuDeleteLabel" class="danger" @click="requestDelete(menu.items); closeMenu()">
@@ -918,14 +1094,28 @@ function openTargetDir(): void {
         <header class="panel-head">
           <h3>重复文件</h3>
           <div class="panel-actions">
-            <button class="btn ghost" :disabled="dupLoading" @click="scanDuplicates">
-              {{ dupLoading ? '扫描中…' : '重新扫描' }}
+            <button class="btn ghost" :disabled="dupLoading" @click="scanDuplicates(false)">
+              {{ dupLoading ? (dupDeep ? '算指纹中…' : '扫描中…') : '重新扫描' }}
+            </button>
+            <button
+              class="btn ghost"
+              :disabled="dupLoading"
+              title="再按指纹比对一遍：能抓出同曲不同码率（元数据对不上的那种），每首约 1 秒"
+              @click="scanDuplicates(true)"
+            >
+              指纹深查
             </button>
             <button class="icon-btn" @click="dupOpen = false"><Icon name="close" :size="14" /></button>
           </div>
         </header>
 
-        <div v-if="dupLoading" class="panel-empty">正在按大小分组并计算哈希，库大的话要几十秒…</div>
+        <div v-if="dupLoading" class="panel-empty">
+          {{
+            dupDeep
+              ? '正在逐首计算音频指纹（每首约 1 秒），库里歌多的话要等一会儿…'
+              : '正在按大小分组并计算哈希，库大的话要几十秒…'
+          }}
+        </div>
         <div v-else-if="!dupGroups.length" class="panel-empty">没有发现重复文件。</div>
         <div v-else class="dup-list">
           <section v-for="group in dupGroups" :key="group.label" class="dup-group">
@@ -953,6 +1143,60 @@ function openTargetDir(): void {
             @click="cleanDuplicates"
           >
             清理 {{ dupSelected.size }} 个
+          </button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- 识别补标签 -->
+    <div v-if="tagOpen" class="mask" @click.self="closeTagPanel">
+      <div class="panel">
+        <header class="panel-head">
+          <h3>识别并补全标签</h3>
+          <div class="panel-actions">
+            <button class="icon-btn" @click="closeTagPanel">
+              <Icon name="close" :size="14" />
+            </button>
+          </div>
+        </header>
+
+        <p class="tag-note">
+          用本机指纹查 AcoustID，只补「歌名等于文件名 / 没有歌手 / 没有专辑」的字段，
+          已整理好的内容不会被覆盖。
+        </p>
+
+        <div v-if="tagScanning" class="tag-progress">
+          <div class="tag-bar">
+            <span :style="{ width: `${tagTotal ? (tagProgress / tagTotal) * 100 : 0}%` }" />
+          </div>
+          <p>
+            {{ tagProgress }} / {{ tagTotal }}
+            <span class="truncate">{{ tagCurrent }}</span>
+          </p>
+          <button class="btn" @click="cancelTagScan">停止</button>
+        </div>
+
+        <div v-else-if="!tagItems.length" class="panel-empty">
+          没有识别到可补全的信息{{ tagMissed ? `（${tagMissed} 首没查到时或标签已完整）` : '' }}。
+        </div>
+
+        <div v-else class="tag-list">
+          <label v-for="item in tagItems" :key="item.id" class="tag-row">
+            <input type="checkbox" :checked="item.checked" @change="toggleTag(item.id)" />
+            <span class="tag-before truncate" :title="item.before">{{ item.before }}</span>
+            <span class="tag-arrow">→</span>
+            <span class="tag-after truncate" :title="item.after">{{ item.after }}</span>
+            <span class="tag-fields">{{ Object.keys(item.patch).length }} 项</span>
+          </label>
+        </div>
+
+        <footer class="panel-foot">
+          <span class="hint">
+            <template v-if="tagMissed">有 {{ tagMissed }} 首没查到，通常是 OST / 翻唱。</template>
+            <template v-else>识别逐首进行，约每秒一首。</template>
+          </span>
+          <button class="btn primary" :disabled="tagScanning || tagApplying || !tagPicked" @click="applyTags">
+            {{ tagApplying ? '写入中…' : `应用 ${tagPicked} 首` }}
           </button>
         </footer>
       </div>
@@ -1648,5 +1892,77 @@ function openTargetDir(): void {
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* 识别补标签 */
+.tag-note {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.tag-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 6px;
+}
+.tag-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  overflow: hidden;
+}
+.tag-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+.tag-progress p {
+  margin: 0;
+  min-width: 0;
+  max-width: 220px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.tag-list {
+  overflow: auto;
+  flex: 1;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+.tag-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1.2fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tag-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.tag-before {
+  color: var(--text-2);
+}
+.tag-arrow {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.tag-after {
+  color: var(--text);
+}
+.tag-fields {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10px;
 }
 </style>

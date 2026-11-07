@@ -170,6 +170,12 @@ export const IPC = {
   /** 还原后重启应用（让新配置生效） */
   appRelaunch: 'app:relaunch',
 
+  // 听歌识曲（本地算 Chromaprint 指纹 → AcoustID 查询）
+  /** 传一段录到的音频字节（webm/opus），返回识别结果 */
+  recognizeAudio: 'recognize:audio',
+  /** 传本地音频文件路径（拖拽 / 从本地库选） */
+  recognizeFile: 'recognize:file',
+
   // 自动更新（Windows）
   updateCheck: 'update:check',
   updateInstall: 'update:install',

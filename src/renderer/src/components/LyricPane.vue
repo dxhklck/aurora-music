@@ -211,18 +211,18 @@ onBeforeUnmount(() => {
 .line {
   padding: 9px 4px;
   border-radius: 12px;
-  text-align: left;
+  text-align: var(--np-align, left);
   cursor: pointer;
   transition: all 0.32s var(--ease);
-  opacity: 0.42;
+  opacity: var(--np-dim, 0.42);
   transform-origin: left center;
 }
 
 .line .text {
   display: block;
-  font-size: 16px;
+  font-size: var(--np-line-size, 16px);
   line-height: 1.5;
-  font-weight: 500;
+  font-weight: var(--np-line-weight, 500);
   color: var(--text);
   transition: all 0.32s var(--ease);
 }
@@ -230,33 +230,33 @@ onBeforeUnmount(() => {
 .line .trans {
   display: block;
   margin-top: 3px;
-  font-size: 12.5px;
+  font-size: var(--np-trans-size, 12.5px);
   color: var(--text-2);
   opacity: 0;
   transition: opacity 0.32s var(--ease);
 }
 
 .line.passed {
-  opacity: 0.3;
+  opacity: var(--np-passed, 0.3);
 }
 
 .line.active {
   opacity: 1;
-  transform: translateX(6px);
+  transform: var(--np-active-shift, translateX(6px));
 }
 .line.active .text {
-  font-size: 21px;
-  font-weight: 700;
+  font-size: var(--np-active-size, 21px);
+  font-weight: var(--np-active-weight, 700);
   letter-spacing: 0.2px;
-  background: linear-gradient(100deg, #fff, var(--accent));
+  background: var(--np-active-fill, linear-gradient(100deg, #fff, var(--accent)));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  text-shadow: 0 6px 26px rgba(0, 0, 0, 0.35);
+  text-shadow: var(--np-active-shadow, 0 6px 26px rgba(0, 0, 0, 0.35));
 }
 .line.active .trans {
-  opacity: 0.8;
-  font-size: 13px;
+  opacity: var(--np-trans-opacity, 0.8);
+  font-size: var(--np-active-trans-size, 13px);
 }
 
 .line:hover {
@@ -298,8 +298,8 @@ onBeforeUnmount(() => {
   line-height: inherit;
 }
 .w-base {
-  color: rgba(255, 255, 255, 0.34);
-  -webkit-text-fill-color: rgba(255, 255, 255, 0.34);
+  color: var(--np-kara-base, rgba(255, 255, 255, 0.34));
+  -webkit-text-fill-color: var(--np-kara-base, rgba(255, 255, 255, 0.34));
 }
 .w-fill {
   position: absolute;
@@ -307,10 +307,13 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  color: #fff;
-  -webkit-text-fill-color: #fff;
-  text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 60%, transparent),
-    0 4px 22px color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--np-kara, #fff);
+  -webkit-text-fill-color: var(--np-kara, #fff);
+  text-shadow: var(
+    --np-kara-glow,
+    0 0 18px color-mix(in srgb, var(--accent) 60%, transparent),
+    0 4px 22px color-mix(in srgb, var(--accent) 38%, transparent)
+  );
   /* 未激活（无 --e）的字保持完全裁掉，避免静态下与 base 叠加闪动 */
   clip-path: inset(0 100% 0 0);
 }
@@ -383,11 +386,11 @@ onBeforeUnmount(() => {
 }
 .mask.top {
   top: 0;
-  background: linear-gradient(180deg, rgba(8, 8, 12, 0.55), transparent);
+  background: linear-gradient(180deg, var(--np-mask, rgba(8, 8, 12, 0.55)), transparent);
 }
 .mask.bottom {
   bottom: 0;
-  background: linear-gradient(0deg, rgba(8, 8, 12, 0.55), transparent);
+  background: linear-gradient(0deg, var(--np-mask, rgba(8, 8, 12, 0.55)), transparent);
 }
 
 .hint {

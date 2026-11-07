@@ -78,6 +78,11 @@ jobs:
             echo "::notice title=产物未签名::未配置 CSC_LINK，Windows 首次运行会提示「未知发布者」，详见 docs/code-signing.md"
           fi
 
+      # macOS / Linux 的 fpcalc 不入库（每个二进制 5MB），打包时按当前平台下载；
+      # Windows 分支会断言仓库自带的 fpcalc.exe 存在，防止漏入库产出无识别功能的安装包
+      - name: Fetch fpcalc
+        run: npm run fetch:fpcalc -- --strict
+
       - name: Package
         env:
           # 有证书就签名，没有就跳过（CI 不因此失败）

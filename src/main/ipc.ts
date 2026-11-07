@@ -28,6 +28,7 @@ import { musicdl } from './engine/musicdl'
 import { refresh as refreshSourceHealth, snapshot as sourceHealthSnapshot } from './services/source-health'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
 import { checkForUpdate, installUpdate } from './updater'
+import { recognizeBuffer, recognizeFile } from './services/recognize'
 import { reregisterShortcuts } from './shortcuts'
 import { sanitizeFileName } from './utils'
 import {
@@ -210,7 +211,7 @@ export function registerIpc(): void {
     report.playlistsRemoved = await playlists.dropLocalTracks(ids)
     return report
   })
-  handle(IPC.libraryDuplicates, () => library.duplicates())
+  handle(IPC.libraryDuplicates, (deep?: boolean) => library.duplicates(!!deep))
   handle(IPC.libraryCopyTo, (ids: string[]) => copyToDir(ids))
   handle(IPC.libraryExportTo, (ids: string[], template: string) => copyToDir(ids, template))
   handle(IPC.libraryRelocate, async () => {
@@ -365,6 +366,15 @@ export function registerIpc(): void {
   handle(IPC.engineRestart, () => musicdl.restart())
   handle(IPC.sourceHealth, () => sourceHealthSnapshot())
   handle(IPC.sourceHealthRefresh, () => refreshSourceHealth())
+
+  // ---------- 听歌识曲 ----------
+  // 传进来的字节量很小（20 秒 48kHz 单声道 WAV 约 1.9MB），不需要开流式通道
+  handle(IPC.recognizeAudio, (payload: Uint8Array) =>
+    recognizeBuffer(Buffer.from(payload), settings.get().acoustidKey)
+  )
+  handle(IPC.recognizeFile, (filePath: string) =>
+    recognizeFile(String(filePath ?? ''), settings.get().acoustidKey)
+  )
 
   // ---------- 更新 ----------
   handle(IPC.updateCheck, () => checkForUpdate())

@@ -28,3 +28,9 @@ scripts/engine-ts/.build/
 
 # 本地手动打包输出（发布链路故障时的兜底产物，不入库）
 dist-local/
+
+# macOS / Linux 的 fpcalc 由 scripts/fetch-fpcalc.mjs 在打包时下载，不入库
+# Windows 版必须随仓库提供：CI 的 Fetch fpcalc 在 win32 是 no-op，漏掉就打包出无识别功能的安装包
+resources/bin/darwin/
+resources/bin/linux-*/
+!resources/bin/fpcalc.exe

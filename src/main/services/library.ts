@@ -11,6 +11,8 @@ import { musicdl } from '../engine/musicdl'
 import { readTagFields, type TagCover } from '../engine/ts/tag-read'
 import { localUrl } from '../media'
 import { settings } from './settings'
+import { fingerprintRaw, fpcalcAvailable } from './recognize'
+import { SAME_RECORDING_MAX_GAP_SEC, sameRecording } from '@shared/fingerprint-match'
 
 /** 本地库识别的音频格式（与 Muse 播放支持的格式保持一致） */
 const AUDIO_EXTS = new Set(['mp3', 'flac', 'wav', 'm4a', 'ogg', 'aac', 'opus'])
@@ -20,6 +22,16 @@ const MAX_SCAN_DEPTH = 2
 
 /** 哈希并发：机械盘上开太多会互相拖慢，3 个足够吃满顺序读 */
 const HASH_CONCURRENCY = 3
+
+/** 指纹并发：fpcalc 是独立进程、CPU 密集，2 个就能吃满，再多只是互相拖慢 */
+const FINGERPRINT_CONCURRENCY = 2
+
+/**
+ * 指纹缓存：`路径|大小|修改时间` → 逐帧数据。
+ * 只存在进程内；size 或 mtime 变了都会失效（同 size 原地覆写也算，见 fingerprintClusters）。
+ * 不落盘是因为几百首的逐帧数据能到几 MB，增量收益不如每次重算。
+ */
+const fingerprintCache = new Map<string, Uint32Array>()
 
 /** 「仅从库移除」的黑名单：同一路径、同大小、同修改时间才跳过，重新下载能正常回来 */
 interface IgnoredEntry {
@@ -650,8 +662,15 @@ class LibraryService {
    * 重复文件扫描。
    * 先按大小分组（免费的粗筛），只对同 size 的组算 sha256，
    * 避免为几千首没重复的歌白读一遍磁盘。
+   *
+   * deep=true 时再补一轮**指纹比对**：抓「同曲不同码率 / flac 与 mp3」这类
+   * 内容不同但其实是同一录音的文件——元数据那套（歌名+歌手+时长）在标签本来就坏掉的
+   * 曲目上完全失效，恰恰是重复文件最集中的地方。代价是要逐首跑 fpcalc，慢。
    */
-  async duplicates(): Promise<DuplicateGroup[]> {
+  async duplicates(deep = false): Promise<DuplicateGroup[]> {
+    if (deep && !fpcalcAvailable()) {
+      throw new Error('缺少指纹组件 fpcalc，无法做指纹深查；请重装完整安装包')
+    }
     await this.load()
     const alive = this.items.filter((item) => !item.missing && item.size > 0)
 
@@ -716,7 +735,154 @@ class LibraryService {
       })
     }
 
+    if (deep) {
+      // 把「已有重复组」与「指纹簇」统一按 id 做并查集。
+      // 早期逐 cluster 只找第一个命中的组并进去：一个簇跨两个 identical 组时
+      //（A,B 字节一致；C,D 字节一致；A 与 C 是同曲不同码率）另一组会残留，
+      // 同一 id 出现在两组里，用户据此清理会漏删或误删。
+      const clusters = await this.fingerprintClusters()
+      if (clusters.length) {
+        const parent = new Map<string, string>()
+        const find = (id: string): string => {
+          let root = id
+          while (parent.has(root) && parent.get(root) !== root) root = parent.get(root) as string
+          return root
+        }
+        const union = (a: string, b: string): void => {
+          const ra = find(a)
+          const rb = find(b)
+          if (ra !== rb) parent.set(ra, rb)
+        }
+        for (const group of groups) {
+          for (let i = 1; i < group.ids.length; i++) union(group.ids[0], group.ids[i])
+        }
+        for (const ids of clusters) {
+          for (let i = 1; i < ids.length; i++) union(ids[0], ids[i])
+        }
+
+        const allIds = new Set<string>()
+        for (const group of groups) group.ids.forEach((id) => allIds.add(id))
+        for (const ids of clusters) ids.forEach((id) => allIds.add(id))
+        const buckets = new Map<string, string[]>()
+        for (const id of allIds) {
+          const root = find(id)
+          const list = buckets.get(root) ?? []
+          list.push(id)
+          buckets.set(root, list)
+        }
+        // 没被合并的原组保留原 label（「完全一致 ×2」），合并过的统一叫「同曲 ×N」
+        const untouched = new Map<string, DuplicateGroup>()
+        for (const group of groups) {
+          const root = find(group.ids[0])
+          if (buckets.get(root)?.length === group.ids.length) untouched.set(root, group)
+        }
+
+        const merged: DuplicateGroup[] = []
+        for (const [root, ids] of buckets) {
+          if (ids.length < 2) continue
+          const original = untouched.get(root)
+          if (original) {
+            merged.push(original)
+            continue
+          }
+          const name = this.findById(ids[0])?.song.name ?? ''
+          merged.push({ kind: 'similar', label: `${name} · 同曲 ×${ids.length}`, ids })
+        }
+        return merged.sort((a, b) => b.ids.length - a.ids.length)
+      }
+    }
+
     return groups.sort((a, b) => b.ids.length - a.ids.length)
+  }
+
+  /**
+   * 按指纹把「同一段录音」聚成组，返回 id 列表。
+   *
+   * 时长先做粗筛很重要——同一录音转码后时长差不会超过几秒，而库里大部分歌彼此时长
+   * 差得远，粗筛能把需要算指纹的数量压到个位数。没有时长的曲目直接跳过（无法预筛，
+   * 全库算一遍代价太高）。
+   */
+  private async fingerprintClusters(): Promise<string[][]> {
+    const pool = this.items.filter((item) => !item.missing && item.size > 0 && item.song.duration > 0)
+    if (pool.length < 2) return []
+
+    const windowMs = SAME_RECORDING_MAX_GAP_SEC * 1000
+    const sorted = [...pool].sort((a, b) => a.song.duration - b.song.duration)
+    const candidateIds = new Set<string>()
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (sorted[j].song.duration - sorted[i].song.duration > windowMs) break
+        candidateIds.add(sorted[i].id)
+        candidateIds.add(sorted[j].id)
+      }
+    }
+    const targets = sorted.filter((item) => candidateIds.has(item.id))
+    if (targets.length < 2) return []
+
+    // 长期运行不让缓存无限增长（每首约 5KB 逐帧数据）
+    if (fingerprintCache.size > 2000) fingerprintCache.clear()
+    const frames = new Map<string, Uint32Array>()
+    for (let i = 0; i < targets.length; i += FINGERPRINT_CONCURRENCY) {
+      const batch = targets.slice(i, i + FINGERPRINT_CONCURRENCY)
+      const done = await Promise.all(
+        batch.map(async (track) => {
+          const stamp = await fileStamp(track.filePath)
+          // 同 size 原地覆写（重下、重编码）必须让旧指纹失效，否则深查会把不同歌并进一组
+          const key = `${track.filePath}|${stamp?.size ?? track.size}|${Math.round(stamp?.mtime ?? 0)}`
+          const cached = fingerprintCache.get(key)
+          if (cached) return [track.id, cached] as const
+          try {
+            const { frames: raw } = await fingerprintRaw(track.filePath)
+            if (!raw.length) return null
+            fingerprintCache.set(key, raw)
+            return [track.id, raw] as const
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            // 缺组件 / 超时不是「单个文件损坏」，吞掉会让深查静默报「没有重复」
+            if (message.includes('MISSING_BINARY') || message.includes('FPCALC_TIMEOUT')) throw error
+            // 损坏文件 / 不支持的格式：跳过，不影响其它曲目
+            return null
+          }
+        })
+      )
+      for (const entry of done) if (entry) frames.set(entry[0], entry[1])
+    }
+
+    // 并查集：A 与 B 同性、B 与 C 同性，三首就是一组
+    const parent = new Map<string, string>()
+    const find = (id: string): string => {
+      let root = id
+      while (parent.get(root) && parent.get(root) !== root) root = parent.get(root) as string
+      return root
+    }
+    const union = (a: string, b: string): void => {
+      const ra = find(a)
+      const rb = find(b)
+      if (ra !== rb) parent.set(ra, rb)
+    }
+
+    const withFrames = targets.filter((track) => frames.has(track.id))
+    for (let i = 0; i < withFrames.length; i++) {
+      const a = withFrames[i]
+      const fa = frames.get(a.id) as Uint32Array
+      for (let j = i + 1; j < withFrames.length; j++) {
+        const b = withFrames[j]
+        if (Math.abs(b.song.duration - a.song.duration) > windowMs) continue
+        if (sameRecording(fa, frames.get(b.id) as Uint32Array)) union(a.id, b.id)
+      }
+    }
+
+    const buckets = new Map<string, string[]>()
+    for (const track of withFrames) {
+      // 不能判 parent.has()：并查集只记录「被指向的那一端」，两组 union 之后
+      // 根节点自己不在 parent 里，判 has() 会把它丢掉，只剩一条、整组作废。
+      // 孤立条目在这里自成一桶，最后按 length > 1 过滤掉即可。
+      const root = find(track.id)
+      const list = buckets.get(root) ?? []
+      list.push(track.id)
+      buckets.set(root, list)
+    }
+    return [...buckets.values()].filter((ids) => ids.length > 1)
   }
 
   // ---------------- 内部 ----------------

@@ -80,8 +80,8 @@ export const useLibraryStore = defineStore('library', () => {
     return report
   }
 
-  async function findDuplicates(): Promise<DuplicateGroup[]> {
-    const groups = await window.api.findDuplicateTracks()
+  async function findDuplicates(deep = false): Promise<DuplicateGroup[]> {
+    const groups = await window.api.findDuplicateTracks(deep)
     duplicateIds.value = groups.reduce((sum, group) => sum + group.ids.length, 0)
     return groups
   }

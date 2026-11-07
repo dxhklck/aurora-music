@@ -18,6 +18,7 @@ import type {
   Playlist,
   QrLoginPlatform,
   QrLoginState,
+  RecognitionResult,
   ProviderInfo,
   ResolvedTrack,
   SearchPage,
@@ -153,8 +154,11 @@ export interface AuroraApi {
   deleteLibraryFiles(ids: string[]): Promise<LibraryOpReport>
   /** 批量仅从库移除，磁盘文件保留；同一路径不会在下次扫描时复活 */
   removeLibraryMany(ids: string[]): Promise<LibraryOpReport>
-  /** 重复文件扫描。identical=内容完全一致，similar=同曲不同音质 */
-  findDuplicateTracks(): Promise<DuplicateGroup[]>
+  /**
+   * 重复文件扫描。identical=内容完全一致，similar=同曲不同音质。
+   * deep=true 额外跑一轮指纹比对（慢，能抓「同曲不同码率」这类元数据对不上的重复）
+   */
+  findDuplicateTracks(deep?: boolean): Promise<DuplicateGroup[]>
   /** 复制到目录：主进程弹目录选择器并复制（含 .lrc / .meta.json），取消返回 null */
   copyLibraryTracks(ids: string[]): Promise<LibraryOpReport | null>
   /** 按命名模板导出：{artist} {name} {album} {ext}；取消返回 null */
@@ -204,6 +208,17 @@ export interface AuroraApi {
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
   /** 重新注册全局快捷键（设置写完后调用），返回注册失败的组合键 */
   applyShortcuts(): Promise<{ failed: string[] }>
+
+  /** 听歌识曲：把录到的一段音频字节交给主进程算指纹并查询 */
+  recognizeAudio(data: Uint8Array): Promise<RecognitionResult>
+  /** 听歌识曲：直接识别磁盘上的音频文件 */
+  recognizeFile(filePath: string): Promise<RecognitionResult>
+  /**
+   * 听歌识曲：<input type="file"> 选中的文件，在 preload 里用 webUtils 取真实路径。
+   * 不走 recognizeAudio 是为了避免把一个几十 MB 的 flac 经 IPC 结构化克隆两遍，
+   * 也让 fpcalc 拿到原始扩展名（任意格式都靠文件内容探测，但别再伪装成 .wav）。
+   */
+  recognizePickedFile(file: File): Promise<RecognitionResult>
 
   /** 写系统剪贴板（复制文件路径） */
   copyText(text: string): Promise<void>
@@ -333,6 +348,8 @@ export interface UpdateStatusView {
    * 用来把用户从「检查失败：Cannot download ...」里捞出来。
    */
   manualUrl?: string
+  /** 备用手动地址：有代理时走 GitHub（差量更新与全平台资产都在那边） */
+  manualUrlAlt?: string
 }
 
 declare global {

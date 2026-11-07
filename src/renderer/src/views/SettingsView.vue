@@ -212,9 +212,13 @@ function installUpdateNow(): void {
   window.api.installUpdate()
 }
 
-/** 自动更新走不通时的兜底：直接打开 Releases 页，用户自己下安装包 */
+/** 自动更新走不通时的兜底：默认 GitCode（国内直连），GitHub 留给有代理的人 */
 function openManualDownload(): void {
   if (update.value?.manualUrl) window.open(update.value.manualUrl)
+}
+
+function openManualDownloadAlt(): void {
+  if (update.value?.manualUrlAlt) window.open(update.value.manualUrlAlt)
 }
 
 onMounted(() => {
@@ -275,6 +279,12 @@ function patchLyricStyle(next: Partial<DesktopLyricStyle>): void {
   const current = settings.value?.desktopLyricStyle
   if (!current) return
   void patch({ desktopLyricStyle: { ...current, ...next } })
+}
+
+/** AcoustID key：留空表示用内置 key；主进程会过滤非法字符 */
+function patchKey(event: Event): void {
+  const value = (event.target as HTMLInputElement).value.trim()
+  void patch({ acoustidKey: value })
 }
 
 const EMPTY_LYRIC_STYLE: DesktopLyricStyle = {
@@ -1015,6 +1025,45 @@ onBeforeUnmount(() => {
       </p>
     </section>
 
+    <!-- 听歌识曲 -->
+    <section class="card block">
+      <div class="block-head">
+        <span class="ico"><Icon name="mic" :size="15" /></span>
+        <div>
+          <strong>听歌识曲</strong>
+          <small>录 20 秒音频，本地算指纹后到 AcoustID 查歌名</small>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>启用（在标题栏显示麦克风按钮）</label>
+        <button
+          class="switch"
+          :class="{ on: settings?.recognizeEnabled }"
+          @click="patch({ recognizeEnabled: !settings?.recognizeEnabled })"
+        >
+          <i />
+        </button>
+      </div>
+
+      <div class="row">
+        <label>AcoustID key</label>
+        <input
+          class="key-input"
+          :value="settings?.acoustidKey ?? ''"
+          placeholder="留空使用内置 key"
+          spellcheck="false"
+          @change="patchKey"
+        />
+      </div>
+
+      <p class="hint">
+        指纹在本机计算，只把指纹送到 AcoustID，不上传音频、也不往它的库里提交任何东西。
+        AcoustID 的库只收正式发行的录音，影视 OST、翻唱、网络歌手的曲子查不到属正常
+        （实测命中率约三成）。key 可在 acoustid.org/new-application 免费申请，填了就用你的配额。
+      </p>
+    </section>
+
     <!-- 下载 -->
     <section class="card block">
       <div class="block-head">
@@ -1436,11 +1485,19 @@ onBeforeUnmount(() => {
           <button v-if="update?.manualUrl" class="btn primary" @click="openManualDownload">
             <Icon name="download" :size="14" /> 手动下载新版
           </button>
+          <button
+            v-if="update?.manualUrlAlt"
+            class="btn"
+            title="有代理或能直连 GitHub 时用这个：全平台资产更全"
+            @click="openManualDownloadAlt"
+          >
+            GitHub 备用
+          </button>
         </div>
       </div>
 
       <p v-if="update && !update.supported" class="hint update-hint">
-        此环境不支持应用内更新，请到 GitHub Releases 下载：github.com/dxhklck/aurora-music/releases
+        此环境不支持应用内更新。Windows 安装版请到 GitCode Releases 下载，macOS / Linux 请到 GitHub Releases。
       </p>
       <p v-else-if="updateText" class="hint update-hint" :class="{ error: update?.state === 'error' }">
         {{ updateText }}
@@ -1619,6 +1676,24 @@ onBeforeUnmount(() => {
   color: var(--text);
   font-size: 12px;
   text-align: center;
+}
+
+/* AcoustID key：字母数字串，等宽字体好看清有没有抄错 */
+.key-input {
+  width: 190px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  letter-spacing: 0.4px;
+}
+.key-input::placeholder {
+  color: var(--text-3);
+  font-family: inherit;
+  letter-spacing: 0;
 }
 
 /* 颜色选择器：原生彩块默认又厚又圆，压成和按钮同高的小方片 */

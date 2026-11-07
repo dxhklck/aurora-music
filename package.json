@@ -25,8 +25,9 @@
     "engine:build": "node scripts/engine-ts/build.mjs",
     "engine:e2e": "npm run engine:build && node scripts/engine-ts/.build/e2e.mjs",
     "engine:test": "node scripts/engine-ts/test/run.mjs",
-    "dist": "npm run typecheck && electron-vite build && electron-builder",
-    "release:verify": "node scripts/release-verify.mjs"
+    "dist": "npm run typecheck && electron-vite build && npm run fetch:fpcalc -- --strict && electron-builder",
+    "release:verify": "node scripts/release-verify.mjs",
+    "fetch:fpcalc": "node scripts/fetch-fpcalc.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

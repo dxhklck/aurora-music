@@ -20,6 +20,13 @@ function normalizeEqualizer(input: unknown): AppSettings['equalizer'] {
 }
 
 /** 优先源列表：去重 + 只留非空字符串。历史值/手改值不能让排序函数拿到脏数据 */
+/** AcoustID key：大小写敏感的字母数字（base64 变体），空串表示用内置 key */
+function normalizeApiKey(input: unknown): string {
+  if (typeof input !== 'string') return ''
+  const trimmed = input.trim()
+  return /^[A-Za-z0-9_-]{6,40}$/.test(trimmed) ? trimmed : ''
+}
+
 function normalizeSources(input: unknown): string[] {
   if (!Array.isArray(input)) return []
   const seen = new Set<string>()
@@ -92,7 +99,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   shortcuts: { toggle: '', next: '', prev: '' },
   nowPlayingStyle: 'vinyl',
-  playerTheme: 'aurora',
+  // 网易云风格的歌词页：模糊封面 + 白色歌词 + 红色进度条，作为新装用户的默认皮肤
+  playerTheme: 'netease',
   themeMode: 'dark',
   downloadConcurrency: 2,
   downloadRetries: 3,
@@ -107,7 +115,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   miniMode: false,
   windowBounds: {},
   desktopLyricBounds: {},
-  tagsBackfilled: false
+  tagsBackfilled: false,
+  recognizeEnabled: true,
+  acoustidKey: ''
 }
 
 /** 设置持久化（settings.json，原子写入 + 内存缓存） */
@@ -146,6 +156,9 @@ class SettingsService {
     if (!Number.isFinite(xf) || xf <= 0) this.cache.crossfadeSec = 0
     else this.cache.crossfadeSec = Math.min(12, Math.round(xf * 2) / 2)
     if (typeof this.cache.loudnessNorm !== 'boolean') this.cache.loudnessNorm = false
+    if (typeof this.cache.recognizeEnabled !== 'boolean') this.cache.recognizeEnabled = true
+    // AcoustID key 是 base64 变体（大小写敏感的字母数字），脏值会让 lookup 恒报 invalid key
+    this.cache.acoustidKey = normalizeApiKey(this.cache.acoustidKey)
     return this.get()
   }
 
@@ -163,6 +176,7 @@ class SettingsService {
         patch.desktopLyricStyle ?? this.cache.desktopLyricStyle
       ),
       shortcuts: normalizeShortcuts(patch.shortcuts ?? this.cache.shortcuts),
+      acoustidKey: normalizeApiKey(patch.acoustidKey ?? this.cache.acoustidKey),
       loudnessNorm: patch.loudnessNorm === undefined ? this.cache.loudnessNorm : Boolean(patch.loudnessNorm),
       crossfadeSec: (() => {
         const incoming = patch.crossfadeSec ?? this.cache.crossfadeSec

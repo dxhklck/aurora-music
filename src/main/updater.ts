@@ -23,7 +23,16 @@ import { pickChannel, compareVersion, isNewerVersion, type ChannelProbe } from '
  */
 
 const REPO = 'dxhklck/aurora-music'
-const MANUAL_URL = `https://github.com/${REPO}/releases/latest`
+/** GitHub Releases 页：墙外/有代理时的备用，也是 mac / Linux 唯一的下载口 */
+const GITHUB_RELEASES = `https://github.com/${REPO}/releases/latest`
+/**
+ * 手动下载默认落到 GitCode。
+ *
+ * 自动更新的首选源就是 GitCode，失败后却把用户送去 GitHub 等于让他再撞一次墙：
+ * 墙内能打开 github.com 页面，但 objects.githubusercontent.com 上的 128MB 包常常拖不动。
+ * 只在 Windows 更新器里出现，而 GitCode 资产仓库正好只有 Windows 三件套，不会给出空目录。
+ */
+const MANUAL_URL = 'https://gitcode.com/dxhklck/aurora_music_release/releases/tag/stable'
 
 /**
  * GitCode 主源。指向**独立的公开资产仓库** `aurora_music_release`，不是代码仓库。
@@ -244,7 +253,7 @@ function failureStatus(error: unknown): UpdateStatusView {
   const missingAsset = /404|not found|cannot download/i.test(message)
   return currentStatus('error', {
     message: missingAsset ? `安装包下载失败（HTTP 404）：${message.slice(0, 120)}` : message,
-    ...(missingAsset ? { manualUrl: MANUAL_URL } : {})
+    ...(missingAsset ? { manualUrl: MANUAL_URL, manualUrlAlt: GITHUB_RELEASES } : {})
   })
 }
 

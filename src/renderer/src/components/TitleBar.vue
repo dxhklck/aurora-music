@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from './Icon.vue'
+import RecognizeDialog from './RecognizeDialog.vue'
 import { useSearchStore } from '../stores/search'
 import { useAppStore } from '../stores/app'
 import { clipboardKeyword } from '@shared/clipboard-text'
@@ -12,6 +13,7 @@ const search = useSearchStore()
 const app = useAppStore()
 const query = ref('')
 const maximized = ref(false)
+const showRecognize = ref(false)
 
 /** 主题两档循环切换：深色 → 浅色 */
 const THEME_ORDER: ThemeMode[] = ['dark', 'light']
@@ -117,6 +119,15 @@ async function searchClipboard(): Promise<void> {
     </button>
 
     <button
+      v-if="app.settings?.recognizeEnabled !== false"
+      class="icon-btn no-drag"
+      title="听歌识曲（录 20 秒识别是什么歌）"
+      @click="showRecognize = true"
+    >
+      <Icon name="mic" :size="17" />
+    </button>
+
+    <button
       class="icon-btn no-drag"
       :title="`主题：${THEME_META[themeMode].label}（点击切换）`"
       @click="cycleTheme"
@@ -125,11 +136,11 @@ async function searchClipboard(): Promise<void> {
     </button>
 
     <button class="icon-btn no-drag" title="桌面歌词" @click="toggleDesktopLyric">
-      <span class="glyph">词</span>
+      <Icon name="lyric-window" :size="17" />
     </button>
 
     <button class="icon-btn no-drag" title="迷你播放器" @click="app.patchSettings({ miniMode: true })">
-      <span class="glyph">迷</span>
+      <Icon name="mini-player" :size="17" />
     </button>
 
     <button class="icon-btn no-drag" title="使用指南（F1）" @click="openGuide">
@@ -148,6 +159,8 @@ async function searchClipboard(): Promise<void> {
       </button>
     </div>
   </header>
+
+  <RecognizeDialog v-if="showRecognize" @close="showRecognize = false" />
 </template>
 
 <style scoped>
@@ -265,13 +278,6 @@ async function searchClipboard(): Promise<void> {
 }
 
 /** 标题栏用单字代替图标：中文方块字比线性图标更好认 */
-.glyph {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1;
-  transform: translateY(-0.5px);
-}
-
 .win-controls {
   display: flex;
   gap: 2px;

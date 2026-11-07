@@ -4,10 +4,15 @@ import { existsSync } from 'node:fs'
 import { writeFile, readFile } from 'node:fs/promises'
 import { IPC } from '@shared/ipc'
 import { registerMediaScheme, installMediaProtocol } from './protocol'
-import { createMainWindow } from './windows'
+import { createMainWindow, getMainWindow } from './windows'
 import { createTray } from './tray'
 import { bootstrapProviders, registerEngineProviders } from './providers'
 import { initSourceHealth } from './services/source-health'
+import {
+  checkMediaType,
+  permissionAllowed,
+  requestMediaTypes
+} from './services/permissions'
 import { setProviderCookies } from './providers/cookies'
 import { registerIpc } from './ipc'
 import { library } from './services/library'
@@ -153,21 +158,63 @@ if (!app.requestSingleInstanceLock()) {
     )
     await bootstrapRuntime()
 
-    // 权限收口：Electron 默认**放行全部权限请求**，而这个应用只需要
-    // `speaker-selection`（选择音频输出设备，见设置页「音频输出设备」）。
-    // 其余（摄像头/麦克风/定位/通知/串口/HID）全部拒绝——显式全拒比给 100 个通道做校验
-    // 更直接地关掉一整类攻击面。登录窗的独立 partition 在 weblogin.ts 里单独设。
+    // 权限收口：Electron 默认**放行全部权限请求**，而这个应用只需要三样：
+    // `speaker-selection`（选择音频输出设备）、`media` 里的**音频**（听歌识曲读麦克风）、
+    // `display-capture`（听歌识曲抓系统输出，仅主窗口）。
+    // 其余（摄像头/定位/通知/串口/HID，以及 media 的视频部分）全部拒绝——显式全拒比
+    // 给 100 个通道做校验更直接地关掉一整类攻击面。登录窗的独立 partition 在 weblogin.ts 单独设。
     //
-    // 为什么必须放行这一项：拒绝之后 enumerateDevices 只会返回一个 id 和 label 都为空的
-    // 默认设备，输出设备下拉里就永远只有「系统默认」——功能看着有、实际用不了。
-    // speaker-selection 只影响「声音往哪个设备送」，不涉及任何采集。
-    const allowedPermissions: ReadonlySet<string> = new Set(['speaker-selection'])
-    session.defaultSession.setPermissionRequestHandler((_contents, permission, done) =>
-      done(allowedPermissions.has(permission))
+    // 为什么必须放行 speaker-selection：拒绝之后 enumerateDevices 只会返回一个 id 和 label
+    // 都为空的默认设备，输出设备下拉里就永远只有「系统默认」——功能看着有、实际用不了。
+    const isMainContents = (contents: unknown): boolean =>
+      !!contents && contents === getMainWindow()?.webContents
+    /**
+     * 两个权限 handler 的 details **不是同一个结构**（判定与解析在 services/permissions.ts，
+     * 有 Node 单测守着，别再内联回来）：
+     * - setPermissionRequestHandler → MediaAccessPermissionRequest.mediaTypes: Array<'video'|'audio'>
+     * - setPermissionCheckHandler  → PermissionCheckHandlerHandlerDetails.mediaType: 'video'|'audio'|'unknown'
+     *
+     * 曾经统一按单数 mediaType 读，request handler 里恒为 undefined，
+     * 于是 getUserMedia({audio:true}) 被拒 → 「麦克风」入口整个不可用（系统声音走
+     * display-capture 分支，不受影响，所以之前实测没暴露出来）。
+     */
+    session.defaultSession.setPermissionRequestHandler((contents, permission, done, details) =>
+      done(
+        permissionAllowed(permission, requestMediaTypes(details), isMainContents(contents))
+      )
     )
-    session.defaultSession.setPermissionCheckHandler((_contents, permission) =>
-      allowedPermissions.has(permission)
-    )
+    session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => {
+      const type = checkMediaType(details)
+      return permissionAllowed(permission, type ? [type] : [], isMainContents(contents))
+    })
+
+    // 系统声音（听歌识曲的「听系统输出」）：只给音频 loopback，不给画面。
+    //
+    // 为什么需要它：麦克风录的是外放，有环境噪音；而用户想识别的往往是浏览器 /
+    // 其它播放器里正在放的歌，直接抓系统输出又干净又准。
+    // 只有 Windows 支持（Chromium 的 loopback 走 WASAPI），mac/Linux 没有对应实现，
+    // 所以这里按平台设，别让不支持的系统挂一个必然失败的处理器。
+    if (process.platform === 'win32') {
+      session.defaultSession.setDisplayMediaRequestHandler(
+        (request, callback) => {
+          // 只认主窗口的顶层 frame：否则登录窗、内嵌页面也能借这个口子录屏。
+          // WebFrameMain 没有 webContents 引用可比，用 processId + routingId 唯一标识。
+          const top = getMainWindow()?.webContents.mainFrame
+          const frame = request.frame
+          const fromMain =
+            !!top &&
+            !!frame &&
+            frame.processId === top.processId &&
+            frame.routingId === top.routingId
+          if (!fromMain) {
+            callback({})
+            return
+          }
+          callback({ audio: 'loopback' })
+        },
+        { useSystemPicker: false }
+      )
+    }
 
     // 渲染/GPU 子进程崩溃：白屏、画面冻结最常见的两种真因，必须留痕
     app.on('render-process-gone', (_event, _contents, details) => {

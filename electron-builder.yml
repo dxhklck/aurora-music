@@ -25,6 +25,13 @@ extraResources:
   # 托盘图标
   - from: resources/icons
     to: icons
+  # 听歌识曲的指纹计算：Chromaprint 的 fpcalc（LGPL-2.1）。
+  # 以独立可执行文件调用、不与本项目链接，因此不传染 MIT 许可证。
+  # Windows 版 fpcalc.exe 随仓库入库；macOS / Linux 由 scripts/fetch-fpcalc.mjs
+  # 在 CI / npm run dist 时按平台下载到对应子目录（--strict 保证缺组件就构建失败）。
+  # 三平台包各带自己那一份，确实缺失时应用侧返回 binary-missing。
+  - from: resources/bin
+    to: bin
   # 音源引擎是进程内 TS 实现（src/main/engine/ts），安装包不携带任何 Python 运行时。
   # 历史背景见 docs/python-removal.md
 

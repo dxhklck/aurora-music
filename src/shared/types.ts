@@ -330,8 +330,20 @@ export interface AppSettings {
   shortcuts: { toggle: string; next: string; prev: string }
   /** 播放页样式：vinyl 黑胶经典 / lyrics 歌词大屏 / cover 封面沉浸 */
   nowPlayingStyle: 'vinyl' | 'lyrics' | 'cover'
-  /** 播放页炫彩皮肤：aurora 默认 / neon 流光 / ocean 碧海 / sunset 熔金 / galaxy 星河 */
-  playerTheme: 'aurora' | 'neon' | 'ocean' | 'sunset' | 'galaxy'
+  /**
+   * 播放页皮肤。前五个是配色，后四个是完整皮肤（背景处理 + 歌词排版 + 控件配色）：
+   * netease 云音乐 / amber 琥珀黑胶 / minimal 黑白极简 / paper 磁带手记。
+   */
+  playerTheme:
+    | 'netease'
+    | 'amber'
+    | 'minimal'
+    | 'paper'
+    | 'aurora'
+    | 'neon'
+    | 'ocean'
+    | 'sunset'
+    | 'galaxy'
   /** 界面主题：dark 深色 / light 浅色（播放页始终深色沉浸式） */
   themeMode: ThemeMode
   /** 同时下载的任务数（1-4） */
@@ -379,7 +391,39 @@ export interface AppSettings {
    * 文件永远不会再被读一次，所以必须显式回填一遍，否则老用户升级后那些字段永远是空的。
    */
   tagsBackfilled?: boolean
+
+  /** 听歌识曲：显示入口按钮（关闭后播放条上不出现麦克风图标） */
+  recognizeEnabled: boolean
+  /**
+   * AcoustID application key。留空 = 用内置 key。
+   * 内置 key 被封或想用自己配额时，用户可在这里覆盖。
+   */
+  acoustidKey: string
 }
+
+/**
+ * 听歌识曲结果。
+ *
+ * 失败是常态（AcoustID 只收正式发行的录音，实测命中率约 37%），
+ * 所以 reason 要区分到「用户能据此行动」的粒度，不能笼统报「识别失败」。
+ */
+export type RecognitionResult =
+  | {
+      ok: true
+      title: string
+      artist: string
+      album: string
+      /** AcoustID 置信度 0~1，实测命中时普遍 ≥0.96 */
+      score: number
+      /** query 音频时长（秒） */
+      duration: number
+      source: 'acoustid'
+    }
+  | {
+      ok: false
+      reason: 'no-match' | 'failed' | 'binary-missing'
+      message: string
+    }
 
 /** 界面主题两档 */
 export type ThemeMode = 'dark' | 'light'

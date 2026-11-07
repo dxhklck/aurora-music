@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { writeMp4Tags } from './tag-mp4'
 import { writeOggTags } from './tag-ogg'
+import { writeFlacTags } from './tag-flac'
 import type { TagPayload, TagResult } from './tag-types'
 
 /**
@@ -88,103 +89,22 @@ async function writeId3(payload: TagPayload): Promise<TagResult> {
   return { ok: true }
 }
 
-/** 解析 FLAC metadata block 链 */
-function readFlacBlocks(data: Buffer): Array<{ type: number; payload: Buffer }> | null {
-  if (data.subarray(0, 4).toString('ascii') !== 'fLaC') return null
-  const blocks: Array<{ type: number; payload: Buffer }> = []
-  let cursor = 4
-  while (cursor + 4 <= data.length) {
-    const header = data[cursor]
-    const type = header & 0x7f
-    const length = data.readUIntBE(cursor + 1, 3)
-    const payload = data.subarray(cursor + 4, cursor + 4 + length)
-    blocks.push({ type, payload })
-    cursor += 4 + length
-    if (header & 0x80) break
-  }
-  return blocks
-}
-
-function buildVorbisComment(existing: Buffer | undefined, entries: Record<string, string>): Buffer {
-  const comments: Array<[string, string]> = []
-  if (existing && existing.length >= 8) {
-    try {
-      let cursor = 0
-      const vendorLength = existing.readUInt32LE(cursor)
-      cursor += 4 + vendorLength
-      const count = existing.readUInt32LE(cursor)
-      cursor += 4
-      for (let index = 0; index < count; index += 1) {
-        if (cursor + 4 > existing.length) break
-        const length = existing.readUInt32LE(cursor)
-        cursor += 4
-        const text = existing.subarray(cursor, cursor + length).toString('utf8')
-        cursor += length
-        const eq = text.indexOf('=')
-        if (eq > 0) comments.push([text.slice(0, eq).toUpperCase(), text.slice(eq + 1)])
-      }
-    } catch {
-      /* 已有注释块损坏就重建 */
-    }
-  }
-  const replaceKeys = new Set(Object.keys(entries).map((key) => key.toUpperCase()))
-  const kept = comments.filter(([key]) => !replaceKeys.has(key))
-  const merged = [...kept, ...Object.entries(entries).map(([key, value]) => [key.toUpperCase(), value] as [string, string])]
-
-  const vendor = Buffer.from('aurora', 'utf8')
-  const parts: Buffer[] = [Buffer.alloc(4), vendor, Buffer.alloc(4)]
-  parts[0].writeUInt32LE(vendor.length, 0)
-  parts[2].writeUInt32LE(merged.length, 0)
-  for (const [key, value] of merged) {
-    const text = Buffer.from(`${key}=${value}`, 'utf8')
-    const length = Buffer.alloc(4)
-    length.writeUInt32LE(text.length, 0)
-    parts.push(length, text)
-  }
-  return Buffer.concat(parts)
-}
-
-async function writeFlac(payload: TagPayload): Promise<TagResult> {
-  const data = await readFile(payload.path)
-  const blocks = readFlacBlocks(data)
-  if (!blocks) return { ok: false, error: '不是合法的 FLAC 文件' }
-
-  const entries: Record<string, string> = { TITLE: payload.title, ARTIST: payload.artists, ALBUM: payload.album }
-  if (payload.lyric) entries.LYRICS = payload.lyric
-  if (payload.track) entries.TRACKNUMBER = String(payload.track)
-
-  const hasComment = blocks.some((block) => block.type === 4)
-  // 统一重建成「头 + 载荷」序列，最后一块打 last 标志——比原地改更不容易出错
-  const rebuilt: Buffer[] = []
-  const pushBlock = (type: number, body: Buffer, isLast: boolean): void => {
-    const header = Buffer.alloc(4)
-    header[0] = (type & 0x7f) | (isLast ? 0x80 : 0)
-    header.writeUIntBE(body.length, 1, 3)
-    rebuilt.push(header, body)
-  }
-
-  const ordered = [...blocks]
-  if (!hasComment) ordered.push({ type: 4, payload: Buffer.alloc(0) })
-
-  ordered.forEach((block, index) => {
-    const isLast = index === ordered.length - 1
-    if (block.type === 4) {
-      pushBlock(4, buildVorbisComment(hasComment ? block.payload : undefined, entries), isLast)
-      return
-    }
-    pushBlock(block.type, block.payload, isLast)
-  })
-
-  await writeFile(payload.path, Buffer.concat([Buffer.from('fLaC', 'ascii'), ...rebuilt]))
-  return { ok: true }
-}
 
 export async function writeTags(payload: TagPayload): Promise<TagResult> {
   if (!payload.path) return { ok: false, error: '缺少目标文件' }
   const ext = extname(payload.path).toLowerCase()
   try {
     if (ext === '.mp3') return await writeId3(payload)
-    if (ext === '.flac') return await writeFlac(payload)
+    if (ext === '.flac') {
+      const entries: Record<string, string> = {
+        TITLE: payload.title,
+        ARTIST: payload.artists,
+        ALBUM: payload.album
+      }
+      if (payload.lyric) entries.LYRICS = payload.lyric
+      if (payload.track) entries.TRACKNUMBER = String(payload.track)
+      return await writeFlacTags(payload.path, entries)
+    }
     if (ext === '.m4a' || ext === '.mp4' || ext === '.aac') return await writeMp4Tags(payload.path, payload)
     if (ext === '.ogg' || ext === '.opus') return await writeOggTags(payload.path, payload)
     // WAV 的 RIFF INFO 收益低、兼容性差，直接跳过

@@ -18,7 +18,8 @@ Electron 45 + Vue 3.5 + TypeScript 5.9 + Vite 6，深色毛玻璃界面；内置
 | **音源** | 20 个音源统一接口：5 个原生适配器 + 15 个进程内引擎音源，侧栏一键切换，无需重启 |
 | **搜索** | 关键词搜索、榜单浏览、增量出结果（慢音源解析一首显示一首）、搜索历史、**从剪贴板取词**（复制歌名后点标题栏按钮，自动去链接直接搜）、**行内一键再搜**（任意列表里对某首歌用「歌名 + 歌手」重搜，找同名翻唱或其它版本） |
 | **播放** | 四种播放模式（列表 / 单曲 / 随机 / 顺序）、队列抽屉（跨重启保留、拖拽重排、多选批量移出/下载/存歌单）、**播放历史页**（搜索、批量下载、清空）、收听统计（本周最常听、累计时长、独立收听报告页：13 周热力图 / 本月 Top 20 / 来源分布）、睡眠定时（15 / 30 / 60 分钟或播完本曲）、停滞自愈（同源重取 → 跨源换源）、换一个版本（跨音源手动挑替代版本，播放失败处与搜索结果都能进）、**换源优先源**（用户指定的源排最前）、**音频输出设备切换**（插拔耳机不用重启）、**响度均衡**（AGC 自动把各歌曲响度拉平）、**交叉淡化**（2~12 秒，歌曲临近结束时上一首淡出、下一首淡入）、**seek 防爆音**（跳转点两侧微淡入淡出） |
-| **歌词** | 逐行 LRC / 逐字 YRC（网易云）与 QRC（QQ）、按歌手动对齐（±0.5 s，按歌记忆）、**歌词手动匹配**（搜正确版本改绑，按歌记忆）、桌面歌词窗（迷你条 / 大字两态、锁定穿透、拖动与右下角把手缩放、**样式中心**：字号 / 字体 / 文字色 / 描边 / 双语排布 / 逐字扫光色） |
+| **听歌识曲** | 录 20 秒音频或选文件，**本机**算 Chromaprint 指纹后查 AcoustID 取歌名 / 歌手 / 专辑，结果一键回落搜索播放；音源里没有时直接给 QQ 音乐 / 酷狗 / 哔哩哔哩 三个出口，还能「只搜歌名」再试。只上传指纹不上传音频、也不向 AcoustID 提交任何数据；指纹组件 fpcalc 三平台齐备（Windows 随仓库，macOS / Linux 打包时由 `scripts/fetch-fpcalc.mjs` 按平台下载）。AcoustID 只收正式发行到 MusicBrainz 的录音，OST / 翻唱 / 网络歌手查不到属正常（实测全库命中率 43%） |
+| **歌词** | 逐行 LRC / 逐字 YRC（网易云）与 QRC（QQ）、按歌手动对齐（±0.5 s，按歌记忆）、**歌词手动匹配**（搜正确版本改绑，按歌记忆）、**播放页 9 款皮肤**（云音乐 / 琥珀黑胶 / 黑白极简 / 磁带手记 + 5 款配色，背景与歌词排版随皮肤切换）、桌面歌词窗（迷你条 / 大字两态、锁定穿透、拖动与右下角把手缩放、**样式中心**：字号 / 字体 / 文字色 / 描边 / 双语排布 / 逐字扫光色） |
 | **音效** | 五段均衡器（60/230/910/3600/14k，±12 dB）、夜间限幅器、实时频谱与黑胶动效 |
 | **下载** | 批量入队、并发与重试可配、**暂停 / 继续**（保留 `.part`，按 Range 续传）、`.part` 原子落盘、写 ID3/Vorbis/MP4 标签，产物为音频 + `.lrc` + `.meta.json` |
 | **本地库** | 导入目录递归扫描，**读音频内嵌标签**（歌手 / 专辑 / 时长 / 封面，mp3 · flac · m4a · ogg），无标签时按文件名猜；**列表 / 专辑墙 / 歌手页三种视图**、库内搜索与歌手 / 专辑 / 格式 / 文件夹 / 来源筛选、7 字段排序、多选批量与右键菜单；重复文件清理（size 分组 + sha256）、按模板复制导出、复制文件到剪贴板；缺失文件标记与重新定位；单条 / 批量改标签 |
@@ -85,8 +86,8 @@ git tag v1.7.0 && git push origin v1.7.0   # 打 tag 触发 CI 三平台构建�
 - 产物命名固定为 `Aurora-Music-<version>-<arch>.<ext>`（**不能含空格**）。
   早期版本用 `${productName}` 拼名字，空格被不同环节规范化成点号/连字符，导致更新器 404。
 - 自动更新走 `electron-updater` + `latest.yml`：主源 GitCode（国内直连），GitHub 与镜像兜底；
-  「下载失败」时会给出可点的手动下载入口。两个源的 `latest.yml` 不保证同时更新，
-  版本比较按数字逐段比，不会把旧版本提示成新版本。
+  「下载失败」时给出可点的手动下载入口（默认 GitCode，另有「GitHub 备用」）。两个源的 `latest.yml`
+  不保证同时更新，版本比较按数字逐段比，不会把旧版本提示成新版本。
 - 未配置证书时产物未签名，首次安装会被 SmartScreen 拦一次（「更多信息 → 仍要运行」）；
   签名路线与 CI 接线见 [docs/code-signing.md](docs/code-signing.md)。
 
@@ -106,12 +107,12 @@ src/
     windows.ts          主窗口 / 桌面歌词窗 / 迷你条 / 音量气泡
     taskbar.ts          任务栏进度条与跳转列表（仅 Windows）
     protocol.ts         muse:// 媒体协议（封面代理、本地流式读取）
-    ipc.ts              109 个 IPC 通道的处理器
+    ipc.ts              111 个 IPC 通道的处理器
   preload/              contextBridge 暴露的 window.api
   shared/               IPC 常量、类型、歌词解析（主进程与渲染层共用）
   renderer/src/
     views/              路由页面 + 两个独立窗口（桌面歌词、音量气泡）
-    components/         22 个组件（播放条、歌词、均衡器、队列、歌曲表…）
+    components/         23 个组件（播放条、歌词、均衡器、队列、歌曲表…）
     stores/             7 个 Pinia store（app / player / search / download / library / playlists / stats）
     core/               audio / wave（Web Audio 图）/ latest（异步门闩）/ plain（IPC 拷贝）
 scripts/
@@ -188,5 +189,5 @@ HLS（m3u8）音源转封装依赖系统的 `ffmpeg`；缺失时会退回 TS 分
 代码按 [MIT](LICENSE) 授权。**名称、应用图标与品牌标识不在授权范围内**：
 再分发修改版须改名换图标，不得暗示原作者背书。详见 [NOTICE](NOTICE)。
 
-安装包仅在 [GitHub Releases](https://github.com/dxhklck/aurora-music/releases) 与
-[GitCode Releases](https://gitcode.com/dxhklck/aurora_music_release/releases) 发布。
+安装包仅在 [GitCode Releases](https://gitcode.com/dxhklck/aurora_music_release/releases)（**国内推荐**，
+更新器主源）与 [GitHub Releases](https://github.com/dxhklck/aurora-music/releases)（全平台资产）发布。

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc'
 import type { AuroraApi } from '../shared/api'
 
@@ -51,7 +51,7 @@ const api: AuroraApi = {
   listMusicDirs: () => ipcRenderer.invoke(IPC.libraryDirs),
   deleteLibraryFiles: (ids) => ipcRenderer.invoke(IPC.libraryDeleteFiles, ids),
   removeLibraryMany: (ids) => ipcRenderer.invoke(IPC.libraryRemoveMany, ids),
-  findDuplicateTracks: () => ipcRenderer.invoke(IPC.libraryDuplicates),
+  findDuplicateTracks: (deep) => ipcRenderer.invoke(IPC.libraryDuplicates, deep),
   copyLibraryTracks: (ids) => ipcRenderer.invoke(IPC.libraryCopyTo, ids),
   exportLibraryTracks: (ids, template) => ipcRenderer.invoke(IPC.libraryExportTo, ids, template),
   relocateLibraryTracks: () => ipcRenderer.invoke(IPC.libraryRelocate),
@@ -81,6 +81,11 @@ const api: AuroraApi = {
 
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),
+  recognizeAudio: (data) => ipcRenderer.invoke(IPC.recognizeAudio, data),
+  recognizeFile: (filePath) => ipcRenderer.invoke(IPC.recognizeFile, filePath),
+  // File 对象不能跨 contextBridge 传给主进程；在 preload 里同步换成绝对路径
+  recognizePickedFile: (file) =>
+    ipcRenderer.invoke(IPC.recognizeFile, webUtils.getPathForFile(file)),
   applyShortcuts: () => ipcRenderer.invoke(IPC.shortcutsApply),
 
   logWrite: (level, scope, message) => ipcRenderer.invoke(IPC.logWrite, { level, scope, message }),

@@ -82,19 +82,40 @@ const styleOptions: { id: NowPlayingStyle; name: string; desc: string }[] = [
   { id: 'cover', name: '封面沉浸', desc: '大封面 + 歌曲信息，纯净无歌词' }
 ]
 
-type PlayerTheme = 'aurora' | 'neon' | 'ocean' | 'sunset' | 'galaxy'
-const theme = computed<PlayerTheme>(() => app.settings?.playerTheme ?? 'aurora')
+type PlayerTheme =
+  | 'netease'
+  | 'amber'
+  | 'minimal'
+  | 'paper'
+  | 'aurora'
+  | 'neon'
+  | 'ocean'
+  | 'sunset'
+  | 'galaxy'
+const theme = computed<PlayerTheme>(() => app.settings?.playerTheme ?? 'netease')
 
 const themeOptions: { id: PlayerTheme; name: string; color: string }[] = [
-  { id: 'aurora', name: '极光（默认）', color: 'linear-gradient(135deg, #7c6cff, #2a1d6e)' },
+  { id: 'netease', name: '云音乐', color: 'linear-gradient(135deg, #ec4141, #2b2b33)' },
+  { id: 'amber', name: '琥珀黑胶', color: 'linear-gradient(135deg, #f0a04b, #2a1a10)' },
+  { id: 'minimal', name: '黑白极简', color: 'linear-gradient(135deg, #f5f5f5, #111111)' },
+  { id: 'paper', name: '磁带手记', color: 'linear-gradient(135deg, #efe3cd, #7a5c3e)' },
+  { id: 'aurora', name: '极光', color: 'linear-gradient(135deg, #7c6cff, #2a1d6e)' },
   { id: 'neon', name: '流光溢彩', color: 'linear-gradient(135deg, #ff4dd8, #22d3ee)' },
   { id: 'ocean', name: '碧海潮声', color: 'linear-gradient(135deg, #0ea5e9, #10b981)' },
   { id: 'sunset', name: '落日熔金', color: 'linear-gradient(135deg, #fb923c, #e11d74)' },
   { id: 'galaxy', name: '星河流转', color: 'linear-gradient(135deg, #312e81, #c026d3)' }
 ]
 
+/** 只有这四款是「光斑配色」皮肤，其余用背景/排版本身说话 */
+const BLOB_THEMES: PlayerTheme[] = ['neon', 'ocean', 'sunset', 'galaxy']
+const hasBlobs = computed(() => BLOB_THEMES.includes(theme.value))
+
 /** 每款皮肤的招牌音波：形态 + 双色，切皮肤 = 换背景 + 换音波，肉眼可辨 */
 const WAVES: Record<PlayerTheme, { mode: 'bars' | 'wave' | 'ring'; colors: [string, string] }> = {
+  netease: { mode: 'bars', colors: ['#ffffff', '#ec4141'] },
+  amber: { mode: 'ring', colors: ['#f0a04b', '#ffd9a0'] },
+  minimal: { mode: 'wave', colors: ['#ffffff', '#8b8b93'] },
+  paper: { mode: 'bars', colors: ['#7a5c3e', '#b08968'] },
   aurora: { mode: 'bars', colors: ['#8b7cff', '#3ec5ff'] },
   neon: { mode: 'wave', colors: ['#ff4dd8', '#22d3ee'] },
   ocean: { mode: 'ring', colors: ['#38bdf8', '#34d399'] },
@@ -185,9 +206,9 @@ onBeforeUnmount(() => {
     <div class="bg" :style="backdrop ? { backgroundImage: `url(${backdrop})` } : {}" />
     <!-- 点暗色背景也能收起：按钮万一点不中时的不依赖焦点的出口 -->
     <div class="bg-mask" @click="close" />
-    <!-- 炫彩皮肤层：aurora 主题不渲染（保持封面模糊背景）。
+    <!-- 炫彩皮肤层：只有光斑系皮肤才渲染（其余用背景与排版本身表达）。
          必须在 bg-mask 之上——原先排在遮罩下面，光斑全被压暗，就是「皮肤看不出差别」的根因 -->
-    <div v-if="theme !== 'aurora'" class="theme-layer" aria-hidden="true">
+    <div v-if="hasBlobs" class="theme-layer" aria-hidden="true">
       <i class="blob a" /><i class="blob b" />
       <i v-if="theme === 'galaxy'" class="stars s1" /><i v-if="theme === 'galaxy'" class="stars s2" />
     </div>
@@ -244,7 +265,7 @@ onBeforeUnmount(() => {
           <Icon name="equalizer" :size="18" />
         </button>
         <button class="icon-btn" title="桌面歌词" @click="openDesktopLyric">
-          <Icon name="monitor" :size="18" />
+          <Icon name="lyric-window" :size="18" />
         </button>
       </div>
       <div v-if="sleepPanel" class="style-panel sleep-panel" @click.stop>
@@ -279,7 +300,7 @@ onBeforeUnmount(() => {
           <strong>{{ opt.name }}</strong>
           <span>{{ opt.desc }}</span>
         </button>
-        <div class="panel-sec">炫彩皮肤</div>
+        <div class="panel-sec">皮肤</div>
         <div class="theme-grid">
           <button
             v-for="opt in themeOptions"
@@ -478,6 +499,22 @@ onBeforeUnmount(() => {
   --text: #f4f5f9;
   --text-2: rgba(244, 245, 249, 0.66);
   --text-3: rgba(244, 245, 249, 0.4);
+  /* 歌词排版由皮肤覆盖（LyricPane 消费这些变量，默认值 = 原来的左对齐样式） */
+  --np-dim: 0.42;
+  --np-passed: 0.3;
+  --np-line-size: 16px;
+  --np-line-weight: 500;
+  --np-active-size: 21px;
+  --np-active-weight: 700;
+  --np-align: left;
+  --np-active-shift: translateX(6px);
+  --np-active-fill: linear-gradient(100deg, #fff, var(--accent));
+  --np-active-shadow: 0 6px 26px rgba(0, 0, 0, 0.35);
+  --np-kara-base: rgba(255, 255, 255, 0.34);
+  --np-kara: #fff;
+  /* 显式声明 color：不写的话标题这类没设 color 的元素会继承 body 的计算值，
+     切到浅色皮肤时仍是白字（变量覆盖不会改变已继承的 color） */
+  color: var(--text);
 }
 
 @keyframes stage-in {
@@ -647,6 +684,195 @@ onBeforeUnmount(() => {
 @keyframes twinkle {
   from { opacity: 0.35; transform: translate3d(0, 0, 0); }
   to { opacity: 1; transform: translate3d(-1.2vw, 0.8vh, 0); }
+}
+
+/* ===== 完整皮肤：背景处理 + 歌词排版 + 控件配色 =====
+   前四个（云音乐 / 琥珀 / 极简 / 纸感）不是单纯换色，所以变量写在舞台根上，
+   LyricPane 通过 --np-* 继承，避免 :deep 穿透子组件样式。 */
+
+/* 云音乐：仿网易歌词页 —— 模糊封面压暗、歌词居中、当前行纯白放大、红色进度条 */
+.stage.theme-netease {
+  --accent: #ec4141;
+  --accent-2: #ec4141;
+  --np-dim: 0.36;
+  --np-passed: 0.24;
+  --np-line-size: 17px;
+  --np-active-size: 27px;
+  --np-active-weight: 700;
+  --np-align: center;
+  --np-active-shift: none;
+  --np-active-fill: #fff;
+  --np-active-shadow: 0 8px 34px rgba(0, 0, 0, 0.55);
+  --np-trans-opacity: 0.72;
+  --np-active-trans-size: 14px;
+  --np-kara-base: rgba(255, 255, 255, 0.3);
+  --np-mask: rgba(8, 8, 10, 0.66);
+}
+.stage.theme-netease .bg {
+  opacity: 0.8;
+  filter: blur(56px) saturate(1.2) brightness(0.82);
+}
+.stage.theme-netease .bg-mask {
+  background:
+    radial-gradient(75% 65% at 50% 32%, rgba(8, 8, 10, 0.08), rgba(8, 8, 10, 0.62) 76%),
+    linear-gradient(180deg, rgba(8, 8, 10, 0.5), rgba(8, 8, 10, 0.78));
+}
+.stage.theme-netease .stage-wave {
+  display: none;
+}
+/* 歌词列收窄一点：居中之后行太长会显得散 */
+.stage.theme-netease .lyric-box.fullscreen {
+  padding: 0 12vw;
+}
+/* 网易的歌词页把歌名放在左上角，而不是居中压在歌词上方 */
+.stage.theme-netease.style-lyrics .track-info.slim {
+  align-self: flex-start;
+  text-align: left;
+  padding-left: 4vw;
+}
+
+/* 琥珀黑胶：暖褐底 + 琥珀高亮，适合配黑胶布局 */
+.stage.theme-amber {
+  --accent: #f0a04b;
+  --accent-2: #f0a04b;
+  --np-dim: 0.4;
+  --np-passed: 0.27;
+  --np-align: center;
+  --np-active-shift: none;
+  --np-active-size: 25px;
+  --np-active-fill: linear-gradient(100deg, #ffe9c7, #f0a04b);
+  --np-kara-glow:
+    0 0 20px rgba(240, 160, 75, 0.55),
+    0 4px 22px rgba(240, 160, 75, 0.32);
+}
+.stage.theme-amber .bg {
+  opacity: 0.5;
+  filter: blur(64px) saturate(1) sepia(0.2) brightness(0.85);
+}
+.stage.theme-amber .bg-mask {
+  background:
+    radial-gradient(65% 58% at 30% 42%, rgba(70, 38, 14, 0.12), rgba(10, 7, 5, 0.78) 72%),
+    linear-gradient(180deg, rgba(10, 7, 5, 0.52), rgba(8, 5, 3, 0.88));
+}
+
+/* 黑白极简：黑底、无封面、细字、纯白高亮 */
+.stage.theme-minimal {
+  --accent: #ffffff;
+  --accent-2: #d1d1d6;
+  --panel: rgba(255, 255, 255, 0.03);
+  --panel-strong: rgba(255, 255, 255, 0.06);
+  --np-dim: 0.34;
+  --np-passed: 0.2;
+  --np-line-size: 15px;
+  --np-line-weight: 400;
+  --np-active-size: 24px;
+  --np-active-weight: 500;
+  --np-align: center;
+  --np-active-shift: none;
+  --np-active-fill: #fff;
+  --np-active-shadow: none;
+  --np-kara-base: rgba(255, 255, 255, 0.26);
+  --np-kara-glow: none;
+  background: #000;
+}
+.stage.theme-minimal .bg {
+  display: none;
+}
+.stage.theme-minimal .bg-mask {
+  background: none;
+}
+.stage.theme-minimal .stage-wave {
+  display: none;
+}
+.stage.theme-minimal .round {
+  background: rgba(255, 255, 255, 0.05);
+}
+.stage.theme-minimal .round.primary {
+  background: #fff;
+  color: #000;
+  box-shadow: none;
+}
+.stage.theme-minimal .lyric-box.fullscreen {
+  padding: 0 10vw;
+}
+
+/* 磁带手记：唯一的浅色舞台，米色纸面 + 深褐字 */
+.stage.theme-paper {
+  --accent: #7a5c3e;
+  --accent-2: #7a5c3e;
+  --panel: rgba(255, 255, 255, 0.42);
+  --panel-strong: rgba(255, 255, 255, 0.72);
+  --border: rgba(74, 56, 38, 0.18);
+  --border-strong: rgba(74, 56, 38, 0.28);
+  --text: #2f261d;
+  --text-2: rgba(47, 38, 29, 0.66);
+  --text-3: rgba(47, 38, 29, 0.42);
+  --np-dim: 0.46;
+  --np-passed: 0.28;
+  --np-line-size: 16.5px;
+  --np-active-size: 24px;
+  --np-align: center;
+  --np-active-shift: none;
+  --np-active-fill: #2b2118;
+  --np-active-shadow: none;
+  --np-kara-base: rgba(47, 38, 29, 0.26);
+  --np-kara: #2b2118;
+  --np-kara-glow: none;
+  --np-mask: rgba(239, 230, 214, 0.94);
+  background: #efe6d6;
+}
+.stage.theme-paper .bg {
+  display: none;
+}
+.stage.theme-paper .bg-mask {
+  background:
+    radial-gradient(80% 70% at 50% 30%, rgba(255, 252, 245, 0.9), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(120, 90, 60, 0.045) 0 1px, transparent 1px 4px),
+    linear-gradient(180deg, #f3ebdc, #e6d8c0);
+}
+.stage.theme-paper .stage-wave {
+  display: none;
+}
+.stage.theme-paper .right {
+  background: rgba(255, 255, 255, 0.4);
+}
+.stage.theme-paper .round {
+  background: rgba(74, 56, 38, 0.06);
+  border-color: rgba(74, 56, 38, 0.2);
+}
+.stage.theme-paper .round:hover {
+  background: rgba(74, 56, 38, 0.12);
+}
+.stage.theme-paper .round.primary {
+  background: #2f261d;
+  color: #f7efe1;
+  box-shadow: 0 12px 26px rgba(47, 38, 29, 0.22);
+}
+.stage.theme-paper .round.primary .ring {
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #f7efe1;
+}
+.stage.theme-paper .icon-btn:hover {
+  background: rgba(74, 56, 38, 0.1);
+}
+/* 浅色底上的半透明白标签等于没有，换成纸色系 */
+.stage.theme-paper .chip {
+  background: rgba(74, 56, 38, 0.08);
+  border-color: rgba(74, 56, 38, 0.18);
+}
+.stage.theme-paper .chip.warn {
+  color: #8a5a1e;
+  border-color: rgba(138, 90, 30, 0.35);
+  background: rgba(138, 90, 30, 0.08);
+}
+.stage.theme-paper .theme-opt:hover {
+  background: rgba(74, 56, 38, 0.08);
+}
+.stage.theme-paper .theme-opt.active {
+  background: rgba(122, 92, 62, 0.16);
+}
+.stage.theme-paper .style-panel {
+  box-shadow: 0 20px 50px rgba(74, 56, 38, 0.22);
 }
 
 /* 用户偏好减弱动态效果时，全部停住 */
@@ -1139,6 +1365,11 @@ onBeforeUnmount(() => {
 }
 .lyric-box.fullscreen {
   width: min(880px, 94%);
+}
+/* 歌词大屏不放音波：环形/柱状都会压在歌词上，字直接不可读。
+   音波留给黑胶与封面布局，它们有明确的视觉中心。 */
+.stage.style-lyrics .stage-wave {
+  display: none;
 }
 .stage.style-lyrics .lyric-box :deep(.line) {
   font-size: 24px;

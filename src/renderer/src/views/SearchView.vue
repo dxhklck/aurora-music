@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { onMounted, computed, ref, watch } from 'vue'
 import type { PlatformId } from '@shared/types'
+import { externalSearchLinks, searchKeywords, trackLabel } from '@shared/recognize-text'
 import Icon from '../components/Icon.vue'
 import SongTable from '../components/SongTable.vue'
 import { useSearchStore } from '../stores/search'
 import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
+import { belongsToOrigin, clearRecognizeOrigin, useRecognizeOrigin } from '../core/recognize-origin'
 
 const search = useSearchStore()
 const app = useAppStore()
@@ -23,6 +25,33 @@ function pick(keyword: string): void {
   input.value = keyword
   suggestOpen.value = false
   void search.run(keyword)
+}
+
+/* ---------------- 识别来源提示条 ---------------- */
+
+const recognizeOrigin = useRecognizeOrigin()
+
+/** 只在「当前关键词仍是这次识别带来的」时显示；用户换了词就自动消失 */
+const origin = computed(() => {
+  const item = recognizeOrigin.value
+  return belongsToOrigin(item, search.keyword) ? item : null
+})
+const originLabel = computed(() =>
+  origin.value ? trackLabel(origin.value.title, origin.value.artist) : ''
+)
+const originLinks = computed(() =>
+  origin.value ? externalSearchLinks(origin.value.title, origin.value.artist) : []
+)
+/** 带歌手搜不到时的手动降级；没有歌手时为空，按钮不显示 */
+const originTitleOnly = computed(() => {
+  if (!origin.value) return ''
+  const list = searchKeywords(origin.value.title, origin.value.artist)
+  return list.length > 1 ? list[list.length - 1] : ''
+})
+
+/** 外链走系统浏览器：主窗口的 setWindowOpenHandler 已经这么接管了 */
+function openExternal(url: string): void {
+  window.open(url, '_blank')
 }
 
 /** 空态里换音源：切换后自动用同一个关键词重搜，不用用户再敲一遍 */
@@ -102,6 +131,30 @@ watch(
           {{ item }}
         </button>
       </div>
+    </div>
+
+    <!-- 从听歌识曲跳过来的：识别结果的出口跟着走，别让用户重开弹窗再录一遍 -->
+    <div v-if="origin" class="origin-strip">
+      <Icon name="mic" :size="15" class="origin-ico" />
+      <div class="origin-body">
+        <span class="origin-title">识别结果 <strong>{{ originLabel }}</strong></span>
+        <span class="origin-hint">没有对得上的版本？换个地方找：</span>
+      </div>
+      <div class="origin-links">
+        <button v-if="originTitleOnly" class="link" @click="pick(originTitleOnly)">只搜歌名</button>
+        <button
+          v-for="link in originLinks"
+          :key="link.id"
+          class="link"
+          :title="`在浏览器中打开${link.label}搜索`"
+          @click="openExternal(link.url)"
+        >
+          {{ link.label }}
+        </button>
+      </div>
+      <button class="icon-btn origin-x" title="不再显示" @click="clearRecognizeOrigin()">
+        <Icon name="close" :size="13" />
+      </button>
     </div>
 
     <div v-if="search.history.length" class="history">
@@ -257,6 +310,66 @@ watch(
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 22px;
+}
+
+/* 识别来源提示条：比历史记录更靠上、更显眼，关掉就整条消失 */
+.origin-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: -6px 0 16px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.origin-ico {
+  color: var(--accent);
+  flex: none;
+}
+.origin-body {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.origin-title {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.origin-title strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.origin-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.origin-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+.origin-links .link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.origin-links .link:hover {
+  color: var(--accent);
+}
+.origin-x {
+  width: 22px;
+  height: 22px;
+  flex: none;
 }
 .label {
   font-size: 11px;
