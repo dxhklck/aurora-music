@@ -17,7 +17,7 @@ import { useLibraryStore } from './stores/library'
 import { usePlaylistStore } from './stores/playlists'
 import { plain } from './core/plain'
 import { wave } from './core/wave'
-import type { LyricWindowState } from '@shared/types'
+import type { AppSettings, LyricWindowState } from '@shared/types'
 import type { TrayState } from '@shared/api'
 
 const app = useAppStore()
@@ -135,19 +135,26 @@ function onKey(event: KeyboardEvent): void {
   }
 }
 
+/** 音频图参数与设置同步。启动与 onSettingsChanged 都走这里，
+ *  否则均衡器面板之外触发的设置广播（其它窗口）不会落到音频图上。 */
+function applyAudioSettings(settings: AppSettings): void {
+  const eq = settings.equalizer
+  if (eq) {
+    wave.setEqualizer(eq.gains, eq.enabled)
+    wave.setNightLimiter(eq.night === true)
+    wave.setPreamp(eq.preamp ?? 0)
+  }
+  wave.setLoudnessNorm(settings.loudnessNorm === true)
+}
+
 onMounted(async () => {
   document.documentElement.dataset.platform = window.api.platform
   await app.boot()
   if (app.settings) {
     player.hydrate({ volume: app.settings.volume, playMode: app.settings.playMode })
-    // 均衡器：音频图是懒创建的，这里先灌一次参数，等第一次打开播放舞台时按它初始化
-    const eq = app.settings.equalizer
-    if (eq) {
-      wave.setEqualizer(eq.gains, eq.enabled)
-      wave.setNightLimiter(eq.night === true)
-    }
-    // 响度均衡同样是「设置先于音频图创建」的场景，启动时灌一次
-    wave.setLoudnessNorm(app.settings.loudnessNorm === true)
+    // 均衡器/夜间限幅/总增益：音频图是懒创建的，这里先灌一次参数，
+    // 等第一次打开播放舞台时按它初始化
+    applyAudioSettings(app.settings)
   }
   player.bindEngine()
   // 把上次关掉时的队列摆回来：只还原队列与选中项，不取址也不出声，
@@ -155,7 +162,10 @@ onMounted(async () => {
   player.restoreQueue()
   await Promise.all([download.init(), library.load(), playlists.load()])
 
-  offSettings = window.api.onSettingsChanged((next) => app.applySettings(next))
+  offSettings = window.api.onSettingsChanged((next) => {
+    app.applySettings(next)
+    applyAudioSettings(next)
+  })
   offTray = window.api.onTrayCommand((command) => {
     if (command === 'toggle') void player.toggle()
     else if (command === 'next') player.next()

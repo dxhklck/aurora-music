@@ -11,11 +11,13 @@ const EQ_MAX_GAIN = 12
 const PREAMP_MAX = 6
 
 function normalizeEqualizer(input: unknown): AppSettings['equalizer'] {
-  const source = (input ?? {}) as { enabled?: unknown; gains?: unknown; preamp?: unknown }
+  const source = (input ?? {}) as { enabled?: unknown; gains?: unknown; preamp?: unknown; night?: unknown }
   const raw = Array.isArray(source.gains) ? source.gains : []
   const preamp = Number(source.preamp)
   return {
     enabled: source.enabled === true,
+    // night（夜间限幅）必须保留：丢掉它用户选了「夜间」重启后设置就没了
+    night: source.night === true,
     gains: Array.from({ length: EQ_BANDS }, (_, index) => {
       const value = Number(raw[index])
       return Number.isFinite(value) ? Math.max(-EQ_MAX_GAIN, Math.min(EQ_MAX_GAIN, value)) : 0
