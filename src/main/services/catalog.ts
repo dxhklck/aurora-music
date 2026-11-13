@@ -392,7 +392,17 @@ class CatalogService {
           scoreboard.record(candidate.info.id, Date.now() - started, false)
           continue
         }
-        const stream = await candidate.resolveStream(match, quality)
+        // 取址同样受 12s 预算约束：引擎取址可能比搜索更慢，不设防的话
+        // 一个慢源就能把「换源」拖成「卡死」。超时按软失败（continue），
+        // 不熔断——可能只是这一次慢。
+        const stream = await withTimeout(
+          candidate.resolveStream(match, quality),
+          Math.max(1, deadline - Date.now())
+        )
+        if (!stream) {
+          scoreboard.record(candidate.info.id, Date.now() - started, false)
+          continue
+        }
         scoreboard.record(candidate.info.id, Date.now() - started, true)
         breaker.delete(candidate.info.id)
         return { song: match, stream }
