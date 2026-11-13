@@ -10,7 +10,8 @@ import type {
 import { parseLrc } from '@shared/lyric'
 import { BaseProvider, DESKTOP_UA } from './base'
 import { ProviderError } from './types'
-import { mediaUrl } from '../media'
+import { mediaUrl, isMediaUrl } from '../media'
+import { stashMediaHeaders } from '../protocol'
 import { decodeHtml } from '../utils'
 import { musicdl, type EngineSong, type ResolveQuery } from '../engine/musicdl'
 import { EngineError } from '../engine/ts/errors'
@@ -478,8 +479,13 @@ export class MusicdlProvider extends BaseProvider {
     }
 
     const format = (resolved.ext || 'mp3').toLowerCase()
+    // Cookie/Referer 不进 URL：登记到主进程仓库，URL 只带一次性 sid，
+    // proxyRemote 按 sid 取回附加（部分 CDN 校验 Referer/Cookie，探测通过
+    // 而播放 403 的根因就是这条链路丢了头）
+    const sid = stashMediaHeaders({ ...headers, ...(this.spec.referer ? { Referer: this.spec.referer } : {}) })
+    const proxyUrl = mediaUrl(probe.finalUrl || resolved.url, this.spec.referer)
     return {
-      url: mediaUrl(probe.finalUrl || resolved.url, this.spec.referer),
+      url: sid && isMediaUrl(proxyUrl) ? `${proxyUrl}&h=${sid}` : proxyUrl,
       directUrl: probe.finalUrl || resolved.url,
       headers,
       protocol: resolved.protocol === 'HLS' ? 'hls' : 'http',

@@ -80,6 +80,35 @@ function isInsideDemoRoot(resolved: string): boolean {
   return normalized === root || normalized.startsWith(root + '\\') || normalized.startsWith(root + '/')
 }
 
+/**
+ * 音源自定义请求头仓库。Cookie/Referer 不能塞进 muse:// URL（渲染层可见、
+ * 会被日志记录，还可能被拼接重放），所以主进程侧用随机 sid 登记，
+ * URL 只带 sid；proxyRemote 取回后附加到上游请求。条目带过期自动淘汰。
+ */
+const mediaHeaderStore = new Map<string, { headers: Record<string, string>; expireAt: number }>()
+const MEDIA_HEADER_TTL = 15 * 60_000
+const MEDIA_HEADER_MAX = 120
+
+export function stashMediaHeaders(headers: Record<string, string>): string | null {
+  const entries = Object.entries(headers).filter(([, value]) => value)
+  if (!entries.length) return null
+  if (mediaHeaderStore.size >= MEDIA_HEADER_MAX) {
+    // 先清过期的，还超就从最早的开始丢
+    const now = Date.now()
+    for (const [key, value] of mediaHeaderStore) {
+      if (value.expireAt <= now) mediaHeaderStore.delete(key)
+    }
+    while (mediaHeaderStore.size >= MEDIA_HEADER_MAX) {
+      const oldest = mediaHeaderStore.keys().next().value
+      if (!oldest) break
+      mediaHeaderStore.delete(oldest)
+    }
+  }
+  const sid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+  mediaHeaderStore.set(sid, { headers: Object.fromEntries(entries), expireAt: Date.now() + MEDIA_HEADER_TTL })
+  return sid
+}
+
 /** 必须在 app ready 之前调用 */
 export function registerMediaScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -181,6 +210,13 @@ async function proxyRemote(request: Request, url: URL): Promise<Response> {
   const headers: Record<string, string> = { 'User-Agent': UA, Accept: '*/*' }
   const referer = url.searchParams.get('r')
   if (referer) headers.Referer = referer
+  // 音源自定义头（Cookie/Referer 等）：按 sid 从主进程仓库取，URL 本身不带敏感值
+  const sid = url.searchParams.get('h')
+  if (sid) {
+    const stashed = mediaHeaderStore.get(sid)
+    mediaHeaderStore.delete(sid) // 一次性：防重放
+    if (stashed) Object.assign(headers, stashed.headers)
+  }
   const range = request.headers.get('range')
   if (range) headers.Range = range
 
@@ -243,7 +279,51 @@ async function proxyRemote(request: Request, url: URL): Promise<Response> {
   }
   if (!outgoing.has('accept-ranges')) outgoing.set('accept-ranges', 'bytes')
 
+  // 图片类响应加体积上限：封面 URL 来自音源返回值（半受控），
+  // 超大/无限响应会拖占带宽与解码内存。音频不限——它本来就要整首传输。
+  const contentType = outgoing.get('content-type') ?? ''
+  if (contentType.startsWith('image/')) {
+    const declared = Number(outgoing.get('content-length') ?? 0)
+    if (declared > MAX_IMAGE_BYTES) {
+      void upstream.body?.cancel()
+      return new Response('Image Too Large', { status: 413, headers: CORS_HEADERS })
+    }
+    return new Response(limitedBody(upstream.body, MAX_IMAGE_BYTES), {
+      status: upstream.status,
+      headers: outgoing
+    })
+  }
+
   return new Response(upstream.body, { status: upstream.status, headers: outgoing })
+}
+
+/** 图片代理的响应体上限（8MB：4K 级封面也用不到这么多） */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+/** 超过 limit 字节就把流掐断（解码端会因数据截断报错——这正是想要的失败） */
+function limitedBody(body: ReadableStream<Uint8Array> | null, limit: number): ReadableStream<Uint8Array> {
+  if (!body) return new ReadableStream<Uint8Array>({ pull(controller) { controller.close() } })
+  let total = 0
+  const reader = body.getReader()
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read()
+      if (done) {
+        controller.close()
+        return
+      }
+      total += value.byteLength
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined)
+        controller.error(new Error('image size limit exceeded'))
+        return
+      }
+      controller.enqueue(value)
+    },
+    async cancel() {
+      await reader.cancel().catch(() => undefined)
+    }
+  })
 }
 
 async function serveLocal(request: Request, url: URL): Promise<Response> {
