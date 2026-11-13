@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { writeFile, readFile } from 'node:fs/promises'
 import { IPC } from '@shared/ipc'
 import { registerMediaScheme, installMediaProtocol, setLocalRoots } from './protocol'
-import { createMainWindow, getMainWindow } from './windows'
+import { createMainWindow, getMainWindow, persistMainWindowBounds } from './windows'
 import { createTray } from './tray'
 import { bootstrapProviders, registerEngineProviders } from './providers'
 import { initSourceHealth } from './services/source-health'
@@ -318,6 +318,8 @@ if (!app.requestSingleInstanceLock()) {
     clearShortcuts()
     event.preventDefault()
     void (async () => {
+      // app.exit 跳过窗口 close 事件，最后一次移动/缩放的几何必须在这里补存
+      persistMainWindowBounds()
       await downloads.flush().catch(() => undefined)
       // 窗口位置这类设置是 close 时异步写的，退出前必须等它落地，否则下次启动回到旧位置
       await settings.flush().catch(() => undefined)

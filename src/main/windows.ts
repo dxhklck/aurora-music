@@ -155,6 +155,24 @@ export function hideToTray(): void {
   mainWindow?.hide()
 }
 
+/**
+ * 把主窗口当前形态的位置尺寸写回设置。普通移动/缩放期间不即时保存（高频事件
+ * 不能每个 move 都写盘），所以退出路径（before-quit）必须显式调一次——
+ * 否则最后一次移动的位置会丢（close handler 只覆盖 hide-to-tray 分支）。
+ */
+export function persistMainWindowBounds(): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  const bounds = { ...settings.get().windowBounds }
+  const rect = win.getNormalBounds()
+  if (settings.get().miniMode) {
+    bounds.mini = { ...rect, width: MINI_SIZE.width, height: MINI_SIZE.height }
+  } else if (rect.width > MINI_SIZE.width) {
+    bounds.normal = rect
+  }
+  void settings.set({ windowBounds: bounds })
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
