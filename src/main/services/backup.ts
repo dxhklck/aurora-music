@@ -17,6 +17,7 @@ import {
   validateBackup
 } from '@shared/backup-format'
 import { settings } from './settings'
+import { downloads } from './download'
 
 /**
  * 全量备份 / 还原：配置 + 本地库索引 + 歌单 + 下载记录 + 渲染层统计。
@@ -51,6 +52,9 @@ function normalizeLocal(input: unknown): Record<string, string> {
  */
 export async function exportBackup(local: Record<string, string>): Promise<BackupExportResult> {
   await settings.flush()
+  // downloads.json 由 600ms 节流定时器回写，导出前必须强制刷盘，
+  // 否则备份里可能落后最后一次任务状态变化整整一个节流周期
+  await downloads.flush()
   const userData = app.getPath('userData')
   const files: Record<string, string> = {
     // settings.json 不能直接抄文件：原文里有 Cookie。用内存里的当前值脱敏后再序列化，
@@ -163,6 +167,8 @@ export async function importBackup(): Promise<BackupImportResult> {
 
   // 先把内存里排队的写盘落地，避免还原后紧接着一次旧值回写
   await settings.flush()
+  // downloads 的节流定时器同理：不刷盘的话还原后 400ms 内旧状态可能盖回 downloads.json
+  await downloads.flush()
 
   const failedFiles: string[] = []
   for (const [name, raw] of Object.entries(payload.files)) {
