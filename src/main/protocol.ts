@@ -1,6 +1,7 @@
 import { protocol } from 'electron'
-import { open, readFile, stat, type FileHandle } from 'node:fs/promises'
-import { extname } from 'node:path'
+import { open, readFile, realpath, stat, type FileHandle } from 'node:fs/promises'
+import { extname, isAbsolute } from 'node:path'
+import { lookup as dnsLookup } from 'node:dns/promises'
 import { MEDIA_SCHEME } from './media'
 
 const UA =
@@ -46,6 +47,39 @@ function preflight(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS })
 }
 
+/**
+ * `muse://local` 允许读取的根目录：下载目录、用户导入的音乐目录、userData 下的
+ * 封面/歌词缓存，以及演示音源目录。协议原本只按扩展名放行，等于给渲染层开了
+ * 「任意路径读白名单扩展名文件」的口子——只要一次 XSS 就能把用户盘里的图片、
+ * 歌词、音频整目录捞走。收敛到受管目录后，越界路径一律 403。
+ */
+let localRoots: string[] = []
+let demoRoot = ''
+
+export function setLocalRoots(roots: { managed: string[]; demo: string }): void {
+  demoRoot = roots.demo
+  localRoots = [...roots.managed]
+}
+
+/** 路径必须在某个受管根内（resolve 归一化 + 前缀比较，防止 ../ 与大小写绕过 Windows 盘符） */
+function isInsideManagedRoots(resolved: string): boolean {
+  const normalized = resolved.toLowerCase()
+  for (const root of localRoots) {
+    const rootNormalized = root.toLowerCase()
+    if (normalized === rootNormalized || normalized.startsWith(rootNormalized.endsWith('\\') || rootNormalized.endsWith('/') ? rootNormalized : rootNormalized + '\\')) return true
+    if (normalized.startsWith(rootNormalized + '/')) return true
+  }
+  return false
+}
+
+/** 演示目录单独放行（dev 与打包布局不同，由主进程启动时登记） */
+function isInsideDemoRoot(resolved: string): boolean {
+  if (!demoRoot) return false
+  const normalized = resolved.toLowerCase()
+  const root = demoRoot.toLowerCase()
+  return normalized === root || normalized.startsWith(root + '\\') || normalized.startsWith(root + '/')
+}
+
 /** 必须在 app ready 之前调用 */
 export function registerMediaScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -87,9 +121,62 @@ export function installMediaProtocol(): void {
   })
 }
 
+/**
+ * muse://media 的目标校验：渲染层不可控内容能让主进程对任意 URL 发 GET，
+ * 包括本机服务（127.0.0.1）、内网段与云元数据接口（169.254.169.254）。
+ * 这里按 IP 段拒绝；域名由 DNS 解析结果判定，防止「域名解析到内网」绕过。
+ */
+function isPrivateAddress(address: string): boolean {
+  // IPv6：::1、::、fc00::/7（唯一本地）、fe80::/10（链路本地）、IPv4 映射地址
+  if (address.includes(':')) {
+    const lower = address.toLowerCase()
+    if (lower === '::1' || lower === '::') return true
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true
+    if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true
+    if (lower.startsWith('::ffff:')) return isPrivateAddress(lower.slice(7))
+    return false
+  }
+  const parts = address.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false
+  const [a, b] = parts as [number, number, number, number]
+  if (a === 0 || a === 10 || a === 127) return true // 本机 / 私网 / 0.0.0.0
+  if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
+  if (a === 169 && b === 254) return true // link-local（含云元数据）
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 192 && b === 0 && (parts[2] === 0 || parts[2] === 2)) return true // 保留段
+  if (a === 198 && (b === 18 || b === 19)) return true // benchmark
+  if (a >= 224) return true // 组播 / 保留
+  return false
+}
+
+async function assertPublicTarget(target: string): Promise<void> {
+  const parsed = new URL(target)
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('protocol')
+  const host = parsed.hostname.replace(/^\[|\]$/g, '')
+  if (!host) throw new Error('no host')
+  // 字面量 IP 直接判；域名解析后每个地址都要是公网
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':')) {
+    if (isPrivateAddress(host)) throw new Error('private address')
+    return
+  }
+  const records = await dnsLookup(host, { all: true, verbatim: true })
+  if (!records.length) throw new Error('dns empty')
+  for (const record of records) {
+    if (isPrivateAddress(record.address)) throw new Error('resolves to private address')
+  }
+}
+
 async function proxyRemote(request: Request, url: URL): Promise<Response> {
   const target = url.searchParams.get('u') ?? ''
   if (!/^https?:\/\//i.test(target)) return new Response('Bad Request', { status: 400 })
+  try {
+    await assertPublicTarget(target)
+  } catch (error) {
+    // 域名解析失败也按拒绝处理：放行等于把 SSRF 判断交给运气
+    process.stdout.write(`[media] blocked proxy target: ${error instanceof Error ? error.message : 'unknown'}\n`)
+    return new Response('Forbidden', { status: 403, headers: CORS_HEADERS })
+  }
 
   const headers: Record<string, string> = { 'User-Agent': UA, Accept: '*/*' }
   const referer = url.searchParams.get('r')
@@ -106,12 +193,38 @@ async function proxyRemote(request: Request, url: URL): Promise<Response> {
   try {
     // 用 Node 的 fetch（undici）而不是 net.fetch：后者在自定义协议回调里对部分
     // 图片/音频 CDN 会直接 ERR_FAILED，且不便于透传 Range。
-    upstream = await fetch(target, {
-      method: request.method === 'HEAD' ? 'HEAD' : 'GET',
-      headers,
-      redirect: 'follow',
-      signal: controller.signal
-    })
+    // redirect:'manual'：跟随重定向时不再逐跳复检等于把 302 跳内网的路留给攻击者
+    let current = target
+    let response: Response | null = null
+    for (let hop = 0; hop < 5; hop += 1) {
+      if (hop > 0) await assertPublicTarget(current)
+      const hopResponse = await fetch(current, {
+        method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+        headers,
+        redirect: 'manual',
+        signal: controller.signal
+      })
+      const location = hopResponse.headers.get('location')
+      if (hopResponse.status >= 300 && hopResponse.status < 400 && location) {
+        try {
+          await hopResponse.body?.cancel()
+        } catch {
+          /* 3xx 通常无 body */
+        }
+        current = new URL(location, current).toString()
+        if (!/^https?:\/\//i.test(current)) throw new Error('redirect to non-http')
+        continue
+      }
+      response = hopResponse
+      break
+    }
+    if (!response) throw new Error('too many redirects')
+    upstream = response
+  } catch (error) {
+    clearTimeout(headerTimer)
+    if (controller.signal.aborted) throw error // 响应头超时保持原语义：502
+    process.stdout.write(`[media] blocked proxy target: ${error instanceof Error ? error.message : 'unknown'}\n`)
+    return new Response('Forbidden', { status: 403, headers: CORS_HEADERS })
   } finally {
     clearTimeout(headerTimer)
   }
@@ -137,10 +250,17 @@ async function serveLocal(request: Request, url: URL): Promise<Response> {
   const filePath = decodeURIComponent(url.searchParams.get('p') ?? '')
   const ext = extname(filePath).toLowerCase()
   if (!filePath || !ALLOWED_EXT.has(ext)) return new Response('Forbidden', { status: 403 })
+  // 必须是受管目录内的绝对路径；符号链接用 realpath 解到真实位置再判一次
+  if (!isAbsolute(filePath) || !isInsideManagedRoots(filePath)) return new Response('Forbidden', { status: 403 })
 
   let size: number
+  let realPath = filePath
   try {
-    const info = await stat(filePath)
+    realPath = await realpath(filePath)
+    if (!isInsideManagedRoots(realPath) && !isInsideDemoRoot(realPath)) {
+      return new Response('Forbidden', { status: 403 })
+    }
+    const info = await stat(realPath)
     if (!info.isFile()) return new Response('Not Found', { status: 404 })
     size = info.size
   } catch {
@@ -184,7 +304,7 @@ async function serveLocal(request: Request, url: URL): Promise<Response> {
   // 小文件整读：这条路径已经跑稳了，不给它引入变化
   if (size <= STREAM_THRESHOLD) {
     try {
-      const data = await readFile(filePath)
+      const data = await readFile(realPath)
       return new Response(data.subarray(start, end + 1) as unknown as BodyInit, { status, headers })
     } catch {
       return new Response('Not Found', { status: 404 })
@@ -192,7 +312,7 @@ async function serveLocal(request: Request, url: URL): Promise<Response> {
   }
 
   // 大文件按需流式：一首 100MB 无损整读，峰值就是一个完整文件；拖动进度条还会再叠一次
-  return new Response(fileBody(filePath, start, end), { status, headers })
+  return new Response(fileBody(realPath, start, end), { status, headers })
 }
 
 /**

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { writeFile, readFile } from 'node:fs/promises'
 import { IPC } from '@shared/ipc'
-import { registerMediaScheme, installMediaProtocol } from './protocol'
+import { registerMediaScheme, installMediaProtocol, setLocalRoots } from './protocol'
 import { createMainWindow, getMainWindow } from './windows'
 import { createTray } from './tray'
 import { bootstrapProviders, registerEngineProviders } from './providers'
@@ -101,6 +101,15 @@ async function bootstrapRuntime(): Promise<void> {
     ? join(app.getPath('temp'), 'aurora-selftest', 'downloads')
     : join(app.getPath('music'), 'Aurora Music')
   await settings.init(app.getPath('userData'), defaultDownloadDir)
+  // muse://local 的可读范围 = 下载目录 + 导入目录 + userData 封面缓存 + demo 目录
+  setLocalRoots({
+    managed: [
+      settings.get().downloadDir,
+      ...settings.get().musicDirs,
+      join(app.getPath('userData'), 'covers')
+    ],
+    demo: resolveDemoDir()
+  })
   // 登录态 Cookie：启动时灌入运行时仓库，之后每次请求时由音源适配器读取
   setProviderCookies({
     qq: settings.get().qqCookie,
