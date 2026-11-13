@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { readFile, writeFile, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import type { AppSettings, DesktopLyricStyle } from '@shared/types'
 
 /** 均衡器固定五段，增益必须恒为 5 个数字：长度不对时 setEqualizer 会静默不生效 */
@@ -71,6 +72,26 @@ function normalizeShortcuts(input: unknown): AppSettings['shortcuts'] {
   const source = (input ?? {}) as Record<string, unknown>
   const pick = (value: unknown): string => (typeof value === 'string' ? value.trim().slice(0, 60) : '')
   return { toggle: pick(source.toggle), next: pick(source.next), prev: pick(source.prev) }
+}
+
+/**
+ * 目录字段防线。downloadDir/musicDirs 决定了「库扫描哪里、删除时允许 trash 哪里」，
+ * 渲染层传上来的 patch 不能随便指定任意路径——只接受绝对路径，且不允许相对路径
+ * / URL 形式的注入。真实来源永远是文件对话框（downloadChooseDir / importChooseDir）。
+ */
+function normalizeDir(input: unknown, fallback: string): string {
+  if (typeof input !== 'string') return fallback
+  const trimmed = input.trim()
+  return trimmed && isAbsolute(trimmed) ? trimmed : fallback
+}
+
+function normalizeDirList(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  const seen = new Set<string>()
+  for (const item of input) {
+    if (typeof item === 'string' && item.trim() && isAbsolute(item.trim())) seen.add(item.trim())
+  }
+  return [...seen]
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -174,6 +195,9 @@ class SettingsService {
     this.cache = {
       ...this.cache,
       ...patch,
+      // 目录字段不受渲染层 patch 任意指定：非法值一律保留现值
+      downloadDir: patch.downloadDir !== undefined ? normalizeDir(patch.downloadDir, this.cache.downloadDir) : this.cache.downloadDir,
+      musicDirs: patch.musicDirs !== undefined ? normalizeDirList(patch.musicDirs) : this.cache.musicDirs,
       equalizer: normalizeEqualizer(patch.equalizer ?? this.cache.equalizer),
       preferredSources: normalizeSources(patch.preferredSources ?? this.cache.preferredSources),
       desktopLyricStyle: normalizeLyricStyle(
