@@ -146,6 +146,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   })
 }
 
+/**
+ * checkForUpdates 互斥。electron-updater 内部会复用 in-flight Promise：
+ * 渠道探测里一次 checkForUpdates 还没回来时，下一次调用拿到的是**上一个渠道**
+ * 的请求结果——版本号、feed 全是旧的，会把错误渠道记进 settings.updateChannel。
+ * 这里把「切换渠道 → 检查」整段串行化，排队等前一次完全结束。
+ */
+let updateChain: Promise<unknown> = Promise.resolve()
+
+function serializeUpdate<T>(task: () => Promise<T>): Promise<T> {
+  const run = updateChain.then(task, task)
+  // 链要吃掉失败，否则一次失败会让后面所有排队任务连带 reject
+  updateChain = run.catch(() => undefined)
+  return run
+}
+
 function applyChannel(channel: Channel): void {
   channel.apply()
 }
@@ -215,8 +230,12 @@ async function ensureChannel(): Promise<void> {
     }
     const timeout = Math.min(index === 0 ? PROBE_TIMEOUT : PROBE_FALLBACK_TIMEOUT, remaining)
     try {
-      await useChannel(channel)
-      const result = await withTimeout(autoUpdater.checkForUpdates(), timeout)
+      // 切渠道 + 检查必须整段串行：electron-updater 的 in-flight Promise 复用
+      // 会让并发检查拿到上一个渠道的结果，把错误渠道记进设置
+      const result = await serializeUpdate(async () => {
+        await useChannel(channel)
+        return withTimeout(autoUpdater.checkForUpdates(), timeout)
+      })
       const version = result?.updateInfo?.version ?? null
       probes.push({ id: label, version })
       // 落后于当前的源：它返回的「无更新」不能采信，继续问下一个
@@ -293,7 +312,7 @@ export async function checkForUpdate(): Promise<UpdateStatusView> {
   initUpdater()
   try {
     await ensureChannel()
-    const result = await autoUpdater.checkForUpdates()
+    const result = await serializeUpdate(() => autoUpdater.checkForUpdates())
     const version = result?.updateInfo?.version
     // 必须用版本号比较，不能写 `version !== app.getVersion()`：
     // GitCode 与 GitHub 的 latest.yml 不保证同时更新，落后的一端会让本来
