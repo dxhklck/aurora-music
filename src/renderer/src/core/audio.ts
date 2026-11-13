@@ -38,6 +38,12 @@ class AudioEngine {
   private stallTimer: number | null = null
   private stallBaseTime = 0
   private stallBaseBuffered = 0
+  /**
+   * 请求代次：load/play/crossfadeTo 每次进入时递增。`await el.play()` 期间用户
+   * 可能切歌/暂停/停止——旧承诺兑现后若不校验代次，会向新曲目 fadeTo 旧音量、
+   * emit 过期 error，或把交叉淡化状态落地到已被替换的会话上。
+   */
+  private generation = 0
 
   constructor() {
     const make = (): HTMLAudioElement => {
@@ -130,6 +136,7 @@ class AudioEngine {
   }
 
   load(url: string, options: { autoplay?: boolean } = {}): void {
+    this.generation += 1
     this.stopFade()
     this.stopCrossfade()
     this.stopStallWatch()
@@ -140,12 +147,18 @@ class AudioEngine {
     this.ready = true
     this.emit('waiting', false)
     if (options.autoplay) {
+      const token = this.generation
       this.applyVolume(0)
       this.startStallWatch()
       void this.el
         .play()
-        .then(() => this.fadeTo(this.targetVolume, 420))
+        .then(() => {
+          // play 等待期间发生了新的 load/pause/stop：旧承诺不得再改音量
+          if (token !== this.generation || !this.ready) return
+          this.fadeTo(this.targetVolume, 420)
+        })
         .catch(() => {
+          if (token !== this.generation || !this.ready) return
           this.applyVolume(this.targetVolume)
           // play() 拒绝不全是自动播放拦截：元素加载失败（如文件损坏）时
           // error 事件先到，error.code 比笼统的"被拦截"更有诊断价值
@@ -163,6 +176,7 @@ class AudioEngine {
 
   async play(): Promise<void> {
     if (!this.ready) return
+    const token = this.generation
     this.stopFade()
     this.stopCrossfade()
     this.applyVolume(0)
@@ -174,6 +188,8 @@ class AudioEngine {
       this.applyVolume(this.targetVolume)
       throw error
     }
+    // await 期间切歌/停止（generation 变化）：旧 play 的淡入不再落地
+    if (token !== this.generation || !this.ready) return
     this.fadeTo(this.targetVolume, 320)
   }
 
@@ -220,6 +236,7 @@ class AudioEngine {
    */
   async crossfadeTo(url: string, ms: number): Promise<boolean> {
     if (!this.ready || ms <= 0) return false
+    const token = this.generation
     const fromIdx = this.activeIdx
     const fromEl = this.els[fromIdx]
     if (fromEl.paused || !Number.isFinite(fromEl.duration)) return false
@@ -239,6 +256,9 @@ class AudioEngine {
       toEl.load()
       return false
     }
+    // await 期间发生 load/stop/seek（代次变了）：不翻转 activeIdx，
+    // 保持现场让新的播放路径接管，否则旧淡化会覆盖新会话
+    if (token !== this.generation || !this.ready) return false
     this.activeIdx = toIdx
     const startedAt = performance.now()
     const fromLevel = this.levels[fromIdx]
@@ -265,6 +285,13 @@ class AudioEngine {
     if (standby) {
       standby.pause()
     }
+    // 淡化被打断时两个分支可能停在中间电平：不复位的话实际输出
+    // = master × branch，滑块 80% 听起来只有 40%。恢复到满电平。
+    this.setElementLevel(0, this.targetVolume)
+    this.setElementLevel(1, this.targetVolume)
+    // applyVolume 把 active 元素的 master 电平拉回目标（setElementLevel
+    // 之上还有 master 一层，只复位 branch 不够）
+    this.applyVolume(this.targetVolume)
   }
 
   private stopCrossfadeTimer(): void {
