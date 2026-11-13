@@ -194,9 +194,20 @@ class AudioEngine {
   }
 
   stop(): void {
-    this.stopStallWatch()
+    // 先掐掉淡出定时器：pause() 只注册 16ms interval，真正的 el.pause() 在
+    // 淡出完成后；不 stopFade 的话 stop 结束时元素还在出声。
+    this.stopFade()
     this.stopCrossfade()
-    for (const el of this.els) el.pause()
+    this.stopStallWatch()
+    for (const el of this.els) {
+      el.pause()
+      el.currentTime = 0
+    }
+    // 分支增益复位：淡出到一半被打断时 levels 停在中间值，音频图下
+    // 实际输出 = master × branch，不复位音量会永远卡在淡化中段
+    this.levels = [this.targetVolume, this.targetVolume]
+    wave.setBranch(0, 1)
+    wave.setBranch(1, 1)
     this.el.removeAttribute('src')
     this.el.load()
     this.ready = false

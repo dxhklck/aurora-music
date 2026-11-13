@@ -960,8 +960,9 @@ export const usePlayerStore = defineStore('player', () => {
   function stop(): void {
     // 让还在路上的取址请求作废，否则它回来会把已经停掉的队列重新播起来
     playGate.invalidate()
-    audio.pause()
-    audio.seek(0)
+    // 必须用 audio.stop()：pause()+seek(0) 的组合会被「淡出定时器 vs seek 的
+    // 淡化分支」竞态吃掉真正的 el.pause()，表现为清空队列后声音停不下来
+    audio.stop()
     playing.value = false
     time.value = 0
     index.value = -1
