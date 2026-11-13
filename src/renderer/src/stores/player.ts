@@ -51,11 +51,34 @@ function loadResume(): ResumeSnapshot | null {
   }
 }
 
-/** 音源可能返回 name 缺失或字面 "Undefined" 的脏数据：入队前统一兜底 */
+/** 音源可能返回 name 缺失或字面 "Undefined" 的脏数据：入队前统一兜底。
+ *  localStorage / 备份还原的数据更脏（artists 可能不是数组），渲染层的
+ *  artists.join / 托盘推送会直接抛 TypeError 并让 250ms 定时器持续报错。 */
 function sanitizeSong(song: Song): Song {
-  return !song.name || song.name.toLowerCase() === 'undefined'
-    ? { ...song, name: '未知曲目' }
-    : song
+  const fixed: Song = {
+    ...song,
+    name: song.name && song.name.toLowerCase() !== 'undefined' ? String(song.name) : '未知曲目',
+    id: String(song.id ?? ''),
+    platform: String(song.platform ?? ''),
+    artists: Array.isArray(song.artists)
+      ? song.artists.map((a) => String(a)).filter(Boolean)
+      : typeof song.artists === 'string'
+        ? [song.artists]
+        : [],
+    album: typeof song.album === 'string' ? song.album : '',
+    duration: Number.isFinite(song.duration) ? Number(song.duration) : 0
+  }
+  if (!fixed.id || !fixed.platform) return fixed
+  return fixed
+}
+
+/** localStorage / 备份里解析出的列表：先过滤再入队 */
+function sanitizeSongList(raw: unknown): Song[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((item): item is Song => !!item && typeof item === 'object')
+    .map(sanitizeSong)
+    .filter((song) => song.id && song.platform)
 }
 
 function sanitizeSongs(songs: Song[]): Song[] {
@@ -129,6 +152,8 @@ export const usePlayerStore = defineStore('player', () => {
    * 先发的后回来就会把正在放的那首顶掉。每次 playAt 领号，await 之后校验。
    */
   const playGate = createLatestGate()
+  /** 歌词请求只认最新：A 慢 B 快时 A 的晚到结果不得覆盖 B 的歌词 */
+  const lyricGate = createLatestGate()
 
   /** 队列项 uid 的工厂（会话内递增，原因见 core/queue.ts） */
   const nextQueueUid = createUidFactory()
@@ -175,7 +200,7 @@ export const usePlayerStore = defineStore('player', () => {
   function loadRecent(): Song[] {
     try {
       const raw = localStorage.getItem(HISTORY_KEY)
-      return raw ? (JSON.parse(raw) as Song[]) : []
+      return raw ? sanitizeSongList(JSON.parse(raw)) : []
     } catch {
       return []
     }
@@ -373,16 +398,22 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   async function loadLyric(song: Song): Promise<void> {
+    const token = lyricGate.next()
+    const key = `${song.platform}:${song.id}`
     lyricLoading.value = true
     lyricOffsetAdj.value = loadLyricOffsetAdj(song)
     try {
-      const picked = lyricPicks.value[`${song.platform}:${song.id}`]
+      const picked = lyricPicks.value[key]
       // 手动指定过就按指定那首取歌词；没指定才用播放中的这首
-      lyric.value = await window.api.lyric(plain(picked ?? song))
+      const result = await window.api.lyric(plain(picked ?? song))
+      // 请求期间切了歌：结果属于旧曲目，丢弃，不写 lyric/loading
+      if (!lyricGate.isCurrent(token)) return
+      lyric.value = result
     } catch {
+      if (!lyricGate.isCurrent(token)) return
       lyric.value = null
     } finally {
-      lyricLoading.value = false
+      if (lyricGate.isCurrent(token)) lyricLoading.value = false
     }
   }
 
@@ -458,10 +489,9 @@ export const usePlayerStore = defineStore('player', () => {
       if (!raw) return null
       const snap = JSON.parse(raw) as QueueSnapshot
       if (!Array.isArray(snap?.songs)) return null
-      // 存储可能被手改坏：没有 id/platform 的条目直接丢掉，别让一行脏数据把整个恢复搞崩
-      const songs = snap.songs.filter(
-        (song) => song && typeof song.id === 'string' && typeof song.platform === 'string'
-      )
+      // 存储可能被手改坏：sanitizeSongList 逐条补齐/过滤，
+      // 别让一行脏数据（artists 不是数组等）把整个恢复后的渲染搞崩
+      const songs = sanitizeSongList(snap.songs)
       if (!songs.length) return null
       const posRaw = localStorage.getItem(QUEUE_POS_KEY)
       const pos = posRaw ? (JSON.parse(posRaw) as Partial<QueuePosition>) : null
@@ -960,6 +990,7 @@ export const usePlayerStore = defineStore('player', () => {
   function stop(): void {
     // 让还在路上的取址请求作废，否则它回来会把已经停掉的队列重新播起来
     playGate.invalidate()
+    lyricGate.invalidate()
     // 必须用 audio.stop()：pause()+seek(0) 的组合会被「淡出定时器 vs seek 的
     // 淡化分支」竞态吃掉真正的 el.pause()，表现为清空队列后声音停不下来
     audio.stop()
