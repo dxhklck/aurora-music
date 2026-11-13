@@ -200,7 +200,11 @@ export function registerIpc(): void {
     return copyFilesToClipboard(paths)
   })
   handle(IPC.libraryDeleteFiles, async (ids: string[]) => {
-    const report = await library.deleteFiles(ids, settings.get().downloadDir)
+    // 记录的 id 前缀就是来源：`local:` 开头是导入/扫描进来的用户原始文件，永不允许
+    // trash——allowedDir 若被篡改（settingsSet 任意路径），原来的「isInsideDir 判断」
+    // 就会把唯一副本也送进回收站。下载记录（id 不带 local: 前缀）才允许动磁盘。
+    const downloadableIds = ids.filter((id) => !id.startsWith('local:'))
+    const report = await library.deleteFiles(downloadableIds, settings.get().downloadDir)
     // 真删之后歌单里的 local 条目就成了死链，跟着清掉（「仅移除」的条目同样失效）
     const gone = report.items.filter((item) => item.ok).map((item) => item.id)
     report.playlistsRemoved = await playlists.dropLocalTracks(gone)
@@ -225,7 +229,9 @@ export function registerIpc(): void {
   handle(IPC.libraryPurgeMissing, () => library.purgeMissing())
   handle(IPC.libraryOpenTrash, () => openTrash())
   handle(IPC.libraryOpenDir, (dir: string) => {
-    if (dir) void shell.openPath(dir)
+    // 目录来源可能是渲染层传参：只允许打开文件对话框/设置里出现过的受管目录
+    const allowed = new Set([settings.get().downloadDir, ...settings.get().musicDirs])
+    if (dir && allowed.has(dir)) void shell.openPath(dir)
   })
 
   // ---------- 本地音乐导入 ----------
