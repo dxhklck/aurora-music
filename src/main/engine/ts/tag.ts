@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { writeMp4Tags } from './tag-mp4'
 import { writeOggTags } from './tag-ogg'
@@ -54,12 +54,15 @@ function usltFrame(lyric: string): Buffer {
   return Buffer.concat([header, payload])
 }
 
-/** 读出现有 ID3v2 帧（保留我们不改写的那些，比如封面 APIC） */
-function readExistingFrames(data: Buffer): { frames: Buffer[]; audioStart: number } {
+/** 读出现有 ID3v2 帧（保留我们不改写的那些，比如封面 APIC）。
+ *  畸形 tagSize（声明大于文件实际长度）时返回 null——绝不把音频段切空。 */
+function readExistingFrames(data: Buffer): { frames: Buffer[]; audioStart: number } | null {
   if (data.length < 10 || data.subarray(0, 3).toString('ascii') !== 'ID3') return { frames: [], audioStart: 0 }
   const version = data[3]
   const tagSize = decodeSyncSafe(data.subarray(6, 10))
   const audioStart = 10 + tagSize
+  // ID3 头声明的内容超出文件本体：容器是坏的，继续写会截掉全部音频
+  if (audioStart > data.length) return null
   const frames: Buffer[] = []
   let cursor = 10
   while (cursor + 10 <= audioStart) {
@@ -75,7 +78,15 @@ function readExistingFrames(data: Buffer): { frames: Buffer[]; audioStart: numbe
 
 async function writeId3(payload: TagPayload): Promise<TagResult> {
   const data = await readFile(payload.path)
-  const { frames, audioStart } = readExistingFrames(data)
+  const parsed = readExistingFrames(data)
+  // 畸形 ID3 头：写进去只会丢音频，直接拒绝，保留原文件
+  if (!parsed) return { ok: false, error: 'ID3 头损坏：标签长度超出文件实际长度' }
+  const { frames, audioStart } = parsed
+  // 音频起点应落在 MPEG 帧同步字上（0xFF Ex/Fx）；不是则视为容器损坏，宁可不动原文件
+  if (audioStart + 1 < data.length && data[audioStart] !== 0xff) {
+    return { ok: false, error: 'ID3 头损坏：标签后不是有效的音频帧' }
+  }
+  if (audioStart >= data.length) return { ok: false, error: 'ID3 头损坏：文件除标签外没有音频数据' }
   const replaced = new Set(['TIT2', 'TPE1', 'TALB', 'USLT', 'TRCK'])
   const kept = frames.filter((frame) => !replaced.has(frame.subarray(0, 4).toString('ascii')))
 
@@ -85,7 +96,10 @@ async function writeId3(payload: TagPayload): Promise<TagResult> {
 
   const body = Buffer.concat([...kept, ...built])
   const header = Buffer.concat([Buffer.from('ID3', 'ascii'), Buffer.from([0x03, 0x00, 0x00]), syncSafeSize(body.length)])
-  await writeFile(payload.path, Buffer.concat([header, body, data.subarray(audioStart)]))
+  // 临时文件 + rename：中途失败（磁盘满/进程退出）不会留下被截断的原文件
+  const tmp = `${payload.path}.tagtmp`
+  await writeFile(tmp, Buffer.concat([header, body, data.subarray(audioStart)]))
+  await rename(tmp, payload.path)
   return { ok: true }
 }
 
