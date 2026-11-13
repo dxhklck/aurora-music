@@ -335,6 +335,12 @@ export interface DownloadParams extends ResolveQuery {
   taskId?: string
   /** 取消信号：由下载管理器在用户点取消时触发 */
   signal?: AbortSignal
+  /**
+   * 已解析好的地址直供：调用方（主进程下载器）刚通过 catalog.resolveTrack
+   * 拿到的直链/请求头。给了它就跳过 resolveSongInfo 的按歌名重搜——
+   * 重启后引擎 token 缓存是空的，重搜可能命中 Live/翻唱版本。
+   */
+  override?: { url: string; headers?: Record<string, string>; cookies?: Record<string, string> }
 }
 
 /** 引擎侧下载：目前只服务 HLS，HTTP 直链由主进程 DownloadManager 自己流式下载 */
@@ -342,8 +348,21 @@ export async function downloadHlsTo(
   params: DownloadParams,
   onProgress?: (received: number, total: number) => void
 ): Promise<{ path: string; size: number }> {
-  const song = await resolveSongInfo(params)
   if (!params.path) throw new EngineError('invalid', '缺少目标路径')
+  if (params.override?.url) {
+    const progress: HlsProgress | undefined = onProgress ? (received, total) => onProgress(received, total) : undefined
+    const result = await downloadHls({
+      url: params.override.url,
+      target: params.path,
+      headers: params.override.headers ?? {},
+      cookies: params.override.cookies ?? {},
+      onProgress: progress,
+      signal: params.signal
+    })
+    onProgress?.(result.size, result.size)
+    return { path: result.path, size: result.size }
+  }
+  const song = await resolveSongInfo(params)
   if (!song.downloadUrl) throw new EngineError('blocked', '没有可用的下载地址')
 
   const progress: HlsProgress | undefined = onProgress ? (received, total) => onProgress(received, total) : undefined

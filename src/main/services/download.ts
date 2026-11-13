@@ -319,7 +319,10 @@ class DownloadManager extends EventEmitter {
     await ensureDir(dir)
 
     const base = sanitizeFileName(`${song.artists.join(', ') || '未知歌手'} - ${song.name}`)
-    const partPath = join(dir, `.${base}.${ext}.part`)
+    // .part 文件名带任务 id：不同平台（netease/qq…）同名同歌手的歌是两个独立任务，
+    // 并发下载时共用一个 .part 会互相截断/混写字节。断点续传不受影响——
+    // 同一任务的 id 不变，续传仍能找到自己的 .part。
+    const partPath = join(dir, `.${base}.${task.id}.${ext}.part`)
     task.partPath = partPath
 
     if (stream.url.startsWith('muse://local')) {
@@ -503,14 +506,18 @@ class DownloadManager extends EventEmitter {
         task.progress = total ? Math.min(received / total, 0.999) : 0
         this.scheduleEmit()
       },
-      controller.signal
+      controller.signal,
+      // 直供刚解析出的地址与请求头：跳过引擎的按歌名重搜（重启后 token 全丢，
+      // 重搜可能命中 Live/翻唱），签名过期时由 run() 的 invalidateStream+重试兜底
+      stream.directUrl && /^https?:\/\//i.test(stream.directUrl)
+        ? { url: stream.directUrl, headers: stream.headers }
+        : undefined
     )
     if (task.status === 'canceled') {
       await safeUnlink(target)
       return
     }
     await moveFile(target, partPath)
-    void stream
   }
 
   /**

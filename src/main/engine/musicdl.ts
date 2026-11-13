@@ -49,9 +49,11 @@ class MusicdlEngine {
     path: string,
     taskId: string,
     onProgress: (received: number, total: number) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** 已解析好的直链与请求头：给了就跳过按歌名重搜（ENG-007） */
+    override?: { url: string; headers?: Record<string, string>; cookies?: Record<string, string> }
   ): Promise<{ path: string; size: number }> {
-    return tsEngine.downloadHlsTo({ ...query, path, taskId, signal }, onProgress)
+    return tsEngine.downloadHlsTo({ ...query, path, taskId, signal, override }, onProgress)
   }
 
   async tag(payload: TagPayload): Promise<{ ok: boolean; skipped?: string; error?: string }> {
