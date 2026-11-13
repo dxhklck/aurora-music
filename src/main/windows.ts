@@ -21,6 +21,27 @@ function rendererUrl(hash: string): { url?: string; file?: string; hash: string 
 }
 
 /**
+ * 外链白名单：只放行 https（开发期额外放行 dev server 的 http）。
+ * file:、自定义协议、本地路径一律拒绝——`shell.openExternal` 会把任意协议
+ * 交给系统默认处理器，file:///...exe 在 Windows 上会真的启动程序。
+ */
+function isSafeExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'https:') return true
+    if (isDev && parsed.protocol === 'http:' && url.startsWith(String(process.env.ELECTRON_RENDERER_URL ?? ''))) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+function openExternalSafe(url: string): void {
+  if (!isSafeExternalUrl(url)) return
+  void shell.openExternal(url).catch(() => undefined)
+}
+
+/**
  * 应用图标（任务栏/窗口用）。不配的话 dev 模式下任务栏显示的是 Electron
  * 默认图标，与托盘、exe 三个来源不一致——统一解析到 resources/icons/icon.ico。
  */
@@ -71,8 +92,23 @@ export function createMainWindow(): BrowserWindow {
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    openExternalSafe(url)
     return { action: 'deny' }
+  })
+
+  // 导航锁定：渲染层只允许加载本地 bundle（或 dev server）。
+  // 没有它，一次 XSS / 误跳转就能让远程页面继承 preload 的完整 window.api
+  //（settings 里含登录 Cookie，还有文件类 IPC），等于把主进程能力整体送出去。
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const target = rendererUrl('')
+    const allowed = target.url
+      ? url.startsWith(target.url)
+      : url.startsWith('file://') && url.startsWith(target.file ? `file://${target.file.split('#')[0].replace(/\\/g, '/')}` : 'file://')
+    if (!allowed) {
+      event.preventDefault()
+      // 想打开外链的正确入口是 window.open（走 openExternalSafe），不是窗口内跳转
+      openExternalSafe(url)
+    }
   })
 
   const target = rendererUrl(process.env.AURORA_ROUTE ?? '')
