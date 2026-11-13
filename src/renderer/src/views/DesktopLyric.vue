@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DesktopLyricStyle, LyricLine } from '@shared/types'
 import Icon from '../components/Icon.vue'
 import { findLyricIndex } from '@shared/lyric'
+import { plain } from '../core/plain'
 
 /**
  * 桌面歌词是独立窗口（绕开 App.vue 单独 mount）。
@@ -87,7 +88,6 @@ function onState(payload: any): void {
       lyricStyle.value = { ...DEFAULT_STYLE, ...(payload.style as DesktopLyricStyle) }
     }
     karaoke.value = lines.value.some((line) => Boolean(line.words?.length))
-    tick()
   }
 }
 
@@ -224,8 +224,12 @@ function setScale(next: number): void {
   const scale = Math.min(1.6, Math.max(0.7, Math.round(next * 20) / 20))
   if (scale === lyricStyle.value.scale) return
   lyricStyle.value = { ...lyricStyle.value, scale }
-  // 立即落盘：以前字号只存在这个窗口的内存里，关掉重开就回到 1.0
-  void window.api.setSettings({ desktopLyricStyle: lyricStyle.value })
+  // 立即落盘：以前字号只存在这个窗口的内存里，关掉重开就回到 1.0。
+  // 必须先 plain()：ref 的 .value 是 reactive Proxy，结构化克隆会抛错
+  //（表现为字号永远存不进去、被 250ms 推送弹回旧值）
+  window.api
+    .setSettings({ desktopLyricStyle: plain(lyricStyle.value) })
+    .catch(() => undefined)
 }
 
 function bigger(): void {
@@ -258,7 +262,10 @@ onMounted(async () => {
   document.body.classList.add('lyric-body')
 })
 
-onBeforeUnmount(() => cancelAnimationFrame(raf))
+onBeforeUnmount(() => {
+  cancelAnimationFrame(raf)
+  raf = 0
+})
 </script>
 
 <template>
