@@ -213,7 +213,12 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   text-align: var(--np-align, left);
   cursor: pointer;
-  transition: all 0.32s var(--ease);
+  /* 只过渡可插值的属性：transition:all 会把 background/text-shadow 也卷进来，
+   * 而 background-clip:text 在 Chromium 里过渡 background 会有一帧按矩形绘制
+   * （暗色主题闪白块、纸墨主题闪深色块）。激活填充与阴影随类名瞬时切换即可。 */
+  transition:
+    opacity 0.32s var(--ease),
+    transform 0.32s var(--ease);
   opacity: var(--np-dim, 0.42);
   transform-origin: left center;
 }
@@ -224,7 +229,9 @@ onBeforeUnmount(() => {
   line-height: 1.5;
   font-weight: var(--np-line-weight, 500);
   color: var(--text);
-  transition: all 0.32s var(--ease);
+  transition:
+    font-size 0.32s var(--ease),
+    letter-spacing 0.32s var(--ease);
 }
 
 .line .trans {
@@ -235,7 +242,6 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition: opacity 0.32s var(--ease);
 }
-
 .line.passed {
   opacity: var(--np-passed, 0.3);
 }
