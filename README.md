@@ -1,7 +1,7 @@
 # Aurora Music
 
 一款多音源桌面音乐播放器：**搜索、榜单、下载、本地库、逐字歌词与桌面歌词**，全部在一个窗口里完成。
-Electron 45 + Vue 3.5 + TypeScript 5.9 + Vite 6，深色毛玻璃界面；内置离线演示音源，装完不登录也能听。
+Electron 45 + Vue 3.5 + TypeScript 5.9 + Vite 8，深色毛玻璃界面；内置离线演示音源，装完不登录也能听。
 
 | 发现 | 正在播放 |
 | --- | --- |
@@ -54,7 +54,18 @@ Electron 45 + Vue 3.5 + TypeScript 5.9 + Vite 6，深色毛玻璃界面；内置
 
 ## 快速开始
 
-需要 Node 20+（开发时使用 22.x）与 npm。
+需要 Node 22+（开发时使用 22.x）与 npm。
+
+国内网络无代理时，安装依赖前先设置 Electron 下载镜像（环境变量，项目内不再带 .npmrc 镜像配置）：
+
+```bash
+# PowerShell
+$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"
+# bash
+export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+```
 
 ```bash
 npm install
@@ -78,7 +89,7 @@ npm run shots       # 重拍文档截图（见 scripts/shots.mjs，需先 npm ru
 
 ```bash
 npm run dist                        # 本机出包（产物在 release/）
-git tag v1.7.0 && git push origin v1.7.0   # 打 tag 触发 CI 三平台构建并发布 GitHub Release
+git tag v1.9.1 && git push origin v1.9.1   # 打 tag 触发 CI 三平台构建并发布 GitHub Release
 ```
 
 - CI（`.github/workflows/build.yml`）在 Windows / macOS / Ubuntu 上分别构建，前置四道关口：
