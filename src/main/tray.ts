@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
 import type { TrayState } from '@shared/api'
 import { settings } from './services/settings'
+import { logger } from './services/logger'
 import { getLyricWindow, getMainWindow, setLyricLocked } from './windows'
 
 /**
@@ -35,7 +36,11 @@ export function isQuitting(): boolean {
 function resolveIconPath(): string {
   // 托盘与任务栏、exe 统一用同一个品牌图标（多尺寸 ico，16-256），
   // tray.png 仅作历史兜底。以前托盘用独立小图，三个来源看起来不一致。
-  const names = ['icon.ico', 'tray.png']
+  // Linux 的 AppIndicator/StatusNotifier 只认 PNG，ico 即使 nativeImage 能解码，
+  // 指示器也加载不出来（麒麟 UKUI 实测托盘空白）——所以 Linux 必须先找 PNG；
+  // tray.png 从 build/icons 出 128px（AppIndicator 索引的最佳尺寸，过大反而丢图标）。
+  const isLinux = process.platform === 'linux'
+  const names = isLinux ? ['tray.png', 'icon.ico'] : ['icon.ico', 'tray.png']
   // getAppPath() 在 dev（electron-vite）下是项目根，直接 `electron out/main` 启动时是 out/main，
   // 所以与 resolveDemoDir 一样列多个候选逐个探测
   const dirs = app.isPackaged
@@ -125,8 +130,11 @@ export function createTray(): void {
     }
     tray = new Tray(icon)
   } catch (error) {
-    // Linux 无 AppIndicator 支持等场景：不建托盘，窗口关闭行为自动回退
-    process.stdout.write(`[tray] 创建失败：${(error as Error).message}\n`)
+    // Linux 无 AppIndicator 支持等场景：不建托盘，窗口关闭行为自动回退。
+    // 同时进崩溃日志：托盘问题用户只会说「没有托盘」，stdout 转瞬即逝查不到现场
+    const message = `[tray] 创建失败：${(error as Error).message}`
+    process.stdout.write(`${message}\n`)
+    logger.warn('tray:create', message)
     tray = null
     return
   }
