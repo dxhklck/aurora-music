@@ -322,7 +322,8 @@ class DownloadManager extends EventEmitter {
     // .part 文件名带任务 id：不同平台（netease/qq…）同名同歌手的歌是两个独立任务，
     // 并发下载时共用一个 .part 会互相截断/混写字节。断点续传不受影响——
     // 同一任务的 id 不变，续传仍能找到自己的 .part。
-    const partPath = join(dir, `.${base}.${task.id}.${ext}.part`)
+    // id 形如 "demo:demo-xxx"，冒号在 Windows 文件名里非法，替换成 -
+    const partPath = join(dir, `.${base}.${task.id.replace(/:/g, '-')}.${ext}.part`)
     task.partPath = partPath
 
     if (stream.url.startsWith('muse://local')) {
