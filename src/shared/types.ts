@@ -476,7 +476,11 @@ export interface WinRect {
   x: number
   y: number
   width: number
-  height: number}
+  height: number
+  /** 左上角在屏幕工作区的相对位置（0~1），换分辨率/显示器时恢复用，可选向后兼容 */
+  rx?: number
+  ry?: number
+}
 
 
 export interface ResolvedTrack {

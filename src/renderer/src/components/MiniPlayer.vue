@@ -281,6 +281,10 @@ function onKey(event: KeyboardEvent): void {
  * 但系统拖拽热区没有 Windows 的错位问题——平台分治：win32 手动拖，其余走系统。
  */
 let dragging = false
+/** slop：位移超过 8px 才算拖动，按下不动或轻微抖动仍是点击（借鉴移动版 PlayerBar） */
+const DRAG_SLOP = 8
+let pressX = 0
+let pressY = 0
 const manualDrag = window.api.platform === 'win32'
 
 function onBarPointerDown(event: PointerEvent): void {
@@ -288,12 +292,23 @@ function onBarPointerDown(event: PointerEvent): void {
   if (event.button !== 0) return
   // 按钮与面板内容上的按下不拖动（列表滚动/点击优先）
   if ((event.target as HTMLElement | null)?.closest('button, .panel')) return
-  dragging = true
-  window.api.miniDragBegin(event.screenX, event.screenY)
+  dragging = false
+  pressX = event.screenX
+  pressY = event.screenY
 }
 
 function onPointerMove(event: PointerEvent): void {
-  if (dragging) window.api.miniDragMove(event.screenX, event.screenY)
+  if (!manualDrag) return
+  if (dragging) {
+    window.api.miniDragMove(event.screenX, event.screenY)
+    return
+  }
+  // 未超 slop 不启动拖动；超了才领号开始拖
+  if (Math.hypot(event.screenX - pressX, event.screenY - pressY) >= DRAG_SLOP) {
+    dragging = true
+    window.api.miniDragBegin(pressX, pressY)
+    window.api.miniDragMove(event.screenX, event.screenY)
+  }
 }
 
 function onPointerUp(): void {
@@ -304,6 +319,8 @@ onMounted(() => {
   if (manualDrag) {
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp)
+    // 系统打断（窗口切换/手势冲突）也要清状态，否则悬挂的 dragging 会吞掉后续点击
+    window.addEventListener('pointercancel', onPointerUp)
   }
 })
 
@@ -323,6 +340,7 @@ onBeforeUnmount(() => {
   if (manualDrag) {
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerUp)
   }
   // 组件卸载时窗口会回到完整形态，确保主进程的展开标记同步复位
   if (panelOpen.value) window.api.setMiniExtra(0, 'down')

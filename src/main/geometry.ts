@@ -44,3 +44,55 @@ export function restoreRect(
   const pos = clampTopLeft({ x: x as number, y: y as number, width: w, height: h }, area)
   return { ...pos, width: w, height: h }
 }
+
+/**
+ * 比例存档：窗口左上角在屏幕内的相对位置（0~1）。
+ *
+ * 借鉴移动版 PlayerBar/LyricOverlay 的做法——存比例不存像素。像素坐标在
+ * 「换分辨率 / 换显示器 / 改缩放」后会落到错误的相对位置（4K 存的右下角
+ * 浮窗到 1080p 屏上就出了屏幕），比例坐标在这些场景下保持视觉相对位置。
+ * clamp 在恢复时做，存档原样保留用户摆放的意图。
+ */
+export function positionRatio(
+  rect: { x: number; y: number },
+  area: Rect
+): { rx: number; ry: number } | null {
+  const width = area.width
+  const height = area.height
+  if (width <= 0 || height <= 0) return null
+  return {
+    rx: clamp01((rect.x - area.x) / width),
+    ry: clamp01((rect.y - area.y) / height)
+  }
+}
+
+/**
+ * 从比例存档恢复左上角坐标：按**当前**工作区尺寸还原，再夹进可视区域。
+ * 比例不合法（NaN / 越界太多）返回 null，调用方退回像素存档或默认位置。
+ */
+export function positionFromRatio(
+  rx: number,
+  ry: number,
+  size: { width: number; height: number },
+  area: Rect
+): { x: number; y: number } | null {
+  if (!Number.isFinite(rx) || !Number.isFinite(ry) || rx < -0.05 || ry < -0.05 || rx > 1.05 || ry > 1.05) {
+    return null
+  }
+  const width = Math.min(size.width, area.width)
+  const height = Math.min(size.height, area.height)
+  const pos = clampTopLeft(
+    {
+      x: area.x + clamp01(rx) * (area.width - width),
+      y: area.y + clamp01(ry) * (area.height - height),
+      width,
+      height
+    },
+    area
+  )
+  return pos
+}
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n))
+}

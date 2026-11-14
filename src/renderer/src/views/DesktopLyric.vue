@@ -123,8 +123,11 @@ function close(): void {
    但系统拖拽热区是合成器原生的、可靠——平台分治，非 win32 走 app-region。 */
 const manualDrag = window.api.platform === 'win32'
 let dragging = false
+let dragStarted = false
 let dragStartX = 0
 let dragStartY = 0
+/** slop：位移超 8px 才算拖动，按下不动仍是点击（解锁按钮等） */
+const DRAG_SLOP = 8
 
 function onDragStart(e: MouseEvent): void {
   if (e.button !== 0) return
@@ -132,10 +135,10 @@ function onDragStart(e: MouseEvent): void {
   // 按钮、右键菜单、拉伸把手上按下不触发拖拽
   if ((e.target as HTMLElement | null)?.closest('button, .ctx-menu, .resize-grip')) return
   if (!manualDrag) return // 非 Windows 走 CSS app-region 热区，见模板 drag 区
+  // 只记起点，超 slop 才真正开始拖（见 onDragMove）——避免点击误成拖动
   dragging = true
   dragStartX = e.screenX
   dragStartY = e.screenY
-  window.api.dragLyricWindow()
 }
 
 /* ---------------- 右下角拉伸 ----------------
@@ -161,7 +164,15 @@ function onDragMove(e: MouseEvent): void {
     return
   }
   if (!dragging) return
-  window.api.moveLyricWindow(e.screenX - dragStartX, e.screenY - dragStartY)
+  // slop 判定在首帧做：超阈值才向主进程领拖动号，此后每帧直接跟随
+  const dx = e.screenX - dragStartX
+  const dy = e.screenY - dragStartY
+  if (!dragStarted) {
+    if (Math.hypot(dx, dy) < DRAG_SLOP) return
+    dragStarted = true
+    window.api.dragLyricWindow()
+  }
+  window.api.moveLyricWindow(dx, dy)
 }
 
 function onDragEnd(): void {
@@ -172,6 +183,9 @@ function onDragEnd(): void {
   }
   if (!dragging) return
   dragging = false
+  // 从未超 slop（只是点击）就不领拖动号也不收尾，避免多余的落盘
+  if (!dragStarted) return
+  dragStarted = false
   window.api.endLyricWindowDrag()
 }
 

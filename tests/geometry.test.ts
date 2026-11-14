@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { clampTopLeft, restoreRect } from '../src/main/geometry.ts'
+import { clampTopLeft, positionFromRatio, positionRatio, restoreRect } from '../src/main/geometry.ts'
 
 /** 1366×768 笔记本，扣掉任务栏后的工作区 */
 const narrowWorkArea = { x: 0, y: 0, width: 1366, height: 728 }
@@ -117,4 +117,48 @@ test('工作区比最小尺寸还小时不会算出负数或越界', () => {
   assert.equal(rect?.height, 100)
   assert.equal(rect?.x, 0)
   assert.equal(rect?.y, 0)
+})
+
+test('positionRatio：屏幕内位置归一化到 0~1', () => {
+  const area = { x: 0, y: 0, width: 2000, height: 1000 }
+  const r = positionRatio({ x: 1000, y: 250 }, area)
+  assert.equal(r?.rx, 0.5)
+  assert.equal(r?.ry, 0.25)
+})
+
+test('positionRatio：负坐标工作区相对原点计算', () => {
+  const area = { x: -1920, y: 0, width: 1920, height: 1040 }
+  const r = positionRatio({ x: -960, y: 520 }, area)
+  assert.equal(r?.rx, 0.5)
+  assert.equal(r?.ry, 0.5)
+})
+
+test('positionRatio：越界位置 clamp 进 0~1，不返回越界比例', () => {
+  const area = { x: 0, y: 0, width: 2000, height: 1000 }
+  const r = positionRatio({ x: -500, y: 2500 }, area)
+  assert.equal(r?.rx, 0)
+  assert.equal(r?.ry, 1)
+})
+
+test('positionFromRatio：同尺寸屏还原回原位（可移动范围内插值）', () => {
+  const area = { x: 0, y: 0, width: 2000, height: 1000 }
+  // 比例在「工作区宽 - 窗口宽」的移动范围内插值：0.5 × (2000-400) = 800
+  const pos = positionFromRatio(0.5, 0.25, { width: 400, height: 100 }, area)
+  assert.equal(pos?.x, 800)
+  assert.equal(pos?.y, 225)
+})
+
+test('positionFromRatio：4K 存档到 1080p 屏保持相对位置且不出屏', () => {
+  const small = { x: 0, y: 0, width: 1920, height: 1040 }
+  // 4K 屏右下角比例 0.9/0.9
+  const pos = positionFromRatio(0.9, 0.9, { width: 380, height: 56 }, small)
+  assert.ok(pos && pos.x + 380 <= 1920)
+  assert.ok(pos && pos.y + 56 <= 1040)
+})
+
+test('positionFromRatio：非法比例返回 null', () => {
+  const area = { x: 0, y: 0, width: 2000, height: 1000 }
+  assert.equal(positionFromRatio(Number.NaN, 0.5, { width: 100, height: 50 }, area), null)
+  assert.equal(positionFromRatio(0.5, 2, { width: 100, height: 50 }, area), null)
+  assert.equal(positionFromRatio(-0.6, 0.5, { width: 100, height: 50 }, area), null)
 })

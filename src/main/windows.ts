@@ -5,7 +5,7 @@ import { IPC } from '@shared/ipc'
 import type { MiniVolumeState } from '@shared/types'
 import { trayReady, isQuitting } from './tray'
 import { settings } from './services/settings'
-import { clampTopLeft, restoreRect } from './geometry'
+import { clampTopLeft, positionFromRatio, positionRatio, restoreRect } from './geometry'
 import { clamp } from './utils'
 
 let mainWindow: BrowserWindow | null = null
@@ -205,6 +205,20 @@ function clampRect(rect: { x: number; y: number; width: number; height: number }
   return clampTopLeft(rect, display.workArea)
 }
 
+/** 算左上角在工作区的相对位置，screen 不可用或非法时返回空对象（存档不写比例字段） */
+function ratioOf(
+  pos: { x: number; y: number },
+  size: { width: number; height: number }
+): { rx?: number; ry?: number } {
+  try {
+    const area = screen.getDisplayMatching({ ...pos, ...size }).workArea
+    const ratio = positionRatio(pos, area)
+    return ratio ? { rx: ratio.rx, ry: ratio.ry } : {}
+  } catch {
+    return {}
+  }
+}
+
 /**
  * 主窗口在「完整形态 ↔ 迷你浮窗」之间切换。
  * 两种形态各自记住位置尺寸（settings.windowBounds），切换时把当前形态的位置存回去。
@@ -229,9 +243,15 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
       y: win.getBounds().y + 320,
       ...MINI_SIZE
     }
+    // 优先比例存档（换分辨率保持相对位置），无比例字段退回像素 + clamp
+    const area = screen.getDisplayMatching(win.getBounds()).workArea
+    const byRatio =
+      typeof miniRect.rx === 'number' && typeof miniRect.ry === 'number'
+        ? positionFromRatio(miniRect.rx, miniRect.ry, MINI_SIZE, area)
+        : null
     // 用**当前**的 MINI_SIZE 参与边界纠正：旧版本存的是 240×56，
     // 直接拿旧宽度 clamp 会让 380 宽的新窗口右边超出屏幕 140px
-    const pos = clampRect({ ...miniRect, ...MINI_SIZE })
+    const pos = byRatio ?? clampRect({ ...miniRect, ...MINI_SIZE })
     // 顺序敏感：先清掉旧上限（0,0 = 不限制），再设新的上下限——
     // 若先设 min 再改 max，min>max 的中间态会让 Windows 忽略 max 更新，展开时窗口会被 320 上限钳死
     win.setMaximumSize(0, 0)
@@ -240,7 +260,7 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
     win.setAlwaysOnTop(true, 'floating')
     win.setResizable(false)
     win.setBounds({ ...pos, ...MINI_SIZE })
-    bounds.mini = { ...pos, ...MINI_SIZE }
+    bounds.mini = { ...pos, ...MINI_SIZE, ...ratioOf(pos, MINI_SIZE) }
   } else {
     // 切回完整窗口：音量气泡没有意义了，直接收起
     closeVolumePopup()
@@ -260,7 +280,7 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
     }
     const pos = clampRect(normal)
     win.setBounds({ ...pos, width: normal.width, height: normal.height })
-    bounds.normal = { ...pos, width: normal.width, height: normal.height }
+    bounds.normal = { ...pos, width: normal.width, height: normal.height, ...ratioOf(pos, normal) }
     if (process.env.AURORA_CAPTURE || process.env.AURORA_SELFTEST) {
       process.stdout.write(
         `[debug:expand] after setBounds -> ${JSON.stringify(win.getBounds())} requested ${normal.width}x${normal.height} max=${JSON.stringify(win.getMaximumSize())} min=${JSON.stringify(win.getMinimumSize())}\n`
@@ -586,7 +606,13 @@ function savedLyricRect(mode: LyricMode): { x: number; y: number; width: number;
   if (!saved) return null
   try {
     const area = screen.getDisplayMatching(saved).workArea
-    return restoreRect(saved, LYRIC_BOUNDS[mode], area)
+    const restored = restoreRect(saved, LYRIC_BOUNDS[mode], area)
+    // 优先比例存档（换分辨率/显示器保持相对位置），其次像素存档
+    if (restored && typeof saved.rx === 'number' && typeof saved.ry === 'number') {
+      const byRatio = positionFromRatio(saved.rx, saved.ry, restored, area)
+      if (byRatio) return { ...byRatio, width: restored.width, height: restored.height }
+    }
+    return restored
   } catch {
     // screen 在 app ready 之前不可用：当作没有存档，退回默认位置，别让开窗失败
     return null
@@ -604,8 +630,18 @@ function saveLyricBounds(): void {
   if (!lyricWindow || lyricWindow.isDestroyed()) return
   const { x, y, width, height } = lyricWindow.getBounds()
   const current = settings.get().desktopLyricBounds ?? {}
+  // 像素与比例双写：像素兜底旧版本/跨版本回滚，比例在换分辨率时保持相对位置
+  let rx: number | undefined
+  let ry: number | undefined
+  try {
+    const ratio = positionRatio({ x, y }, screen.getDisplayMatching({ x, y, width, height }).workArea)
+    rx = ratio?.rx
+    ry = ratio?.ry
+  } catch {
+    /* screen 不可用时只写像素 */
+  }
   void settings
-    .set({ desktopLyricBounds: { ...current, [lyricMode]: { x, y, width, height } } })
+    .set({ desktopLyricBounds: { ...current, [lyricMode]: { x, y, width, height, ...(rx !== undefined ? { rx, ry } : {}) } } })
     .catch(() => undefined)
 }
 
