@@ -41,12 +41,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-        # Linux 额外出 arm64（鲲鹏/飞腾等国产 ARM 机器）：在 x64 runner 上交叉构建，
-        # electron-builder 自动下载 arm64 的 Electron 发行包；不额外占一个 runner
+        # include-only 写法：每条 include 就是一个完整组合，避免 GitHub Actions
+        # 「include 匹配到已有 os 键 = 扩充而非新增」的合并规则把两个 Linux 组合
+        # 揉成一条，导致 x64/arm64 二选一（v1.9.3 实测只剩 arm64）。
+        # arm64 条目在 x64 runner 上交叉构建（鲲鹏/飞腾等国产 ARM 机器）。
         include:
+          - os: windows-latest
+          - os: macos-latest
           - os: ubuntu-latest
-            linux_arm64: true
+          - os: ubuntu-latest
+            arm64: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -102,7 +106,7 @@ jobs:
           SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.signing.outputs.enabled }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LINUX_ARM64: ${{ matrix.linux_arm64 }}
+          LINUX_ARM64: ${{ matrix.arm64 }}
         shell: bash
         run: |
           # 未配置证书时 secrets 会求值成空串，而 electron-builder 只在 Windows 侧判断
@@ -112,13 +116,14 @@ jobs:
             unset CSC_LINK CSC_KEY_PASSWORD
             echo "未配置签名证书，本次产物不做签名"
           fi
-          # linux_arm64=true 时追加 --arm64：交叉构建出 arm64.deb / arm64.AppImage
+          # LINUX_ARM64=true 时追加 --arm64：交叉构建出 arm64.deb / arm64.AppImage
           npx --yes electron-builder --publish never ${LINUX_ARM64:+--arm64}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aurora-${{ matrix.os }}
+          # 两个 ubuntu 组合（x64/arm64）artifact 名必须不同，否则后传的覆盖先传的
+          name: aurora-${{ matrix.os }}${{ matrix.arm64 == true && '-arm64' || '' }}
           path: |
             release/*.exe
             release/*.dmg
