@@ -117,8 +117,11 @@ function close(): void {
 }
 
 /* ---------------- 手动拖拽 ----------------
-   透明无边框窗口上 -webkit-app-region: drag 在 Windows 不可靠，
-   改为上报光标位移、主进程移动窗口（见 windows.ts lyricDragStart）。 */
+   Windows：透明无边框窗口上 -webkit-app-region: drag 不可靠，
+   改为上报光标位移、主进程移动窗口（见 windows.ts lyricDragStart）。
+   Linux/Wayland（麒麟等）：Wayland 禁止程序自行挪窗口，setBounds 拖动无效，
+   但系统拖拽热区是合成器原生的、可靠——平台分治，非 win32 走 app-region。 */
+const manualDrag = window.api.platform === 'win32'
 let dragging = false
 let dragStartX = 0
 let dragStartY = 0
@@ -128,6 +131,7 @@ function onDragStart(e: MouseEvent): void {
   if (locked.value) return
   // 按钮、右键菜单、拉伸把手上按下不触发拖拽
   if ((e.target as HTMLElement | null)?.closest('button, .ctx-menu, .resize-grip')) return
+  if (!manualDrag) return // 非 Windows 走 CSS app-region 热区，见模板 drag 区
   dragging = true
   dragStartX = e.screenX
   dragStartY = e.screenY
@@ -279,7 +283,9 @@ onBeforeUnmount(() => {
     @mousemove="onWinMouseMove"
     @mouseleave="onWinMouseLeave"
   >
-    <div class="toolbar">
+    <!-- 非 Windows（Wayland 等）：程序不能挪窗口，拖动交给系统热区；
+         Windows 保持 no-drag（手动 IPC 拖动），动态类由 App.vue 的 data-platform 决定 -->
+    <div class="toolbar" :class="{ 'sys-drag': !manualDrag }">
       <span class="grip">⋮⋮</span>
       <div class="tools">
         <button title="缩小" @click="smaller">A−</button>
@@ -379,7 +385,8 @@ onBeforeUnmount(() => {
   padding: 6px 18px;
   color: var(--ly-fg);
   /* 闲置时完全裸字：面板只在悬停时浮出（见下方 ::before）。
-     拖拽走手动 IPC（透明窗口上 -webkit-app-region 不可靠），故不再声明 drag 区。
+     Windows 拖拽走手动 IPC（透明窗口上 -webkit-app-region 不可靠），不声明 drag 区；
+     Linux/Wayland 用 .sys-drag 系统热区拖动（Wayland 禁程序挪窗口）。
      边框保留透明占位，避免悬停时因 border 出现导致内容位移 1px。 */
   background: transparent;
   border: 1px solid transparent;
@@ -394,6 +401,16 @@ onBeforeUnmount(() => {
 }
 .lyric-window:hover {
   box-shadow: var(--ly-panel-shadow);
+}
+
+/* Linux/Wayland：系统拖拽热区（合成器原生，Windows 除外启用） */
+.lyric-window.sys-drag {
+  -webkit-app-region: drag;
+}
+.lyric-window.sys-drag button,
+.lyric-window.sys-drag .ctx-menu,
+.lyric-window.sys-drag .resize-grip {
+  -webkit-app-region: no-drag;
 }
 
 /**
