@@ -103,6 +103,9 @@ export const IPC = {
   winIsMaximized: 'win:is-maximized',
   /** 迷你窗口：临时附加区（歌词 / 队列）的高度与生长方向，主进程同步调整窗口 */
   miniSetExtra: 'mini:set-extra',
+  /** 迷你窗口：手动拖动（pointer 事件 + setBounds，绕开 app-region 热区丢失问题） */
+  miniDragBegin: 'mini:drag-begin',
+  miniDragMove: 'mini:drag-move',
   /** 迷你窗口：音量气泡（独立透明窗口）开/关与双向同步 */
   miniVolumeToggle: 'mini:volume-toggle',
   miniVolumeInit: 'mini:volume-init',

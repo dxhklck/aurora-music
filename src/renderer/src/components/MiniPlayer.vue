@@ -274,6 +274,35 @@ function onKey(event: KeyboardEvent): void {
   }
 }
 
+/* ---------------- 手动拖动 ----------------
+ * Windows 上展开面板（窗口 setBounds 变高）后 -webkit-app-region: drag 的热区
+ * 会与窗口实际矩形错位，表现为「展开后拖不动」。不再依赖系统拖拽：指针按下
+ * 时上报屏幕坐标，主进程记住偏移，move 期间 setBounds 跟随。闲置态迷你条仍
+ * 保留 app-region: drag（未展开时热区可靠），展开后统一走手动拖动。
+ */
+let dragging = false
+
+function onBarPointerDown(event: PointerEvent): void {
+  if (event.button !== 0) return
+  // 按钮与面板内容上的按下不拖动（列表滚动/点击优先）
+  if ((event.target as HTMLElement | null)?.closest('button, .panel')) return
+  dragging = true
+  window.api.miniDragBegin(event.screenX, event.screenY)
+}
+
+function onPointerMove(event: PointerEvent): void {
+  if (dragging) window.api.miniDragMove(event.screenX, event.screenY)
+}
+
+function onPointerUp(): void {
+  dragging = false
+}
+
+onMounted(() => {
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp)
+})
+
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   void measureMarquee()
@@ -287,6 +316,8 @@ onBeforeUnmount(() => {
   window.clearTimeout(hintTimer)
   offVolumeChanged?.()
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
   // 组件卸载时窗口会回到完整形态，确保主进程的展开标记同步复位
   if (panelOpen.value) window.api.setMiniExtra(0, 'down')
 })
@@ -300,7 +331,7 @@ onBeforeUnmount(() => {
     @mouseleave="onLeave"
     @dblclick="onDoubleClick"
   >
-    <div class="bar" @wheel.prevent="onVolumeWheel">
+    <div class="bar" @wheel.prevent="onVolumeWheel" @pointerdown="onBarPointerDown">
       <CoverArt
         class="cover"
         :src="song?.coverUrl ?? null"
@@ -390,7 +421,7 @@ onBeforeUnmount(() => {
     <!-- 下方面板：歌词 / 队列，高度与主进程的 MINI_PANEL_HEIGHT 保持一致 -->
     <transition name="panel">
       <div v-if="panel === 'lyric' || panel === 'queue'" class="panel">
-        <div class="panel-head">
+        <div class="panel-head" @pointerdown="onBarPointerDown">
           <span>{{ panel === 'lyric' ? '歌词' : '播放队列' }}</span>
           <small v-if="panel === 'queue'">{{ player.queue.length }} 首</small>
           <button class="collapse" title="收起（Esc）" @click="closePanel">
@@ -461,6 +492,12 @@ onBeforeUnmount(() => {
   align-items: center;
   /* 整条可拖动；按钮和面板单独 no-drag */
   -webkit-app-region: drag;
+  cursor: move;
+}
+/* 展开态热区会错位，拖动改由 pointer 事件手动实现（见 onBarPointerDown） */
+.mini-player.panel-open .bar,
+.mini-player.panel-open .panel-head {
+  -webkit-app-region: no-drag;
 }
 
 .cover {

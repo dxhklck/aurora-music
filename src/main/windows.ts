@@ -310,21 +310,57 @@ export function setMiniExtra(extra: number, direction: 'up' | 'down' = 'down'): 
       }
     }
     if (actual === 'down' && y + total > area.y + area.height) {
-      // 下方放不下：优先翻到上方，上下都不够就贴着底边
-      if (top - wanted >= area.y) {
-        actual = 'up'
-        y = top - wanted
-      } else {
-        y = Math.max(area.y, area.y + area.height - total)
-      }
+      // 下方放不下：贴着工作区底边。不能翻到上方——渲染层的 DOM 里迷你条
+      // 固定画在窗口顶部，翻向后窗口上移、条跟着顶上去，布局对不上。
+      y = Math.max(area.y, area.y + area.height - total)
     }
   }
 
   miniExtra = wanted > 0 ? { height: wanted, direction: actual } : null
+  // 顺序敏感（同 applyMiniMode 的实测结论）：setResizable(false) 时 Windows 会
+  // 忽略 setMaximumSize/setBounds。展开态干脆保持 resizable(true)——宽度仍被
+  // max 锁在 380；收起时由 collapseMiniExtra 关回 false。
+  win.setResizable(true)
   win.setMaximumSize(0, 0)
   win.setMinimumSize(MINI_SIZE.width, MINI_SIZE.height)
   win.setMaximumSize(MINI_SIZE.width, total)
   win.setBounds({ x: bounds.x, y, width: MINI_SIZE.width, height: total })
+  // 拖拽区在渲染层重绘时才上报系统，尺寸变化后强制重算一次
+  win.webContents.invalidate()
+}
+
+/** 收起展开面板后把窗口关回不可缩放（收起方向由渲染层 setMiniExtra(0) 触发） */
+export function collapseMiniExtra(): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  if (!settings.get().miniMode) return
+  win.setResizable(false)
+}
+
+/* ---------------- 迷你窗口手动拖动 ----------------
+ * Windows 上 -webkit-app-region: drag 的热区在窗口尺寸变化（setBounds 展开
+ * 面板）后会与实际矩形错位，表现为「展开面板后拖不动窗口」。不再依赖系统
+ * 拖拽：渲染层在按下时上报 pointer 屏幕坐标，move 期间主进程 setBounds 跟随。
+ */
+let miniDragOffset: { x: number; y: number } | null = null
+
+export function miniDragBegin(screenX: number, screenY: number): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed() || !settings.get().miniMode) return
+  const bounds = win.getBounds()
+  // 记住按下点相对窗口左上角的偏移，move 时保持窗口不跳
+  miniDragOffset = { x: screenX - bounds.x, y: screenY - bounds.y }
+}
+
+export function miniDragMove(screenX: number, screenY: number): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed() || !miniDragOffset) return
+  const width = win.getBounds().width
+  const height = win.getBounds().height
+  const x = Math.round(screenX - miniDragOffset.x)
+  const y = Math.round(screenY - miniDragOffset.y)
+  // 不做屏内 clamp：贴边半露是用户的自由，applyMiniMode 落盘前会 clampRect
+  win.setBounds({ x, y, width, height })
 }
 
 /** 当前是否有附加区展开（供自检/调试读取） */

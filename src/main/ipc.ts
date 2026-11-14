@@ -42,6 +42,9 @@ import {
   setLyricHover,
   setLyricMode,
   setMiniExtra,
+  collapseMiniExtra,
+  miniDragBegin,
+  miniDragMove,
   toggleVolumePopup,
   closeVolumePopup,
   getVolumeState,
@@ -400,9 +403,15 @@ export function registerIpc(): void {
   on(IPC.winClose, () => getMainWindow()?.close())
   handle(IPC.winIsMaximized, () => getMainWindow()?.isMaximized() ?? false)
   // 迷你窗口附加区（歌词/队列/音量）：fire-and-forget，渲染层不等待窗口尺寸变更
-  on(IPC.miniSetExtra, (extra: number, direction: 'up' | 'down') =>
+  on(IPC.miniSetExtra, (extra: number, direction: 'up' | 'down') => {
     setMiniExtra(Number(extra) || 0, direction === 'up' ? 'up' : 'down')
-  )
+    // 展开期间窗口临时保持 resizable（见 setMiniExtra 注释），收起后关回
+    if (!Number(extra)) collapseMiniExtra()
+  })
+  // 迷你窗口手动拖动：窗口（含展开态）在 Windows 上 -webkit-app-region 热区
+  // 会随尺寸变化丢失，改由渲染层 pointer 事件 + setBounds 自己拖
+  on(IPC.miniDragBegin, (screenX: number, screenY: number) => miniDragBegin(Number(screenX), Number(screenY)))
+  on(IPC.miniDragMove, (screenX: number, screenY: number) => miniDragMove(Number(screenX), Number(screenY)))
 
   // ---------- 迷你音量气泡 ----------
   handle(IPC.miniVolumeToggle, (state: MiniVolumeState) => toggleVolumePopup(state))

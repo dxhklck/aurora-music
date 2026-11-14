@@ -260,6 +260,9 @@ export interface AuroraApi {
    * `direction` 是期望生长方向（歌词/队列向下，空间不足时自动翻转）。
    */
   setMiniExtra(extra: number, direction: 'up' | 'down'): void
+  /** 迷你窗口手动拖动：pointer 按下 / 移动时上报屏幕坐标，主进程 setBounds 跟随 */
+  miniDragBegin(screenX: number, screenY: number): void
+  miniDragMove(screenX: number, screenY: number): void
   /** 打开/关闭音量气泡（独立透明窗口），返回最终是否可见 */
   toggleMiniVolume(state: MiniVolumeState): Promise<boolean>
   /** 音量气泡启动时读取当前音量 */
