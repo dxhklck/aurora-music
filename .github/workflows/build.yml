@@ -42,6 +42,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
+        # Linux 额外出 arm64（鲲鹏/飞腾等国产 ARM 机器）：在 x64 runner 上交叉构建，
+        # electron-builder 自动下载 arm64 的 Electron 发行包；不额外占一个 runner
+        include:
+          - os: ubuntu-latest
+            linux_arm64: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +102,7 @@ jobs:
           SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.signing.outputs.enabled }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINUX_ARM64: ${{ matrix.linux_arm64 }}
         shell: bash
         run: |
           # 未配置证书时 secrets 会求值成空串，而 electron-builder 只在 Windows 侧判断
@@ -106,7 +112,8 @@ jobs:
             unset CSC_LINK CSC_KEY_PASSWORD
             echo "未配置签名证书，本次产物不做签名"
           fi
-          npx --yes electron-builder --publish never
+          # linux_arm64=true 时追加 --arm64：交叉构建出 arm64.deb / arm64.AppImage
+          npx --yes electron-builder --publish never ${LINUX_ARM64:+--arm64}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
