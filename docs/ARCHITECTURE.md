@@ -1,7 +1,7 @@
 # Aurora Music 架构设计
 
 > 本文说明技术决策、分层边界、关键流程，以及从 `musicdl` 借鉴并改造的设计。
-> 对应版本：1.7.0 · 最后核对：2026-11-04 · 文档索引见 [README.md](./README.md)
+> 对应版本：1.9.1 · 最后核对：2026-11-14 · 文档索引见 [README.md](./README.md)
 
 ## 1. 设计目标
 
@@ -180,8 +180,10 @@ LRCLIB /api/search → 打分（标题/歌手/时长）→ 取最佳
 
 ```
 queued ──▶ downloading ──▶ done
-   ▲            │  │
-   │            │  └──▶ canceled（用户取消，删除 .part）
+   ▲            │  │  │
+   │            │  │  └──▶ canceled（用户取消，删除 .part）
+   │            │  ▼
+   │            └─▶ paused（保留 .part，resume 回 queued 断点续传）
    │            ▼
    └──── error ◀┘（重试 N 次仍失败，N 可配置）
 ```
