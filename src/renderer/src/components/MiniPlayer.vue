@@ -276,13 +276,15 @@ function onKey(event: KeyboardEvent): void {
 
 /* ---------------- 手动拖动 ----------------
  * Windows 上展开面板（窗口 setBounds 变高）后 -webkit-app-region: drag 的热区
- * 会与窗口实际矩形错位，表现为「展开后拖不动」。不再依赖系统拖拽：指针按下
- * 时上报屏幕坐标，主进程记住偏移，move 期间 setBounds 跟随。闲置态迷你条仍
- * 保留 app-region: drag（未展开时热区可靠），展开后统一走手动拖动。
+ * 会与窗口实际矩形错位，表现为「展开后拖不动」，因此改走 pointer 事件自实现。
+ * Linux（尤其 Wayland，麒麟/鲲鹏）不允许程序自行挪窗口，setBounds 拖动无效，
+ * 但系统拖拽热区没有 Windows 的错位问题——平台分治：win32 手动拖，其余走系统。
  */
 let dragging = false
+const manualDrag = window.api.platform === 'win32'
 
 function onBarPointerDown(event: PointerEvent): void {
+  if (!manualDrag) return
   if (event.button !== 0) return
   // 按钮与面板内容上的按下不拖动（列表滚动/点击优先）
   if ((event.target as HTMLElement | null)?.closest('button, .panel')) return
@@ -299,8 +301,10 @@ function onPointerUp(): void {
 }
 
 onMounted(() => {
-  window.addEventListener('pointermove', onPointerMove)
-  window.addEventListener('pointerup', onPointerUp)
+  if (manualDrag) {
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+  }
 })
 
 onMounted(() => {
@@ -316,8 +320,10 @@ onBeforeUnmount(() => {
   window.clearTimeout(hintTimer)
   offVolumeChanged?.()
   window.removeEventListener('keydown', onKey)
-  window.removeEventListener('pointermove', onPointerMove)
-  window.removeEventListener('pointerup', onPointerUp)
+  if (manualDrag) {
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+  }
   // 组件卸载时窗口会回到完整形态，确保主进程的展开标记同步复位
   if (panelOpen.value) window.api.setMiniExtra(0, 'down')
 })
@@ -494,9 +500,11 @@ onBeforeUnmount(() => {
   -webkit-app-region: drag;
   cursor: move;
 }
-/* 展开态热区会错位，拖动改由 pointer 事件手动实现（见 onBarPointerDown） */
-.mini-player.panel-open .bar,
-.mini-player.panel-open .panel-head {
+/* 展开态热区在 Windows 会错位，拖动改由 pointer 事件手动实现（见 onBarPointerDown）；
+ * Linux/Wayland 系统拖拽可靠且 setBounds 拖动无效，保留 app-region: drag。
+ * 平台由 App.vue 写在 html[data-platform] 上（scoped 样式用 :global 匹配根） */
+.mini-player:global([data-platform='win32']).panel-open .bar,
+.mini-player:global([data-platform='win32']).panel-open .panel-head {
   -webkit-app-region: no-drag;
 }
 
