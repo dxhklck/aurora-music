@@ -12,6 +12,12 @@ import { artworkSrc } from '../core/artwork'
 import { createUidFactory, moveIndex, moveItem, type QueueItem } from '../core/queue'
 
 const HISTORY_KEY = 'aurora.recent'
+/**
+ * 完整播放历史（带时间戳），与移动版共用同一个 localStorage 键。
+ * 旧记录只有 aurora.recent（无时间）：升级后用它兜底迁移，at=0 表示时间未知。
+ */
+const HISTORY_LOG_KEY = 'aurora.history'
+const HISTORY_LOG_LIMIT = 300
 /** 榜单队列断点：记录「哪份榜单 + 第几首 + 播到几毫秒」，跨重启续播 */
 const RESUME_KEY = 'aurora.hero.resume'
 /** 歌词手动对齐记忆：{ "platform:id": 毫秒偏移 }，只记用户调过的歌 */
@@ -85,6 +91,12 @@ function sanitizeSongs(songs: Song[]): Song[] {
   return songs.map(sanitizeSong)
 }
 
+/** 一条播放历史。at = 0 表示从旧版 aurora.recent 迁移来的，时间未知 */
+export interface HistoryEntry {
+  song: Song
+  at: number
+}
+
 export const usePlayerStore = defineStore('player', () => {
   const queue = ref<QueueItem[]>([])
   const index = ref(-1)
@@ -109,6 +121,8 @@ export const usePlayerStore = defineStore('player', () => {
   const showNowPlaying = ref(false)
   const showQueue = ref(false)
   const recent = ref<Song[]>(loadRecent())
+  /** 完整播放历史（带时间戳，新的在前）；视图层按天分组展示 */
+  const history = ref<HistoryEntry[]>(loadHistory())
   /** 当前队列的来源标签（如 hero:qq:榜id）；空 = 普通队列，不记断点 */
   const queueTag = ref('')
   /** 「换一个版本」面板：候选列表 / 加载中 / 是否展开 */
@@ -208,9 +222,74 @@ export const usePlayerStore = defineStore('player', () => {
 
   function pushRecent(song: Song): void {
     const next = [song, ...recent.value.filter((item) => !(item.id === song.id && item.platform === song.platform))]
-    // 200 条足够撑起「播放历史」页，又不会把 localStorage 撑爆（每条约 300 字节）
+    // 200 条足够撑起「最近播放」兜底列表，又不会把 localStorage 撑爆（每条约 300 字节）
     recent.value = next.slice(0, 200)
     localStorage.setItem(HISTORY_KEY, JSON.stringify(recent.value))
+  }
+
+  /**
+   * 读完整历史。旧版本只有 aurora.recent（无时间戳）：升级后用它兜底迁移，
+   * at=0 归到「更早的播放」，不让用户的记录看起来凭空消失。
+   */
+  function loadHistory(): HistoryEntry[] {
+    try {
+      const raw = localStorage.getItem(HISTORY_LOG_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown
+        if (Array.isArray(parsed) && parsed.length) return normalizeHistory(parsed)
+      }
+    } catch {
+      /* 解析失败就退回 recent，历史坏掉不能影响播放 */
+    }
+    return loadRecent()
+      .slice(0, HISTORY_LOG_LIMIT)
+      .map((song) => ({ song, at: 0 }))
+  }
+
+  function normalizeHistory(input: unknown[]): HistoryEntry[] {
+    const out: HistoryEntry[] = []
+    for (const item of input) {
+      if (!item || typeof item !== 'object') continue
+      const record = item as { song?: unknown; at?: unknown }
+      // 兼容早期误把纯 Song 数组写进来的格式
+      const rawSong = (record.song ?? record) as Song
+      if (!rawSong || typeof rawSong !== 'object') continue
+      const song = sanitizeSong(rawSong)
+      if (!song.id || !song.platform) continue
+      const at = typeof record.at === 'number' && Number.isFinite(record.at) ? record.at : 0
+      out.push({ song, at })
+      if (out.length >= HISTORY_LOG_LIMIT) break
+    }
+    return out
+  }
+
+  function persistHistory(): void {
+    try {
+      localStorage.setItem(HISTORY_LOG_KEY, JSON.stringify(history.value))
+    } catch {
+      /* 配额满：历史写失败不能影响播放 */
+    }
+  }
+
+  /** 每次真正开播记一条；同一首连续重播（单曲循环）只更新时间，不刷屏 */
+  function recordHistory(song: Song): void {
+    const now = Date.now()
+    const last = history.value[0]
+    if (last && last.song.id === song.id && last.song.platform === song.platform) {
+      history.value = [{ song, at: now }, ...history.value.slice(1)]
+    } else {
+      history.value = [{ song, at: now }, ...history.value].slice(0, HISTORY_LOG_LIMIT)
+    }
+    persistHistory()
+  }
+
+  function clearHistory(): void {
+    history.value = []
+    try {
+      localStorage.removeItem(HISTORY_LOG_KEY)
+    } catch {
+      /* 清不掉也只影响下次启动的展示，内存里已经空了 */
+    }
   }
 
   function clearRecent(): void {
@@ -334,6 +413,7 @@ export const usePlayerStore = defineStore('player', () => {
       saveQueuePos()
       failureStreak = 0
       pushRecent(song)
+      recordHistory(song)
       // 收听统计：与最近播放同一个成功点（拿到流并开始播放才记）
       useStatsStore().recordPlay(song)
       void loadLyric(resolved.song)
@@ -881,6 +961,7 @@ export const usePlayerStore = defineStore('player', () => {
       saveQueuePos()
       failureStreak = 0
       pushRecent(song)
+      recordHistory(song)
       useStatsStore().recordPlay(song)
       void loadLyric(resolved.song)
       updateMediaSession(song)
@@ -1072,6 +1153,8 @@ export const usePlayerStore = defineStore('player', () => {
     showNowPlaying,
     showQueue,
     recent,
+    history,
+    clearHistory,
     clearRecent,
     current,
     displaySong,
