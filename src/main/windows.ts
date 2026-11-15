@@ -293,15 +293,20 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
       y: win.getBounds().y + 320,
       ...MINI_SIZE
     }
-    // 优先比例存档（换分辨率保持相对位置），无比例字段退回像素 + clamp
+    // 优先比例存档（换分辨率保持相对位置），无比例字段退回像素 + clamp。
+    // 旧版本把屏外坐标写进过存档（x=3267,y=1975）：这种记录一律作废，
+    // 改摆到当前工作区中心，否则重启后仍是「isVisible=true 但看不到」。
     const area = screen.getDisplayMatching(win.getBounds()).workArea
+    const brokenPixel = isFullyOutside({ ...miniRect, ...MINI_SIZE }, area)
     const byRatio =
-      typeof miniRect.rx === 'number' && typeof miniRect.ry === 'number'
+      !brokenPixel && typeof miniRect.rx === 'number' && typeof miniRect.ry === 'number'
         ? positionFromRatio(miniRect.rx, miniRect.ry, MINI_SIZE, area)
         : null
     // 用**当前**的 MINI_SIZE 参与边界纠正：旧版本存的是 240×56，
     // 直接拿旧宽度 clamp 会让 380 宽的新窗口右边超出屏幕 140px
-    const pos = byRatio ?? clampRect({ ...miniRect, ...MINI_SIZE })
+    const pos = brokenPixel
+      ? centeredTopLeft(MINI_SIZE, area)
+      : (byRatio ?? clampRect({ ...miniRect, ...MINI_SIZE }))
     // 顺序敏感：先清掉旧上限（0,0 = 不限制），再设新的上下限——
     // 若先设 min 再改 max，min>max 的中间态会让 Windows 忽略 max 更新，展开时窗口会被 320 上限钳死
     win.setMaximumSize(0, 0)
