@@ -89,6 +89,14 @@ export function createMainWindow(): BrowserWindow {
     if (mainWindow) restoreWindowShape(mainWindow)
     mainWindow?.show()
     mainWindow?.webContents.setBackgroundThrottling(false)
+    // 「窗口不见了」类问题现场难复现：启动后把窗口真实状态打一行，
+    // 配合日志定位（isVisible / 边界 / 是否最小化）
+    if (mainWindow) {
+      const b = mainWindow.getBounds()
+      process.stdout.write(
+        `[window] ready visible=${mainWindow.isVisible()} minimized=${mainWindow.isMinimized()} bounds=${JSON.stringify(b)} displays=${screen.getAllDisplays().map((d) => `${d.id}:${d.workArea.width}x${d.workArea.height}@${d.workArea.x},${d.workArea.y}`).join('|')}\n`
+      )
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
