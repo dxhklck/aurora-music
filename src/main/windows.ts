@@ -289,6 +289,11 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
     })
     win.setBounds({ ...pos, width: normal.width, height: normal.height })
     bounds.normal = { ...pos, width: normal.width, height: normal.height, ...ratioOf(pos, normal) }
+    // 展开必须保证窗口可见：迷你条上「隐藏到托盘」会把窗口 hide 掉（close 事件
+    // 走托盘分支），此时再点展开只改设置的话窗口还是 hidden，表现为「显示不了主窗口」
+    if (!win.isVisible()) win.show()
+    if (win.isMinimized()) win.restore()
+    win.focus()
     if (process.env.AURORA_CAPTURE || process.env.AURORA_SELFTEST) {
       process.stdout.write(
         `[debug:expand] after setBounds -> ${JSON.stringify(win.getBounds())} requested ${normal.width}x${normal.height} max=${JSON.stringify(win.getMaximumSize())} min=${JSON.stringify(win.getMinimumSize())}\n`
