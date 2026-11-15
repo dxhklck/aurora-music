@@ -69,6 +69,11 @@ export function positionRatio(
 /**
  * 从比例存档恢复左上角坐标：按**当前**工作区尺寸还原，再夹进可视区域。
  * 比例不合法（NaN / 越界太多）返回 null，调用方退回像素存档或默认位置。
+ *
+ * 口径必须与 positionRatio 一致：rx = (x-area.x)/area.width（分母是整个工作区，
+ * 不减窗宽）。曾经恢复时乘了 (area.width - width)，同屏往返就系统性偏移
+ * （偏移量 = width×(1-rx)，迷你条贴右下角时一次恢复就偏 300px），表现成
+ * 「窗口自己乱跳」。越界交给 clampTopLeft 兜底。
  */
 export function positionFromRatio(
   rx: number,
@@ -83,8 +88,8 @@ export function positionFromRatio(
   const height = Math.min(size.height, area.height)
   const pos = clampTopLeft(
     {
-      x: area.x + clamp01(rx) * (area.width - width),
-      y: area.y + clamp01(ry) * (area.height - height),
+      x: area.x + clamp01(rx) * area.width,
+      y: area.y + clamp01(ry) * area.height,
       width,
       height
     },

@@ -140,12 +140,24 @@ test('positionRatio：越界位置 clamp 进 0~1，不返回越界比例', () =>
   assert.equal(r?.ry, 1)
 })
 
-test('positionFromRatio：同尺寸屏还原回原位（可移动范围内插值）', () => {
+test('positionFromRatio：同尺寸屏还原回原位（口径与 positionRatio 一致）', () => {
   const area = { x: 0, y: 0, width: 2000, height: 1000 }
-  // 比例在「工作区宽 - 窗口宽」的移动范围内插值：0.5 × (2000-400) = 800
+  // 存档口径 rx=(x-area.x)/area.width：0.5×2000=1000（分母不减窗宽）
   const pos = positionFromRatio(0.5, 0.25, { width: 400, height: 100 }, area)
-  assert.equal(pos?.x, 800)
-  assert.equal(pos?.y, 225)
+  assert.equal(pos?.x, 1000)
+  assert.equal(pos?.y, 250)
+})
+
+test('positionFromRatio：存取往返一致（右下角存档原位恢复，不系统性偏移）', () => {
+  const area = { x: 0, y: 0, width: 1920, height: 1032 }
+  const size = { width: 380, height: 56 }
+  // 真实场景回归：窗口在 (1540, 976)，先存比例再恢复，必须回到原位。
+  // 曾经恢复时乘了 (area.width - width)，右下角的迷你条一次恢复就偏 300px。
+  const r = positionRatio({ x: 1540, y: 976 }, area)
+  assert.ok(r)
+  const pos = positionFromRatio(r.rx, r.ry, size, area)
+  assert.equal(pos?.x, 1540)
+  assert.equal(pos?.y, 976)
 })
 
 test('positionFromRatio：4K 存档到 1080p 屏保持相对位置且不出屏', () => {
