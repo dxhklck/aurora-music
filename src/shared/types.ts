@@ -331,6 +331,11 @@ export interface AppSettings {
   /** 播放页样式：vinyl 黑胶经典 / lyrics 歌词大屏 / cover 封面沉浸 */
   nowPlayingStyle: 'vinyl' | 'lyrics' | 'cover'
   /**
+   * 驾驶模式切歌时用系统语音播报「歌名，歌手」（Web Speech API 本地语音，离线可用）。
+   * 暂停态切歌不报；快速连跳只报最后一首。
+   */
+  driveModeTts: boolean
+  /**
    * 播放页皮肤。前五个是配色，后四个是完整皮肤（背景处理 + 歌词排版 + 控件配色）：
    * netease 云音乐 / amber 琥珀黑胶 / minimal 黑白极简 / paper 磁带手记。
    */

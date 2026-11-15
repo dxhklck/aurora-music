@@ -126,6 +126,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   shortcuts: { toggle: '', next: '', prev: '' },
   nowPlayingStyle: 'vinyl',
+  driveModeTts: true,
   // 网易云风格的歌词页：模糊封面 + 白色歌词 + 红色进度条，作为新装用户的默认皮肤
   playerTheme: 'netease',
   themeMode: 'dark',

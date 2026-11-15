@@ -120,6 +120,11 @@ const ICONS: Record<string, IconDef> = {
     fill: false
   },
   play_circle: { paths: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M10 8.5 16 12l-6 3.5z'], fill: false },
+  /** 驾驶模式：方向盘（外圈 + 三辐 + 中毂） */
+  car: {
+    paths: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', 'M3.4 11h17.2', 'M12 12.8V21', 'M12 12.8 6 19.4', 'M12 12.8 18 19.4', 'M12 12.8a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2Z'],
+    fill: false
+  },
   equalizer: { paths: ['M6 4v16M12 4v16M18 4v16', 'M4 9h4M10 15h4M16 7h4'], fill: false },
   lock: { paths: ['M6 10.5h12V20H6z', 'M9 10.5V7.5a3 3 0 0 1 6 0v3'], fill: false },
   unlock: { paths: ['M6 10.5h12V20H6z', 'M9 10.5V7.5a3 3 0 0 1 5.6-1.6'], fill: false },

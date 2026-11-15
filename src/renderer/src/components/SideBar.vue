@@ -85,6 +85,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         <Icon name="lyrics" :size="18" />
         <span>歌词舞台</span>
       </button>
+      <button class="nav-item as-button" @click="player.openDriving()">
+        <Icon name="car" :size="18" />
+        <span>驾驶模式</span>
+      </button>
     </div>
 
     <div class="block">

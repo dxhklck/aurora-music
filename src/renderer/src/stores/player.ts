@@ -7,6 +7,7 @@ import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
 import { useStatsStore } from './stats'
+import { cancelTts } from '../core/tts'
 import { createLatestGate } from '../core/latest'
 import { artworkSrc } from '../core/artwork'
 import { createUidFactory, moveIndex, moveItem, type QueueItem } from '../core/queue'
@@ -120,6 +121,8 @@ export const usePlayerStore = defineStore('player', () => {
   const resolvedSong = ref<Song | null>(null)
   const showNowPlaying = ref(false)
   const showQueue = ref(false)
+  /** 驾驶模式覆盖层：全屏大按钮，长按 800ms 退出 */
+  const showDriving = ref(false)
   const recent = ref<Song[]>(loadRecent())
   /** 完整播放历史（带时间戳，新的在前）；视图层按天分组展示 */
   const history = ref<HistoryEntry[]>(loadHistory())
@@ -841,6 +844,18 @@ export const usePlayerStore = defineStore('player', () => {
     return false
   }
 
+  /** 进入驾驶模式：顺带关掉其它覆盖层（播放页/队列抽屉），一次只留一个全屏层 */
+  function openDriving(): void {
+    showNowPlaying.value = false
+    showQueue.value = false
+    showDriving.value = true
+  }
+
+  function closeDriving(): void {
+    showDriving.value = false
+    cancelTts()
+  }
+
   async function toggle(): Promise<void> {
     if (!current.value) {
       if (queue.value.length) await playAt(0)
@@ -1152,6 +1167,9 @@ export const usePlayerStore = defineStore('player', () => {
     resolvedSong,
     showNowPlaying,
     showQueue,
+    showDriving,
+    openDriving,
+    closeDriving,
     recent,
     history,
     clearHistory,

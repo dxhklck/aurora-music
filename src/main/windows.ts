@@ -278,7 +278,15 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
       ...clampRect({ x: win.getBounds().x - 120, y: win.getBounds().y - 120, ...NORMAL_SIZE }),
       ...NORMAL_SIZE
     }
-    const pos = clampRect(normal)
+    // 迷你条常贴在屏幕角落，切回完整窗口后大窗跟着缩在角落里很难受：
+    // 位置改在工作区居中，只保留存档的尺寸
+    const area = screen.getDisplayMatching(win.getBounds()).workArea
+    const pos = clampRect({
+      x: Math.round(area.x + (area.width - normal.width) / 2),
+      y: Math.round(area.y + (area.height - normal.height) / 2),
+      width: normal.width,
+      height: normal.height
+    })
     win.setBounds({ ...pos, width: normal.width, height: normal.height })
     bounds.normal = { ...pos, width: normal.width, height: normal.height, ...ratioOf(pos, normal) }
     if (process.env.AURORA_CAPTURE || process.env.AURORA_SELFTEST) {

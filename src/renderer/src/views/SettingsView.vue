@@ -877,6 +877,18 @@ onBeforeUnmount(() => {
       <p class="hint">交叉淡化在歌曲自然临近结束时生效；手动切歌、暂停与拖进度条不参与。</p>
 
       <div class="row">
+        <label>驾驶模式语音播报</label>
+        <button
+          class="switch"
+          :class="{ on: settings?.driveModeTts }"
+          title="驾驶模式里切歌时用系统语音念「歌名，歌手」；走本地语音，离线可用"
+          @click="patch({ driveModeTts: !settings?.driveModeTts })"
+        >
+          <i />
+        </button>
+      </div>
+
+      <div class="row">
         <label>每次搜索条数</label>
         <input
           class="num"

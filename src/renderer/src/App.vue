@@ -6,6 +6,7 @@ import SideBar from './components/SideBar.vue'
 import PlayerBar from './components/PlayerBar.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
 import NowPlaying from './components/NowPlaying.vue'
+import DrivingMode from './components/DrivingMode.vue'
 import QueueDrawer from './components/QueueDrawer.vue'
 import ToastHost from './components/ToastHost.vue'
 import PlaylistPicker from './components/PlaylistPicker.vue'
@@ -68,6 +69,7 @@ watch(isMini, (mini) => {
   if (mini) {
     player.showNowPlaying = false
     player.showQueue = false
+    player.closeDriving()
   }
 })
 
@@ -108,6 +110,15 @@ function onKey(event: KeyboardEvent): void {
     return
   }
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+  // 驾驶模式占屏时只留 Esc 退出：空格/方向键是大误触源（行车中碰到就跳歌/调音量）。
+  // 媒体键走主进程全局快捷键，不经过这里，正好可用。
+  if (player.showDriving) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      player.closeDriving()
+    }
+    return
+  }
   if (event.code === 'Space') {
     // 焦点在按钮上时把空格留给按钮自身激活：否则点了「收起」再按空格，
     // 默认点击被 preventDefault 吃掉，按钮看起来"没有反应"。
@@ -212,6 +223,10 @@ onBeforeUnmount(() => {
 
     <transition name="stage">
       <NowPlaying v-if="player.showNowPlaying" />
+    </transition>
+
+    <transition name="stage">
+      <DrivingMode v-if="player.showDriving" />
     </transition>
 
     <QueueDrawer />

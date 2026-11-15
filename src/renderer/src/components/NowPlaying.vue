@@ -261,6 +261,13 @@ onBeforeUnmount(() => {
           <Icon name="refresh" :size="18" />
         </button>
         <button
+          class="icon-btn"
+          title="驾驶模式（大按钮，长按退出）"
+          @click.stop="player.openDriving()"
+        >
+          <Icon name="car" :size="18" />
+        </button>
+        <button
           class="icon-btn sleep"
           :class="{ active: player.sleepMode !== 'off' }"
           title="睡眠定时"
