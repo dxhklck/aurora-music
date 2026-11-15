@@ -8,7 +8,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { clampTopLeft, positionFromRatio, positionRatio, restoreRect } from '../src/main/geometry.ts'
+import {
+  centeredTopLeft,
+  clampTopLeft,
+  isFullyOutside,
+  keepPartlyVisible,
+  positionFromRatio,
+  positionRatio,
+  restoreRect
+} from '../src/main/geometry.ts'
 
 /** 1366×768 笔记本，扣掉任务栏后的工作区 */
 const narrowWorkArea = { x: 0, y: 0, width: 1366, height: 728 }
@@ -173,4 +181,38 @@ test('positionFromRatio：非法比例返回 null', () => {
   assert.equal(positionFromRatio(Number.NaN, 0.5, { width: 100, height: 50 }, area), null)
   assert.equal(positionFromRatio(0.5, 2, { width: 100, height: 50 }, area), null)
   assert.equal(positionFromRatio(-0.6, 0.5, { width: 100, height: 50 }, area), null)
+})
+
+/* ---------------- 拖动时防整窗出屏 ---------------- */
+
+test('keepPartlyVisible：允许贴边半露，但整窗出屏时拉回一截', () => {
+  const area = { x: 0, y: 0, width: 1920, height: 1032 }
+  const size = { width: 380, height: 56 }
+  // 左侧只露 20px 时拉到至少露 40px，但仍是半藏，不该被强行推回 0
+  const peeking = keepPartlyVisible({ x: -360, y: 488, ...size }, area, 40)
+  assert.equal(peeking.x, -340)
+  // 完全出屏：至少留 40px 在可视区（isVisible 仍 true 但肉眼找不到窗口）
+  const gone = keepPartlyVisible({ x: 5000, y: 5000, ...size }, area, 40)
+  assert.equal(gone.x, area.width - 40)
+  assert.equal(gone.y, area.height - 40)
+  const goneLeft = keepPartlyVisible({ x: -5000, y: -5000, ...size }, area, 40)
+  assert.equal(goneLeft.x, area.x - size.width + 40)
+  assert.equal(goneLeft.y, area.y - size.height + 40)
+})
+
+test('keepPartlyVisible：副屏负坐标工作区按副屏边界拉回', () => {
+  const leftScreen = { x: -1920, y: 0, width: 1920, height: 1040 }
+  const pos = keepPartlyVisible({ x: -5000, y: 5000, width: 380, height: 56 }, leftScreen, 40)
+  assert.equal(pos.x, leftScreen.x - 380 + 40)
+  assert.equal(pos.y, leftScreen.y + leftScreen.height - 40)
+  const farRight = keepPartlyVisible({ x: 9999, y: 500, width: 380, height: 56 }, leftScreen, 40)
+  assert.equal(farRight.x, leftScreen.x + leftScreen.width - 40)
+})
+
+test('isFullyOutside / centeredTopLeft：屏外存档改写成工作区中心', () => {
+  const area = { x: 0, y: 0, width: 1920, height: 1032 }
+  const size = { width: 380, height: 56 }
+  assert.equal(isFullyOutside({ x: 3267, y: 1975, ...size }, area), true)
+  assert.equal(isFullyOutside({ x: -360, y: 488, ...size }, area), false)
+  assert.deepEqual(centeredTopLeft(size, area), { x: 770, y: 488 })
 })

@@ -98,6 +98,47 @@ export function positionFromRatio(
   return pos
 }
 
+/**
+ * 把窗口拉回可视区：至少留一截在「离原位置最近的那条边」上。
+ *
+ * 与 clampTopLeft 不同：这里允许贴边半露（迷你条半藏在屏幕边缘是常见摆法），
+ * 但绝不允许整窗出屏——整窗出屏时 isVisible() 仍是 true，托盘的 show() 也不会
+ * 把它挪回来，用户看到的就是「窗口自己消失了」且点「显示主窗口」没反应。
+ * 出屏后不是一律拉到工作区右下角，而是从哪侧出去就从哪侧回来，避免跨屏乱跳。
+ */
+export function keepPartlyVisible(rect: Rect, area: Rect, sliver = 40): { x: number; y: number } {
+  const width = Math.min(Math.max(rect.width, 1), Math.max(area.width, 1))
+  const height = Math.min(Math.max(rect.height, 1), Math.max(area.height, 1))
+  const margin = Math.min(sliver, width, height)
+  return {
+    x: Math.min(Math.max(rect.x, area.x - width + margin), area.x + area.width - margin),
+    y: Math.min(Math.max(rect.y, area.y - height + margin), area.y + area.height - margin)
+  }
+}
+
+/** 整窗是否完全落在工作区之外（贴边半露不算，那是用户故意摆的） */
+export function isFullyOutside(rect: Rect, area: Rect): boolean {
+  return (
+    rect.x + rect.width <= area.x ||
+    rect.x >= area.x + area.width ||
+    rect.y + rect.height <= area.y ||
+    rect.y >= area.y + area.height
+  )
+}
+
+/** 指定尺寸摆到工作区中心；尺寸先夹到工作区，极小屏也不会算出界外坐标 */
+export function centeredTopLeft(
+  size: { width: number; height: number },
+  area: Rect
+): { x: number; y: number } {
+  const width = Math.min(size.width, area.width)
+  const height = Math.min(size.height, area.height)
+  return {
+    x: Math.floor(area.x + (area.width - width) / 2),
+    y: Math.floor(area.y + (area.height - height) / 2)
+  }
+}
+
 function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n))
 }

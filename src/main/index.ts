@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { writeFile, readFile } from 'node:fs/promises'
 import { IPC } from '@shared/ipc'
 import { registerMediaScheme, installMediaProtocol, setLocalRoots } from './protocol'
-import { createMainWindow, getMainWindow, persistMainWindowBounds } from './windows'
+import { createMainWindow, ensureMainWindowVisible, getMainWindow, persistMainWindowBounds } from './windows'
 import { createTray } from './tray'
 import { bootstrapProviders, registerEngineProviders } from './providers'
 import { initSourceHealth } from './services/source-health'
@@ -142,9 +142,10 @@ if (!app.requestSingleInstanceLock()) {
     // 跳转列表的命令：参数由第二个进程带进来，这里代它执行。
     // 这类唤起是「后台控制」，不要顺手把窗口弹出来打扰用户。
     const command = parseJumpCommand(argv)
-    const win = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed())
-    if (win && !command) {
+    const win = getMainWindow()
+    if (win && !win.isDestroyed() && !command) {
       if (win.isMinimized()) win.restore()
+      ensureMainWindowVisible(win)
       if (!win.isVisible()) win.show()
       win.focus()
     }

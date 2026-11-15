@@ -5,7 +5,7 @@ import { IPC } from '@shared/ipc'
 import type { TrayState } from '@shared/api'
 import { settings } from './services/settings'
 import { logger } from './services/logger'
-import { getLyricWindow, getMainWindow, setLyricLocked } from './windows'
+import { ensureMainWindowVisible, getLyricWindow, getMainWindow, setLyricLocked } from './windows'
 
 /**
  * 系统托盘。
@@ -69,6 +69,7 @@ function showMainWindow(): void {
   const win = getMainWindow()
   if (!win || win.isDestroyed()) return
   if (win.isMinimized()) win.restore()
+  ensureMainWindowVisible(win)
   win.show()
   win.focus()
 }

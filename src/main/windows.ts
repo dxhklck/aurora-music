@@ -2,10 +2,18 @@ import { app, BrowserWindow, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { IPC } from '@shared/ipc'
-import type { MiniVolumeState } from '@shared/types'
+import type { MiniVolumeState, WinRect } from '@shared/types'
 import { trayReady, isQuitting } from './tray'
 import { settings } from './services/settings'
-import { clampTopLeft, positionFromRatio, positionRatio, restoreRect } from './geometry'
+import {
+  centeredTopLeft,
+  clampTopLeft,
+  isFullyOutside,
+  keepPartlyVisible,
+  positionFromRatio,
+  positionRatio,
+  restoreRect
+} from './geometry'
 import { clamp } from './utils'
 
 let mainWindow: BrowserWindow | null = null
@@ -87,6 +95,8 @@ export function createMainWindow(): BrowserWindow {
   mainWindow.on('ready-to-show', () => {
     // 恢复上次关闭前的窗口位置与形态（迷你态跨重启）
     if (mainWindow) restoreWindowShape(mainWindow)
+    // 存档若来自被拖出屏的那次会话，直接 show 也看不到：先夹回可视区
+    if (mainWindow) ensureMainWindowVisible(mainWindow)
     mainWindow?.show()
     mainWindow?.webContents.setBackgroundThrottling(false)
     // 「窗口不见了」类问题现场难复现：启动后把窗口真实状态打一行，
@@ -147,7 +157,7 @@ export function createMainWindow(): BrowserWindow {
       const bounds = { ...settings.get().windowBounds }
       const rect = mainWindow.getNormalBounds()
       // 迷你态只记「收起后的尺寸」：面板展开时会话不持久化，否则下次启动会以 376 高打开
-      if (settings.get().miniMode) bounds.mini = { ...rect, width: MINI_SIZE.width, height: MINI_SIZE.height }
+      if (settings.get().miniMode) bounds.mini = miniBoundsForSave(mainWindow)
       else if (rect.width > MINI_SIZE.width) bounds.normal = rect
       void settings.set({ windowBounds: bounds })
       event.preventDefault()
@@ -174,7 +184,7 @@ export function persistMainWindowBounds(): void {
   const bounds = { ...settings.get().windowBounds }
   const rect = win.getNormalBounds()
   if (settings.get().miniMode) {
-    bounds.mini = { ...rect, width: MINI_SIZE.width, height: MINI_SIZE.height }
+    bounds.mini = miniBoundsForSave(win)
   } else if (rect.width > MINI_SIZE.width) {
     bounds.normal = rect
   }
@@ -207,10 +217,42 @@ function miniBaseTop(win: BrowserWindow): number {
     : bounds.y
 }
 
+/**
+ * 迷你条存档：整窗出屏的坐标一律改成屏幕中心，并补上比例字段。
+ *
+ * 曾经手动拖动把窗口挪到屏外时仍会原样落盘，重启恢复后照样看不见；
+ * 而 isVisible() 是 true，托盘 show() 不改坐标，点「显示主窗口」也没反应。
+ */
+function miniBoundsForSave(win: BrowserWindow): WinRect {
+  const bounds = win.getNormalBounds()
+  const rect = { ...bounds, ...MINI_SIZE }
+  const area = screen.getPrimaryDisplay().workArea
+  const pos = isFullyOutside(rect, area) ? centeredTopLeft(MINI_SIZE, area) : { x: bounds.x, y: bounds.y }
+  return { ...pos, ...MINI_SIZE, ...ratioOf(pos, MINI_SIZE) }
+}
+
 /** 把目标矩形纠正到最近显示器的可视区域内（换显示器/分辨率后防止窗口跑到屏外） */
 function clampRect(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
   const display = screen.getDisplayMatching(rect)
   return clampTopLeft(rect, display.workArea)
+}
+
+/**
+ * 把主窗口（含迷你条）拉回最近显示器的可视范围。
+ *
+ * 托盘「显示主窗口」以前只做 show+focus：手动拖动把窗口挪到屏外时
+ * isVisible() 仍是 true，show 不会改坐标，用户点菜单感觉「没反应」。
+ * 这里保留贴边半露的摆法，只在整窗出屏时拉回来（见 keepPartlyVisible）。
+ */
+export function ensureMainWindowVisible(win: BrowserWindow | null = mainWindow): void {
+  if (!win || win.isDestroyed()) return
+  const rect = win.getBounds()
+  try {
+    const area = screen.getDisplayMatching(rect).workArea
+    win.setBounds({ ...keepPartlyVisible(rect, area), width: rect.width, height: rect.height })
+  } catch {
+    /* screen 未就绪时只做 show，不因兜底把显示窗口卡住 */
+  }
 }
 
 /** 算左上角在工作区的相对位置，screen 不可用或非法时返回空对象（存档不写比例字段） */
@@ -273,7 +315,7 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
     // 切回完整窗口：音量气泡没有意义了，直接收起
     closeVolumePopup()
     if (win.getBounds().width <= MINI_SIZE.width) {
-      bounds.mini = win.getNormalBounds()
+      bounds.mini = miniBoundsForSave(win)
     }
     // 顺序敏感（Windows 实测）：setResizable(false) 之后 setMaximumSize/setMinimumSize
     // 会被系统忽略，必须先恢复 resizable，再清最大尺寸锁（0,0 = 不限制）、设最小尺寸，
@@ -299,6 +341,7 @@ export function applyMiniMode(win: BrowserWindow, mini: boolean): void {
     bounds.normal = { ...pos, width: normal.width, height: normal.height, ...ratioOf(pos, normal) }
     // 展开必须保证窗口可见：迷你条上「隐藏到托盘」会把窗口 hide 掉（close 事件
     // 走托盘分支），此时再点展开只改设置的话窗口还是 hidden，表现为「显示不了主窗口」
+    ensureMainWindowVisible(win)
     if (!win.isVisible()) win.show()
     if (win.isMinimized()) win.restore()
     win.focus()
@@ -400,8 +443,13 @@ export function miniDragMove(screenX: number, screenY: number): void {
   const height = win.getBounds().height
   const x = Math.round(screenX - miniDragOffset.x)
   const y = Math.round(screenY - miniDragOffset.y)
-  // 不做屏内 clamp：贴边半露是用户的自由，applyMiniMode 落盘前会 clampRect
-  win.setBounds({ x, y, width, height })
+  // 允许贴边半露，但整窗出屏必须拉住：否则 isVisible() 仍是 true 而屏幕上看不到，
+  // 托盘 show() 也不会改坐标，表现成「播放中迷你条突然消失、点显示主窗口没反应」
+  // 按「目标位置」找显示器：用当前 bounds 会把窗口锁死在这块屏，拖不到副屏
+  const target = { x, y, width, height }
+  const area = screen.getDisplayMatching(target).workArea
+  const pos = keepPartlyVisible(target, area)
+  win.setBounds({ ...pos, width, height })
 }
 
 /** 当前是否有附加区展开（供自检/调试读取） */
@@ -905,12 +953,14 @@ export function lyricDragMove(dx: number, dy: number): void {
   if (!lyricWindow || lyricWindow.isDestroyed() || !dragOrigin) return
   // 用 setBounds 而不是 setPosition：顺带把尺寸钉回按下时的值，
   // 系统若在拖动中把窗口拉大，下一次移动就纠正回来。
-  lyricWindow.setBounds({
+  const rect = {
     x: dragOrigin.winX + dx,
     y: dragOrigin.winY + dy,
     width: dragOrigin.width,
     height: dragOrigin.height
-  })
+  }
+  const area = screen.getDisplayMatching(rect).workArea
+  lyricWindow.setBounds({ ...keepPartlyVisible(rect, area), width: rect.width, height: rect.height })
 }
 
 export function lyricDragEnd(): void {

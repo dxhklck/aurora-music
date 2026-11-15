@@ -280,6 +280,7 @@ function onKey(event: KeyboardEvent): void {
  * Linux（尤其 Wayland，麒麟/鲲鹏）不允许程序自行挪窗口，setBounds 拖动无效，
  * 但系统拖拽热区没有 Windows 的错位问题——平台分治：win32 手动拖，其余走系统。
  */
+let pressing = false
 let dragging = false
 /** slop：位移超过 8px 才算拖动，按下不动或轻微抖动仍是点击（借鉴移动版 PlayerBar） */
 const DRAG_SLOP = 8
@@ -289,16 +290,23 @@ const manualDrag = window.api.platform === 'win32'
 
 function onBarPointerDown(event: PointerEvent): void {
   if (!manualDrag) return
+  // 每次按下先清掉上次状态：pointerup 丢在窗口外时，下一段鼠标掠过不能续着拖
+  pressing = false
+  dragging = false
   if (event.button !== 0) return
   // 按钮与面板内容上的按下不拖动（列表滚动/点击优先）
   if ((event.target as HTMLElement | null)?.closest('button, .panel')) return
+  // 必须记录「按下过」：全局 pointermove 在鼠标只是掠过窗口时也会触发。
+  // 少了这个守卫就会拿初始 (0,0) 算 slop，第一次移动即被当拖动，
+  // 窗口被推到屏外（isVisible 仍为 true，看起来像迷你条突然消失）。
+  pressing = true
   dragging = false
   pressX = event.screenX
   pressY = event.screenY
 }
 
 function onPointerMove(event: PointerEvent): void {
-  if (!manualDrag) return
+  if (!manualDrag || !pressing) return
   if (dragging) {
     window.api.miniDragMove(event.screenX, event.screenY)
     return
@@ -312,6 +320,7 @@ function onPointerMove(event: PointerEvent): void {
 }
 
 function onPointerUp(): void {
+  pressing = false
   dragging = false
 }
 
@@ -319,8 +328,10 @@ onMounted(() => {
   if (manualDrag) {
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp)
-    // 系统打断（窗口切换/手势冲突）也要清状态，否则悬挂的 dragging 会吞掉后续点击
+    // 系统打断（窗口切换/手势冲突）或窗口失焦也要清状态，
+    // 否则悬挂的 pressing 会让下一段鼠标掠过继续拖动
     window.addEventListener('pointercancel', onPointerUp)
+    window.addEventListener('blur', onPointerUp)
   }
 })
 
@@ -341,6 +352,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerup', onPointerUp)
     window.removeEventListener('pointercancel', onPointerUp)
+    window.removeEventListener('blur', onPointerUp)
   }
   // 组件卸载时窗口会回到完整形态，确保主进程的展开标记同步复位
   if (panelOpen.value) window.api.setMiniExtra(0, 'down')
