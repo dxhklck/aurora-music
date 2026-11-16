@@ -359,6 +359,11 @@ class WaveEngine {
     return this.gain
   }
 
+  /** 频谱分箱宽度（Hz），供可视化按频率取段 */
+  get binHz(): number {
+    return this.ctx ? this.ctx.sampleRate / FFT_SIZE : 48000 / FFT_SIZE
+  }
+
   /** 频域数据（0-255），未挂接时返回全 0 数组 */
   freq(): Uint8Array {
     if (this.analyser) this.analyser.getByteFrequencyData(this.freqData)
