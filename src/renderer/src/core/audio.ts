@@ -27,6 +27,9 @@ class AudioEngine {
   private handlers = new Map<string, Set<Handler>>()
   private fadeTimer: number | null = null
   private xfTimer: number | null = null
+  /** 音频图两条增益的实际镜像；syncGraph 原样重放，不靠 levels 反推 */
+  private masterLevel = 0.75
+  private branchLevels: [number, number] = [1, 1]
   private targetVolume = 0.75
   private muted = false
   /** 播放速率（0.5~2）。playbackRate 是元素属性，换 src / load 不清零，两个元素各设一次即可 */
@@ -311,7 +314,9 @@ class AudioEngine {
     this.levels[index] = clamped
     const el = this.els[index]
     if (el) el.volume = clamped
-    wave.setBranch(index, this.targetVolume > 0 ? clamped / this.targetVolume : 0)
+    const branch = this.targetVolume > 0 ? clamped / this.targetVolume : 0
+    this.branchLevels[index] = branch
+    wave.setBranch(index, branch)
   }
 
   seek(ms: number): void {
@@ -361,6 +366,7 @@ class AudioEngine {
     this.el.volume = clamped
     this.levels[this.activeIdx] = clamped
     // 音频图接管后元素音量失效，必须同步到 master；未挂接时是空操作
+    this.masterLevel = clamped
     wave.setGain(clamped)
   }
 
@@ -399,17 +405,22 @@ class AudioEngine {
   }
 
   /**
-   * 音频图挂接后由调用方（NowPlaying）补一次同步：
+   * 音频图挂接后由调用方（NowPlaying / DrivingMode）补一次同步：
    * master 音量、静音态、两个分支的电平都按引擎当前值灌进去。
    * 挂接本身可能发生在播放中途甚至交叉淡化进行中，靠元素自身状态初始化会错。
+   *
+   * 普通淡入/淡出只动 master（applyVolume 每帧推给 wave），分支必须保持满电平：
+   * 切歌时 load() 先 applyVolume(0) 再 play()，play 事件紧接着触发舞台的 syncGraph，
+   * 若把这份「淡入起点 0」当成分支电平灌进去，branch 就永久停在 0——之后淡入只抬
+   * master，表现为「切歌后无声，暂停再播放才恢复」。分支只由 setElementLevel 改，
+   * 这里重放它的镜像即可，交叉淡化中途值也能原样恢复。
    */
   syncGraph(): void {
     if (!wave.state.attached) return
-    wave.setGain(this.targetVolume)
+    wave.setGain(this.masterLevel)
     wave.setMuted(this.muted)
-    for (const index of [0, 1] as const) {
-      wave.setBranch(index, this.targetVolume > 0 ? this.levels[index] / this.targetVolume : 0)
-    }
+    wave.setBranch(0, this.branchLevels[0])
+    wave.setBranch(1, this.branchLevels[1])
   }
 
   private fadeTo(target: number, duration: number): void {
