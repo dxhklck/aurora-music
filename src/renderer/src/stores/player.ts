@@ -155,10 +155,19 @@ export const usePlayerStore = defineStore('player', () => {
 
   let engineBound = false
   let volumeTimer: number | null = null
+  /** 撤掉还没触发的失败自动跳过（新的播放请求、停止播放都要先调用） */
+  function cancelSkip(): void {
+    if (skipTimer !== null) {
+      window.clearTimeout(skipTimer)
+      skipTimer = null
+    }
+  }
   /** 原生媒体面板位置同步节流 */
   let lastNativeSync = 0
   /** 连续播放失败计数：用于自动跳过损坏/无版权曲目，避免无限连跳 */
   let failureStreak = 0
+  /** 失败后自动跳过下一首的定时器：新的播放请求要先撤掉它，否则会盖掉用户手选的歌 */
+  let skipTimer: number | null = null
   /** 停滞自愈进度：0 未发生 / 1 已同源重取 / 2 已跨源（同一首歌最多两段，防循环） */
   let stallCount = 0
   /** startHero 续播时要跳转的毫秒数，等 duration 就绪后消费 */
@@ -376,6 +385,7 @@ export const usePlayerStore = defineStore('player', () => {
     if (!song) return
     const app = useAppStore()
     bindEngine()
+    cancelSkip()
     const token = playGate.next()
     if (!opts.isRetry) {
       stallCount = 0
@@ -427,12 +437,19 @@ export const usePlayerStore = defineStore('player', () => {
       error.value = friendlyError(err)
       playing.value = false
       failureStreak += 1
-      // 一首歌播不了就自动跳下一首，连续 3 次失败后停下来等用户处理。
-      // noSkip：用户从「换一个版本」面板主动试播时不能跳——他还在挑，跳走等于把队列进度弄乱
+      // 一首歌播不了就从当前队列移除再播下一首，连续 3 次失败后停下来等用户处理。
+      // 只改播放队列，不动本地歌单；noSkip：用户从「换一个版本」面板主动试播时不能跳——他还在挑
       if (!opts.noSkip && failureStreak <= 3 && queue.value.length > 1) {
-        useAppStore().toast(`《${song.name}》无法播放，已自动跳过`, 'error')
-        window.setTimeout(() => {
-          void next(false)
+        queue.value.splice(target, 1)
+        index.value = Math.min(target, queue.value.length - 1)
+        loadedUid = null
+        saveQueue()
+        error.value = ''
+        updateMediaSession(queue.value[index.value] ?? null)
+        useAppStore().toast(`《${song.name}》无法播放，已从队列移除`, 'error')
+        skipTimer = window.setTimeout(() => {
+          skipTimer = null
+          void playAt(index.value)
         }, 900)
       }
     } finally {
@@ -1086,6 +1103,7 @@ export const usePlayerStore = defineStore('player', () => {
   function stop(): void {
     // 让还在路上的取址请求作废，否则它回来会把已经停掉的队列重新播起来
     playGate.invalidate()
+    cancelSkip()
     lyricGate.invalidate()
     // 必须用 audio.stop()：pause()+seek(0) 的组合会被「淡出定时器 vs seek 的
     // 淡化分支」竞态吃掉真正的 el.pause()，表现为清空队列后声音停不下来
