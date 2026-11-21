@@ -73,11 +73,17 @@ const api: AuroraApi = {
   addPlaylistSongs: (id, songs) => ipcRenderer.invoke(IPC.playlistAddSongs, { id, songs }),
   removePlaylistSong: (id, platform, songId) =>
     ipcRenderer.invoke(IPC.playlistRemoveSong, { id, platform, songId }),
+  removePlaylistSongEverywhere: (platform, songId) =>
+    ipcRenderer.invoke(IPC.playlistRemoveSongEverywhere, { platform, songId }),
   movePlaylistSong: (id, platform, songId, direction) =>
     ipcRenderer.invoke(IPC.playlistMoveSong, { id, platform, songId, direction }),
   toggleFavorite: (song) => ipcRenderer.invoke(IPC.playlistToggleFavorite, song),
   exportPlaylistM3u: (args) => ipcRenderer.invoke(IPC.playlistExportM3u, args),
   importPlaylistM3u: (targetId) => ipcRenderer.invoke(IPC.playlistImportM3u, targetId),
+  remotePlaylists: (platform) => ipcRenderer.invoke(IPC.playlistRemoteList, platform),
+  remotePlaylistDetail: (platform, id) =>
+    ipcRenderer.invoke(IPC.playlistRemoteDetail, { platform, id }),
+  syncRemotePlaylist: (payload) => ipcRenderer.invoke(IPC.playlistSyncRemote, payload),
 
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),

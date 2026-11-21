@@ -267,6 +267,19 @@ export interface Playlist {
   songs: Song[]
   createdAt: number
   updatedAt: number
+  /** 从网易云同步来的歌单：记住远端 id，再次同步时原地更新而不是新建 */
+  neteaseId?: string
+  /** 从 QQ 音乐同步来的歌单：含义同 neteaseId，跨平台 id 不会互相串单 */
+  qqId?: string
+}
+
+/** 账号歌单统一摘要（网易云 / QQ “导入歌单”列表用） */
+export interface RemotePlaylistSummary {
+  id: string
+  name: string
+  trackCount: number
+  coverUrl: string | null
+  creator: string
 }
 
 /**

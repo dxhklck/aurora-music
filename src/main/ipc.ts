@@ -2,7 +2,7 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { AppSettings, LibraryTrack, MiniVolumeState, Song } from '@shared/types'
 import { setProviderCookies } from './providers/cookies'
-import type { TrayState } from '@shared/api'
+import type { RemotePlaylistPlatform, TrayState } from '@shared/api'
 import { updateTrayState } from './tray'
 import { providers, registerEngineProviders, unregisterEngineProviders } from './providers'
 import { catalog } from './services/catalog'
@@ -12,6 +12,7 @@ import { library } from './services/library'
 import { copyTracks, openTrash } from './services/fileops'
 import { copyFilesToClipboard } from './services/clipboard'
 import { playlists } from './services/playlists'
+import type { RemoteSyncPayload } from './services/remote-sync'
 import { exportPlaylistToM3u, importM3uFromFile } from './services/m3u-io'
 import { settings } from './services/settings'
 import { logger } from './services/logger'
@@ -292,12 +293,22 @@ export function registerIpc(): void {
   handle(IPC.playlistRemoveSong, (args: { id: string; platform: string; songId: string }) =>
     playlists.removeSong(args.id, args.platform, args.songId)
   )
+  handle(IPC.playlistRemoveSongEverywhere, (args: { platform: string; songId: string }) =>
+    playlists.removeSongEverywhere(args.platform, args.songId)
+  )
   handle(
     IPC.playlistMoveSong,
     (args: { id: string; platform: string; songId: string; direction: 'up' | 'down' }) =>
       playlists.moveSong(args.id, args.platform, args.songId, args.direction)
   )
   handle(IPC.playlistToggleFavorite, (song: Song) => playlists.toggleFavorite(song))
+  handle(IPC.playlistRemoteList, (platform: RemotePlaylistPlatform) =>
+    catalog.remotePlaylists(platform)
+  )
+  handle(IPC.playlistRemoteDetail, (args: { platform: RemotePlaylistPlatform; id: string }) =>
+    catalog.remotePlaylistDetail(args.platform, args.id)
+  )
+  handle(IPC.playlistSyncRemote, (payload: RemoteSyncPayload) => playlists.syncRemote(payload))
   handle(IPC.playlistExportM3u, async (args: { id: string; name: string }) => {
     const win = BrowserWindow.getFocusedWindow() ?? undefined
     const options: Electron.SaveDialogOptions = {

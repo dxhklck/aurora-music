@@ -5,6 +5,7 @@ import type { Playlist, Song } from '@shared/types'
 import { FAVORITES_ID } from '@shared/types'
 import { ensureDir } from '../utils'
 import { createWriteQueue, writeAtomic } from './atomic-write'
+import { syncRemotePlaylistInList, type RemoteSyncPayload } from './remote-sync'
 
 const MAX_NAME = 40
 const MAX_DESCRIPTION = 120
@@ -162,6 +163,24 @@ class PlaylistService {
   }
 
   /**
+   * 播放失败时把这首歌从所有歌单里清掉（含收藏夹）。
+   * 留在歌单里也是永远播不了的死条目，下次点开还会再失败一次。
+   */
+  async removeSongEverywhere(platform: string, songId: string): Promise<Playlist[]> {
+    const key = `${platform}:${songId}`
+    let changed = false
+    for (const playlist of this.items) {
+      const next = playlist.songs.filter((song) => keyOf(song) !== key)
+      if (next.length === playlist.songs.length) continue
+      playlist.songs = next
+      playlist.updatedAt = Date.now()
+      changed = true
+    }
+    if (changed) await this.persist()
+    return this.list()
+  }
+
+  /**
    * 本地文件被真删后，把各歌单里指向它的条目一起清掉。
    * 不清就会留下永远播不了的死条目（local 音源找不到记录直接报错）。
    * 返回实际清掉的条目数。
@@ -199,6 +218,13 @@ class PlaylistService {
     const [moved] = target.songs.splice(from, 1)
     target.songs.splice(to, 0, moved)
     // 不改 updatedAt：手动调序不应该让歌单在侧栏里跳到最前面
+    await this.persist()
+    return this.list()
+  }
+
+  /** 账号歌单同步：同平台 + 远端 id 原地更新，首次导入新建「平台 · 歌单名」 */
+  async syncRemote(payload: RemoteSyncPayload): Promise<Playlist[]> {
+    this.items = syncRemotePlaylistInList(this.items, payload)
     await this.persist()
     return this.list()
   }

@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import type { RemotePlaylistPlatform } from '@shared/api'
 import type { Playlist, Song } from '@shared/types'
 import { FAVORITES_ID } from '@shared/types'
 import { useAppStore } from './app'
@@ -77,8 +78,30 @@ export const usePlaylistStore = defineStore('playlists', () => {
     items.value = await window.api.removePlaylistSong(id, song.platform, song.id)
   }
 
+  /** 播放失败：这首歌从所有歌单（含收藏夹）一并清掉 */
+  async function removeSongEverywhere(song: Song): Promise<void> {
+    items.value = await window.api.removePlaylistSongEverywhere(song.platform, song.id)
+  }
+
   async function moveSong(id: string, song: Song, direction: 'up' | 'down'): Promise<void> {
     items.value = await window.api.movePlaylistSong(id, song.platform, song.id, direction)
+  }
+
+  /** 账号歌单同步：同一平台 + remoteId 原地更新，首次导入新建「平台 · 歌单名」 */
+  async function syncRemote(
+    platform: RemotePlaylistPlatform,
+    name: string,
+    remoteId: string,
+    songs: Song[]
+  ): Promise<Playlist | null> {
+    items.value = await window.api.syncRemotePlaylist({
+      platform,
+      name,
+      remoteId,
+      songs: plain(songs)
+    })
+    const idField = platform === 'qq' ? 'qqId' : 'neteaseId'
+    return items.value.find((item) => item[idField] === remoteId) ?? null
   }
 
   async function toggleFavorite(song: Song): Promise<void> {
@@ -115,7 +138,9 @@ export const usePlaylistStore = defineStore('playlists', () => {
     remove,
     addSongs,
     removeSong,
+    removeSongEverywhere,
     moveSong,
+    syncRemote,
     toggleFavorite,
     openPicker,
     closePicker

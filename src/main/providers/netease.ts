@@ -3,6 +3,7 @@ import type {
   Lyric,
   ProviderInfo,
   Quality,
+  RemotePlaylistSummary,
   SearchPage,
   Song,
   StreamInfo
@@ -12,6 +13,7 @@ import { BaseProvider, DESKTOP_UA } from './base'
 import { neteaseCookieHeader } from './cookies'
 import { ProviderError, type SearchArgs } from './types'
 import { mediaUrl } from '../media'
+import { settings } from '../services/settings'
 
 interface NeteaseSong {
   id: number
@@ -222,6 +224,84 @@ export class NeteaseProvider extends BaseProvider {
       { headers: { Referer: this.referer } }
     )
     return (all.songs ?? []).map((song) => this.mapSong(song))
+  }
+
+  /* ---------------- 账号歌单同步 ---------------- */
+
+  /** 当前登录账号的 uid：优先用登录时落库的资料，缺失就现场问一次 */
+  private async accountUid(): Promise<number | null> {
+    const cached = settings.get().neteaseAccount?.userId
+    if (cached) return cached
+    if (!settings.get().neteaseCookie) return null
+    try {
+      const data = await this.json<{
+        account?: { id?: number }
+        profile?: { userId?: number }
+      }>('https://music.163.com/api/nuser/account/get', { headers: { Referer: this.referer } })
+      return data.account?.id ?? data.profile?.userId ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /** 账号下的歌单列表（含「我喜欢的音乐」） */
+  async userPlaylists(): Promise<RemotePlaylistSummary[]> {
+    if (!settings.get().neteaseCookie) {
+      throw new ProviderError('unsupported', '请先登录网易云账号', this.info.id)
+    }
+    const uid = await this.accountUid()
+    if (!uid) throw new ProviderError('unsupported', '登录态可能已失效，请重新登录网易云', this.info.id)
+    const data = await this.json<{
+      code?: number
+      playlist?: Array<{
+        id: number
+        name: string
+        trackCount?: number
+        coverImgUrl?: string
+        creator?: { nickname?: string }
+      }>
+    }>(`https://music.163.com/api/user/playlist?uid=${uid}&limit=1000&offset=0`, {
+      headers: { Referer: this.referer }
+    })
+    if (data.code && data.code !== 200) {
+      throw new ProviderError('unsupported', '读取歌单失败，登录态可能已失效', this.info.id)
+    }
+    return (data.playlist ?? []).map((item) => ({
+      id: String(item.id),
+      name: item.name,
+      trackCount: item.trackCount ?? 0,
+      coverUrl: item.coverImgUrl ? `${item.coverImgUrl}?param=160y160` : null,
+      creator: item.creator?.nickname ?? ''
+    }))
+  }
+
+  /** 单个歌单的完整曲目（最多 1000 首，网易云接口上限） */
+  async userPlaylistDetail(id: string): Promise<{ name: string; songs: Song[] }> {
+    if (!settings.get().neteaseCookie) {
+      throw new ProviderError('unsupported', '请先登录网易云账号', this.info.id)
+    }
+    const data = await this.json<{
+      code?: number
+      playlist?: { name?: string; tracks?: NeteaseSong[]; trackCount?: number }
+    }>(`https://music.163.com/api/v6/playlist/detail?id=${id}&n=1000`, {
+      headers: { Referer: this.referer }
+    })
+    if (data.code && data.code !== 200) {
+      throw new ProviderError('unsupported', '读取歌单失败，登录态可能已失效', this.info.id)
+    }
+    let tracks = data.playlist?.tracks ?? []
+    // 部分歌单 detail 只回 trackIds；再走一次 all 接口补齐
+    if (!tracks.length && (data.playlist?.trackCount ?? 0) > 0) {
+      const all = await this.json<{ songs?: NeteaseSong[] }>(
+        `https://music.163.com/api/playlist/track/all?id=${id}&limit=1000&offset=0`,
+        { headers: { Referer: this.referer } }
+      )
+      tracks = all.songs ?? []
+    }
+    return {
+      name: data.playlist?.name?.trim() || '网易云歌单',
+      songs: tracks.map((song) => this.mapSong(song))
+    }
   }
 
   async resolveStream(song: Song, quality: Quality): Promise<StreamInfo> {

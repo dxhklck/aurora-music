@@ -6,6 +6,7 @@ import { audio } from '../core/audio'
 import { plain } from '../core/plain'
 import { friendlyError } from '../core/error'
 import { useAppStore } from './app'
+import { usePlaylistStore } from './playlists'
 import { useStatsStore } from './stats'
 import { cancelTts } from '../core/tts'
 import { createLatestGate } from '../core/latest'
@@ -437,8 +438,14 @@ export const usePlayerStore = defineStore('player', () => {
       error.value = friendlyError(err)
       playing.value = false
       failureStreak += 1
-      // 一首歌播不了就从当前队列移除再播下一首，连续 3 次失败后停下来等用户处理。
-      // 只改播放队列，不动本地歌单；noSkip：用户从「换一个版本」面板主动试播时不能跳——他还在挑
+      // 播不了的歌留在歌单里也是死条目：队列和所有歌单（含收藏夹）一起清掉。
+      // noSkip：用户从「换一个版本」面板主动试播时只报错，不删他歌单里的东西
+      if (!opts.noSkip) {
+        void usePlaylistStore()
+          .removeSongEverywhere(song)
+          .catch(() => undefined)
+      }
+      // 再从当前队列移除并播下一首；连续 3 次失败后停下来等用户处理
       if (!opts.noSkip && failureStreak <= 3 && queue.value.length > 1) {
         queue.value.splice(target, 1)
         index.value = Math.min(target, queue.value.length - 1)
@@ -446,7 +453,7 @@ export const usePlayerStore = defineStore('player', () => {
         saveQueue()
         error.value = ''
         updateMediaSession(queue.value[index.value] ?? null)
-        useAppStore().toast(`《${song.name}》无法播放，已从队列移除`, 'error')
+        useAppStore().toast(`《${song.name}》无法播放，已从队列与歌单移除`, 'error')
         skipTimer = window.setTimeout(() => {
           skipTimer = null
           void playAt(index.value)

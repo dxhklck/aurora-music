@@ -3,10 +3,12 @@ import type {
   ChartSummary,
   Lyric,
   Quality,
+  RemotePlaylistSummary,
   ResolvedTrack,
   SearchPage,
   Song
 } from '@shared/types'
+import type { RemotePlaylistPlatform } from '@shared/api'
 import { parseLrc } from '@shared/lyric'
 import { providers } from '../providers'
 import { ProviderError } from '../providers/types'
@@ -166,6 +168,27 @@ class CatalogService {
   async chartDetail(platform: string, id: string, page = 1, limit = 40): Promise<SearchPage> {
     const key = `chart:${platform}:${id}:${page}:${limit}`
     return chartCache.wrap(key, () => providers.get(platform).chartDetail({ id, page, limit }))
+  }
+
+  /** 当前账号下的远端歌单列表（provider 内部已完成登录态校验与字段归一化） */
+  async remotePlaylists(platform: RemotePlaylistPlatform): Promise<RemotePlaylistSummary[]> {
+    const provider = providers.get(platform)
+    if (!provider.userPlaylists) {
+      throw new ProviderError('unsupported', `${provider.info.name} 不支持导入账号歌单`, platform)
+    }
+    return provider.userPlaylists()
+  }
+
+  /** 远端歌单曲目；provider 内部统一映射成 Song */
+  async remotePlaylistDetail(
+    platform: RemotePlaylistPlatform,
+    id: string
+  ): Promise<{ name: string; songs: Song[] }> {
+    const provider = providers.get(platform)
+    if (!provider.userPlaylistDetail) {
+      throw new ProviderError('unsupported', `${provider.info.name} 不支持导入账号歌单`, platform)
+    }
+    return provider.userPlaylistDetail(id)
   }
 
   /**

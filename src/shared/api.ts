@@ -20,10 +20,14 @@ import type {
   QrLoginState,
   RecognitionResult,
   ProviderInfo,
+  RemotePlaylistSummary,
   ResolvedTrack,
   SearchPage,
   Song
 } from './types'
+
+/** 支持导入账号歌单的平台 */
+export type RemotePlaylistPlatform = 'netease' | 'qq'
 
 /** 单个音源在本次运行期间的请求成败统计 */
 export interface EngineSourceHealthView {
@@ -188,6 +192,8 @@ export interface AuroraApi {
   removePlaylist(id: string): Promise<Playlist[]>
   addPlaylistSongs(id: string, songs: Song[]): Promise<Playlist[]>
   removePlaylistSong(id: string, platform: string, songId: string): Promise<Playlist[]>
+  /** 把这首歌从所有歌单（含收藏夹）里清掉，用于播放失败后的死条目清理 */
+  removePlaylistSongEverywhere(platform: string, songId: string): Promise<Playlist[]>
   /** 歌单内换位：越界（已在顶/底）时原样返回 */
   movePlaylistSong(
     id: string,
@@ -203,6 +209,20 @@ export interface AuroraApi {
   exportPlaylistM3u(args: { id: string; name: string }): Promise<M3uExportResult>
   /** 从 M3U 导入成新歌单（会弹选择对话框），按路径匹配库内条目 */
   importPlaylistM3u(targetId?: string): Promise<M3uImportResult>
+  /** 当前账号下的远端歌单列表（需要该平台登录态） */
+  remotePlaylists(platform: RemotePlaylistPlatform): Promise<RemotePlaylistSummary[]>
+  /** 远端歌单的完整曲目（需要该平台登录态） */
+  remotePlaylistDetail(
+    platform: RemotePlaylistPlatform,
+    id: string
+  ): Promise<{ name: string; songs: Song[] }>
+  /** 把远端歌单同步为本地歌单，返回最新歌单列表 */
+  syncRemotePlaylist(payload: {
+    platform: RemotePlaylistPlatform
+    name: string
+    remoteId: string
+    songs: Song[]
+  }): Promise<Playlist[]>
 
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>

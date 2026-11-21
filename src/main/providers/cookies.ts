@@ -40,6 +40,21 @@ export function extractQQUin(cookie = qqCookie): string {
   return match ? match[1] : ''
 }
 
+/**
+ * QQ 音乐 Web 接口用 p_skey/qm_keyst 等登录 Cookie 算 CSRF token（g_tk）。
+ * 拿不到登录 Cookie 时返回 5381（匿名值）；接口会自己返回未登录提示。
+ */
+export function qqGtk(cookie = qqCookie): number {
+  const skey =
+    cookie.match(/(?:^|;\s*)p_skey=([^;]+)/i)?.[1] ??
+    cookie.match(/(?:^|;\s*)skey=([^;]+)/i)?.[1] ??
+    cookie.match(/(?:^|;\s*)qm_keyst=([^;]+)/i)?.[1] ??
+    ''
+  let hash = 5381
+  for (const char of skey) hash = (hash << 5) + hash + char.charCodeAt(0)
+  return hash & 0x7fffffff
+}
+
 /** 统一换行/首尾空白，避免用户粘贴时带进 \r\n 把请求头搞坏 */
 function normalizeCookie(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim()
