@@ -7,7 +7,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Playlist, Song } from '../src/shared/types.ts'
-import { syncRemotePlaylistInList } from '../src/main/services/remote-sync.ts'
+import {
+  applyRemoteSyncInList,
+  planRemoteSyncInList,
+  syncRemotePlaylistInList
+} from '../src/main/services/remote-sync.ts'
 
 function song(platform: string, id: string, name = `曲目 ${id}`): Song {
   return {
@@ -103,4 +107,85 @@ test('既有歌单列表不被修改', () => {
   )
   assert.equal(list.length, 0, '纯函数不应修改入参')
   assert.equal(result.length, 1)
+})
+
+test('差异计划列出新增与远端删减，默认保留删减曲目', () => {
+  const first = syncRemotePlaylistInList(
+    [],
+    { platform: 'netease', name: '歌单', remoteId: '1', songs: [song('netease', 'a'), song('netease', 'b')] },
+    1_000
+  )
+  const { plan } = planRemoteSyncInList(
+    first,
+    { platform: 'netease', name: '歌单', remoteId: '1', songs: [song('netease', 'a'), song('netease', 'c')] },
+    2_000
+  )
+  assert.deepEqual(
+    plan.added.map((item) => item.id),
+    ['c']
+  )
+  assert.deepEqual(
+    plan.keptMissing.map((item) => item.id),
+    ['b']
+  )
+  assert.equal(plan.missingCount, 1)
+
+  const { result, list } = applyRemoteSyncInList(
+    first,
+    {
+      platform: 'netease',
+      name: '歌单',
+      remoteId: '1',
+      songs: [song('netease', 'a'), song('netease', 'c')],
+      deleteRemoteMissing: false
+    },
+    3_000
+  )
+  assert.deepEqual(
+    result.playlist.songs.map((item) => item.id),
+    ['a', 'c', 'b']
+  )
+  assert.equal(result.removed.length, 0)
+  assert.equal(result.playlist.lastSyncAt, 3_000)
+  assert.equal(list[0].id, first[0].id)
+})
+
+test('确认后只从当前远端歌单移除删减曲目', () => {
+  const first = syncRemotePlaylistInList(
+    [
+      {
+        id: 'other',
+        name: '其他歌单',
+        songs: [song('netease', 'b')],
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ],
+    { platform: 'qq', name: '歌单', remoteId: '8', songs: [song('qq', 'a'), song('qq', 'b')] },
+    1_000
+  )
+  const { result, list } = applyRemoteSyncInList(
+    first,
+    {
+      platform: 'qq',
+      name: '歌单',
+      remoteId: '8',
+      songs: [song('qq', 'a')],
+      deleteRemoteMissing: true
+    },
+    2_000
+  )
+  assert.deepEqual(
+    result.playlist.songs.map((item) => item.id),
+    ['a']
+  )
+  assert.deepEqual(
+    result.removed.map((item) => item.id),
+    ['b']
+  )
+  assert.deepEqual(
+    list.find((item) => item.id === 'other')?.songs.map((item) => item.id),
+    ['b'],
+    '其他歌单不能被同步删歌影响'
+  )
 })

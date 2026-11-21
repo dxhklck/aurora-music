@@ -2,6 +2,16 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/ipc'
 import type { AuroraApi } from '../shared/api'
 
+/** Error 跨 IPC 会丢原型链，只传主进程需要的字段 */
+function toErrorPayload(error: unknown): { code?: string; provider?: string; message: string } {
+  const value = error as { code?: string; provider?: string } | null
+  return {
+    code: value?.code,
+    provider: value?.provider,
+    message: error instanceof Error ? error.message : String(error ?? '')
+  }
+}
+
 const api: AuroraApi = {
   platform: process.platform,
   providers: () => ipcRenderer.invoke(IPC.providerList),
@@ -38,11 +48,15 @@ const api: AuroraApi = {
   engineRestart: () => ipcRenderer.invoke(IPC.engineRestart),
   sourceHealth: () => ipcRenderer.invoke(IPC.sourceHealth),
   sourceHealthRefresh: () => ipcRenderer.invoke(IPC.sourceHealthRefresh),
+  sourceRecentFailures: () => ipcRenderer.invoke(IPC.sourceRecentFailures),
+  reportSourceFailure: (song, error) =>
+    ipcRenderer.invoke(IPC.sourceReportFailure, { song, error: toErrorPayload(error) }),
 
   listLibrary: () => ipcRenderer.invoke(IPC.libraryList),
   removeLibrary: (id) => ipcRenderer.invoke(IPC.libraryRemove, id),
   updateLibraryMeta: (id, patch) => ipcRenderer.invoke(IPC.libraryUpdateMeta, id, patch),
   updateLibraryMetaMany: (ids, patch) => ipcRenderer.invoke(IPC.libraryUpdateMetaMany, ids, patch),
+  chooseLibraryCover: () => ipcRenderer.invoke(IPC.libraryChooseCover),
   copyLibraryFiles: (ids) => ipcRenderer.invoke(IPC.libraryCopyFiles, ids),
   refreshLibrary: () => ipcRenderer.invoke(IPC.libraryRefresh),
   revealLibrary: (id) => ipcRenderer.invoke(IPC.libraryReveal, id),
@@ -84,6 +98,8 @@ const api: AuroraApi = {
   remotePlaylistDetail: (platform, id) =>
     ipcRenderer.invoke(IPC.playlistRemoteDetail, { platform, id }),
   syncRemotePlaylist: (payload) => ipcRenderer.invoke(IPC.playlistSyncRemote, payload),
+  planRemoteSyncPlaylist: (payload) => ipcRenderer.invoke(IPC.playlistSyncPlan, payload),
+  applyRemoteSyncPlaylist: (payload) => ipcRenderer.invoke(IPC.playlistSyncApply, payload),
 
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),

@@ -10,10 +10,14 @@ import {
   activeDays,
   dayKey,
   formatListenTime,
+  hourBuckets,
   lastDays,
   listenStreak,
+  monthListenMs,
   platformBreakdown,
-  topSongs
+  topArtists,
+  topSongs,
+  yearlyMonths
 } from '../src/renderer/src/views/stats/aggregate.ts'
 import type { Song } from '../src/shared/types.ts'
 
@@ -129,4 +133,33 @@ test('时长格式化', () => {
   assert.equal(formatListenTime(90_000), '1 分钟')
   assert.equal(formatListenTime(3 * 3600_000 + 20 * 60_000), '3 小时 20 分钟')
   assert.equal(formatListenTime(2 * 3600_000), '2 小时')
+})
+
+test('月度汇总优先，旧数据按日明细兜底', () => {
+  const snapshot = {
+    songs: {},
+    days: { '2026-01-01': 1000, '2026-01-31': 2000 },
+    monthly: { '2026-01': 9000 }
+  }
+  assert.equal(monthListenMs(snapshot, 2026, 0), 9000)
+  assert.equal(monthListenMs({ songs: {}, days: snapshot.days }, 2026, 0), 3000)
+  const year = yearlyMonths(snapshot, 2026)
+  assert.equal(year.length, 12)
+  assert.equal(year[0].ms, 9000)
+  assert.equal(year[1].ms, 0)
+})
+
+test('歌手偏好合并同名歌手，时段补齐 24 小时', () => {
+  const songs = {
+    a: stat(3, 1, song({ artists: ['周杰伦', '其他'] })),
+    b: stat(2, 1, song({ id: 'b', artists: ['周杰伦'] }))
+  }
+  assert.deepEqual(topArtists(songs, 2), [
+    { name: '周杰伦', count: 5 },
+    { name: '其他', count: 3 }
+  ])
+  const hours = hourBuckets({ '9': 4, '23': 1 })
+  assert.equal(hours.length, 24)
+  assert.equal(hours[9].count, 4)
+  assert.equal(hours[0].count, 0)
 })

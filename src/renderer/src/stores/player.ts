@@ -436,6 +436,9 @@ export const usePlayerStore = defineStore('player', () => {
       // 过期请求的失败不该报错、也不该触发自动跳过（用户已经去点别的歌了）
       if (!playGate.isCurrent(token)) return
       error.value = friendlyError(err)
+      void window.api
+        .reportSourceFailure(plain(song), err)
+        .catch(() => undefined)
       playing.value = false
       failureStreak += 1
       // 播不了的歌留在歌单里也是死条目：队列和所有歌单（含收藏夹）一起清掉。

@@ -1,9 +1,9 @@
 /**
  * 收听报告的聚合计算（纯函数）。
  *
- * 数据早就在 `stores/stats.ts` 里存着了（歌曲封顶 300 条、天数封顶 90 天），
+ * 数据早就在 `stores/stats.ts` 里存着了（歌曲 300 条、天数 365 天、月度汇总长期保留），
  * 但界面只露出「本周最常听」8 首。这里把同一份数据换成几种看法：
- * 日历热力图、本月 Top N、来源分布、连续收听天数。
+ * 日历热力图、月/年视图、歌手偏好、听歌时段、来源分布、连续收听天数。
  *
  * 放纯函数是因为「日期边界」这类 bug 只能靠测试抓：
  * 本地日期不能用 toISOString（UTC 会让凌晨的记录记到前一天），
@@ -21,6 +21,8 @@ export interface SongStatLike {
 export interface StatsSnapshot {
   songs: Record<string, SongStatLike>
   days: Record<string, number>
+  hours?: Record<string, number>
+  monthly?: Record<string, number>
 }
 
 export interface DayPoint {
@@ -123,6 +125,49 @@ export function listenStreak(days: Record<string, number>, today = new Date()): 
     cursor += 1
   }
   return streak
+}
+
+/** 本地月份键：`YYYY-MM`，不用 toISOString 避免 UTC 跨月 */
+export function monthKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** 某月的收听毫秒：优先月度汇总，旧数据没有汇总时按日明细兜底 */
+export function monthListenMs(snapshot: StatsSnapshot, year: number, month: number): number {
+  const key = `${year}-${String(month + 1).padStart(2, '0')}`
+  const stored = snapshot.monthly?.[key]
+  if (typeof stored === 'number') return stored
+  let sum = 0
+  for (const [day, ms] of Object.entries(snapshot.days)) {
+    if (day.startsWith(`${key}-`)) sum += ms
+  }
+  return sum
+}
+
+/** 一年的 12 个月收听时长，供年度视图画图 */
+export function yearlyMonths(snapshot: StatsSnapshot, year: number): Array<{ month: number; ms: number }> {
+  return Array.from({ length: 12 }, (_, month) => ({ month: month + 1, ms: monthListenMs(snapshot, year, month) }))
+}
+
+/** 歌手偏好：同名歌手合并播放次数，按次数降序 */
+export function topArtists(songs: Record<string, SongStatLike>, limit: number): Array<{ name: string; count: number }> {
+  const totals = new Map<string, number>()
+  for (const stat of Object.values(songs)) {
+    for (const name of stat.song.artists ?? []) {
+      const trimmed = name.trim()
+      if (!trimmed) continue
+      totals.set(trimmed, (totals.get(trimmed) ?? 0) + stat.count)
+    }
+  }
+  return [...totals.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, Math.max(0, Math.trunc(limit)))
+}
+
+/** 听歌时段：0-23 点开始播放的次数，缺数据的小时补 0 */
+export function hourBuckets(hours: Record<string, number> = {}): Array<{ hour: number; count: number }> {
+  return Array.from({ length: 24 }, (_, hour) => ({ hour, count: Math.max(0, hours[String(hour)] ?? 0) }))
 }
 
 /** 一天里最常听的那个小时由心跳决定，这里只给日总量格式化 */

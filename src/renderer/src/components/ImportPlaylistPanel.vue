@@ -8,10 +8,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import CoverArt from './CoverArt.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import { useAppStore } from '../stores/app'
 import { usePlaylistStore } from '../stores/playlists'
 import { friendlyError } from '../core/error'
 import type { RemotePlaylistPlatform } from '@shared/api'
+import type { RemoteSyncPlan } from '@shared/types'
 import type { RemotePlaylistSummary } from '@shared/types'
 
 const visible = defineModel<boolean>('visible', { default: false })
@@ -24,6 +26,7 @@ const loading = ref(false)
 const error = ref('')
 const lists = ref<RemotePlaylistSummary[]>([])
 const busyId = ref('')
+const pendingPlan = ref<{ item: RemotePlaylistSummary; songs: RemoteSyncPlan['added'] } | null>(null)
 
 const platformName = computed(() => (platform.value === 'qq' ? 'QQ 音乐' : '网易云音乐'))
 const loggedIn = computed(() =>
@@ -59,7 +62,7 @@ function switchPlatform(value: RemotePlaylistPlatform): void {
   if (visible.value && loggedIn.value) void load()
 }
 
-async function sync(item: RemotePlaylistSummary): Promise<void> {
+async function sync(item: RemotePlaylistSummary, deleteRemoteMissing = false): Promise<void> {
   if (busyId.value) return
   busyId.value = item.id
   try {
@@ -69,13 +72,38 @@ async function sync(item: RemotePlaylistSummary): Promise<void> {
       return
     }
     const existed = synced(item.id)
-    await playlists.syncRemote(platform.value, detail.name, item.id, detail.songs)
-    app.toast(`已${existed ? '更新' : '导入'}《${detail.name}》· ${detail.songs.length} 首`, 'success')
+    if (!deleteRemoteMissing) {
+      const plan = await playlists.planRemoteSync(platform.value, detail.name, item.id, detail.songs)
+      if (plan.missingCount) {
+        pendingPlan.value = { item, songs: detail.songs }
+        return
+      }
+    }
+    const result = await playlists.applyRemoteSync(
+      platform.value,
+      detail.name,
+      item.id,
+      detail.songs,
+      deleteRemoteMissing
+    )
+    const parts = [
+      `已${existed ? '更新' : '导入'}《${result.playlist.name.replace(/^[^·]+·\s*/, '')}》`,
+      `新增 ${result.added.length} 首`
+    ]
+    if (result.removed.length) parts.push(`移除 ${result.removed.length} 首`)
+    app.toast(parts.join(' · '), 'success')
   } catch (err) {
     app.toast(friendlyError(err), 'error')
   } finally {
     busyId.value = ''
   }
+}
+
+async function confirmDeleteMissing(): Promise<void> {
+  const pending = pendingPlan.value
+  if (!pending) return
+  pendingPlan.value = null
+  await sync(pending.item, true)
 }
 
 function login(): void {
@@ -182,6 +210,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         </div>
       </div>
     </transition>
+
+    <ConfirmDialog
+      v-if="pendingPlan"
+      title="远端歌单有删减"
+      confirm-text="移除这些歌曲"
+      cancel-text="保留本地歌曲"
+      danger
+      @confirm="confirmDeleteMissing"
+      @cancel="pendingPlan = null"
+    >
+      <p>《{{ pendingPlan.item.name }}》在远端少了歌曲，默认会从本地歌单中保留这些歌。</p>
+      <p v-if="pendingPlan.songs.length">确认后只从当前导入的歌单里移除，不会影响收藏夹和其他歌单。</p>
+    </ConfirmDialog>
   </Teleport>
 </template>
 

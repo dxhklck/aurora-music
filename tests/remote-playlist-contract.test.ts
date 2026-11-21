@@ -21,6 +21,9 @@ test('Playlist 持久化远端 id 与摘要类型', async () => {
   assert.ok(playlist, '找不到 Playlist 接口')
   assert.match(playlist[0], /neteaseId\?: string/, 'Playlist 缺少 neteaseId 字段')
   assert.match(playlist[0], /qqId\?: string/, 'Playlist 缺少 qqId 字段')
+  assert.match(playlist[0], /lastSyncAt\?: number/, 'Playlist 缺少 lastSyncAt 字段')
+  assert.match(types, /export interface RemoteSyncPlan \{/, '缺少 RemoteSyncPlan 类型')
+  assert.match(types, /export interface RemoteSyncResult \{/, '缺少 RemoteSyncResult 类型')
 
   const summary = types.match(/export interface RemotePlaylistSummary \{[\s\S]*?\n\}/)
   assert.ok(summary, '缺少 RemotePlaylistSummary 类型')
@@ -66,7 +69,9 @@ test('IPC 三通道定义唯一，并在 preload / main 对齐', async () => {
   const channels: Record<string, string> = {
     playlistRemoteList: 'playlist:remote-list',
     playlistRemoteDetail: 'playlist:remote-detail',
-    playlistSyncRemote: 'playlist:sync-remote'
+    playlistSyncRemote: 'playlist:sync-remote',
+    playlistSyncPlan: 'playlist:sync-plan',
+    playlistSyncApply: 'playlist:sync-apply'
   }
   for (const [key, value] of Object.entries(channels)) {
     assert.match(ipc, new RegExp(`${key}: '${value}'`), `IPC 缺少 ${key}`)
@@ -88,6 +93,8 @@ test('AuroraApi 与 catalog 暴露远端歌单能力', async () => {
   assert.match(api, /remotePlaylists\(platform: RemotePlaylistPlatform\)/, '缺少 remotePlaylists 声明')
   assert.match(api, /remotePlaylistDetail\([\s\S]*?platform: RemotePlaylistPlatform/, '缺少 remotePlaylistDetail 声明')
   assert.match(api, /syncRemotePlaylist\(payload:/, '缺少 syncRemotePlaylist 声明')
+  assert.match(api, /planRemoteSyncPlaylist\(payload:/, '缺少 planRemoteSyncPlaylist 声明')
+  assert.match(api, /applyRemoteSyncPlaylist\(payload:/, '缺少 applyRemoteSyncPlaylist 声明')
 
   const catalog = await source('src/main/services/catalog.ts')
   assert.match(catalog, /async remotePlaylists\(/, 'catalog 缺少 remotePlaylists')
@@ -95,4 +102,6 @@ test('AuroraApi 与 catalog 暴露远端歌单能力', async () => {
 
   const playlists = await source('src/main/services/playlists.ts')
   assert.match(playlists, /async syncRemote\(/, '歌单服务缺少 syncRemote')
+  assert.match(playlists, /planRemoteSync\(/, '歌单服务缺少 planRemoteSync')
+  assert.match(playlists, /async applyRemoteSync\(/, '歌单服务缺少 applyRemoteSync')
 })

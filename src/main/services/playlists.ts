@@ -1,11 +1,17 @@
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import type { Playlist, Song } from '@shared/types'
+import type { Playlist, RemoteSyncPlan, RemoteSyncResult, Song } from '@shared/types'
 import { FAVORITES_ID } from '@shared/types'
 import { ensureDir } from '../utils'
 import { createWriteQueue, writeAtomic } from './atomic-write'
-import { syncRemotePlaylistInList, type RemoteSyncPayload } from './remote-sync'
+import {
+  applyRemoteSyncInList,
+  planRemoteSyncInList,
+  syncRemotePlaylistInList,
+  type RemoteSyncApplyPayload,
+  type RemoteSyncPayload
+} from './remote-sync'
 
 const MAX_NAME = 40
 const MAX_DESCRIPTION = 120
@@ -227,6 +233,19 @@ class PlaylistService {
     this.items = syncRemotePlaylistInList(this.items, payload)
     await this.persist()
     return this.list()
+  }
+
+  /** 只生成差异计划，不落盘；远端删歌默认保留 */
+  planRemoteSync(payload: RemoteSyncPayload): RemoteSyncPlan {
+    return planRemoteSyncInList(this.items, payload).plan
+  }
+
+  /** 按确认结果落盘差异，只影响当前远端歌单 */
+  async applyRemoteSync(payload: RemoteSyncApplyPayload): Promise<RemoteSyncResult> {
+    const { result, list } = applyRemoteSyncInList(this.items, payload)
+    this.items = list
+    await this.persist()
+    return result
   }
 
   /** 返回操作后是否处于「已收藏」状态 */

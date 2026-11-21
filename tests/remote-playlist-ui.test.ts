@@ -30,7 +30,12 @@ test('面板含平台切换/登录引导/VIP 提示/无分享链接输入/无下
   }
   assert.ok(panel.includes('window.api.remotePlaylists'), '未读取远端歌单列表')
   assert.ok(panel.includes('window.api.remotePlaylistDetail'), '未读取歌单详情')
-  assert.ok(panel.includes('playlists.syncRemote'), '未调用 store 同步')
+  assert.ok(
+    panel.includes('playlists.planRemoteSync') && panel.includes('playlists.applyRemoteSync'),
+    '未调用差异计划 / 应用同步'
+  )
+  assert.ok(panel.includes('ConfirmDialog'), '远端删歌缺少确认弹窗')
+  assert.ok(panel.includes('默认会从本地歌单中保留这些歌'), '缺少默认保留提示')
   assert.ok(!/placeholder="[^"]*分享/.test(panel), '本期不做分享链接输入')
   assert.ok(!panel.includes('parseQqPlaylistId'), '本期不做分享链接解析')
   assert.ok(!/enqueueDownload|download\(/.test(panel), '导入歌单不应触发下载')

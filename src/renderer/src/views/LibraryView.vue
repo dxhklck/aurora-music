@@ -359,6 +359,8 @@ const metaOpen = ref(false)
 const metaIds = ref<string[]>([])
 const metaArtists = ref('')
 const metaAlbum = ref('')
+const metaName = ref('')
+const metaCoverPath = ref('')
 const metaBusy = ref(false)
 
 /** 菜单里的危险项文案：全可删就是「删除文件」，混合来源要说清删几个、移除几个 */
@@ -377,6 +379,8 @@ function askMeta(items: LibraryTrack[]): void {
   metaIds.value = items.map((item) => item.id)
   metaArtists.value = ''
   metaAlbum.value = ''
+  metaName.value = ''
+  metaCoverPath.value = ''
   metaOpen.value = true
 }
 
@@ -702,20 +706,27 @@ async function saveEditor(): Promise<void> {
   }
 }
 
+async function chooseMetaCover(): Promise<void> {
+  metaCoverPath.value = await window.api.chooseLibraryCover()
+}
+
 async function runMeta(): Promise<void> {
   const ids = [...metaIds.value]
   const artists = metaArtists.value.trim()
   const album = metaAlbum.value.trim()
+  const name = ids.length === 1 ? metaName.value.trim() : ''
   if (!ids.length) return
-  if (!artists && !album) {
-    app.toast('歌手和专辑都空着，没有要改的内容', 'info')
+  if (!artists && !album && !name && !metaCoverPath.value) {
+    app.toast('所有字段都空着，没有要改的内容', 'info')
     return
   }
   metaBusy.value = true
   try {
     const result = await library.updateMetaMany(ids, {
       ...(artists ? { artists } : {}),
-      ...(album ? { album } : {})
+      ...(album ? { album } : {}),
+      ...(name ? { name } : {}),
+      ...(metaCoverPath.value ? { coverPath: metaCoverPath.value } : {})
     })
     metaOpen.value = false
     tableRef.value?.clearSelection()
@@ -1077,6 +1088,10 @@ function openTargetDir(): void {
       @confirm="runMeta"
     >
       <p>只改动填写的字段，留空的保持原样；同时写入文件标签与音乐库索引。</p>
+      <label v-if="metaIds.length === 1" class="field">
+        <span>歌名</span>
+        <input v-model="metaName" maxlength="120" placeholder="留空则不修改" />
+      </label>
       <label class="field">
         <span>歌手</span>
         <input v-model="metaArtists" maxlength="120" placeholder="多个歌手用 / 分隔" />
@@ -1085,7 +1100,13 @@ function openTargetDir(): void {
         <span>专辑</span>
         <input v-model="metaAlbum" maxlength="120" placeholder="留空则不修改" />
       </label>
-      <p class="hint">歌名逐首不同，不参与批量修改；要改歌名请用单首的「编辑歌曲信息」。</p>
+      <label class="field">
+        <span>封面</span>
+        <button class="btn" @click="chooseMetaCover">
+          {{ metaCoverPath ? '已选择图片，点此更换' : '选择本地图片' }}
+        </button>
+      </label>
+      <p class="hint">歌名只在选中 1 首时可改；封面可一次应用到所有选中曲目。</p>
     </ConfirmDialog>
 
     <!-- 重复文件 -->

@@ -97,6 +97,18 @@ export const IPC = {
   playlistRemoteDetail: 'playlist:remote-detail',
   /** 把远端歌单同步为本地歌单（同平台 + 远端 id 原地更新） */
   playlistSyncRemote: 'playlist:sync-remote',
+  /** 生成账号歌单差异计划，不落盘 */
+  playlistSyncPlan: 'playlist:sync-plan',
+  /** 按差异计划落盘，支持确认后删除远端已移除的歌曲 */
+  playlistSyncApply: 'playlist:sync-apply',
+
+  /** 选择本地图片用于批量封面 */
+  libraryChooseCover: 'library:choose-cover',
+
+  /** 最近的单曲播放失败记录 */
+  sourceRecentFailures: 'source:recent-failures',
+  /** 单曲播放失败上报 */
+  sourceReportFailure: 'source:report-failure',
 
   // 设置
   settingsGet: 'settings:get',

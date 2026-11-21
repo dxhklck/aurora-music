@@ -16,6 +16,7 @@ import { TtlCache } from './cache'
 import { settings } from './settings'
 import { SourceScoreboard } from './source-score'
 import { snapshot as sourceHealthSnapshot } from './source-health'
+import { loggedInPriorities, recordFailure } from './source-failures'
 import { dedupeAlternatives, normalize, rankMatches } from './match'
 
 const searchCache = new TtlCache<SearchPage>(3 * 60_000, 120)
@@ -227,6 +228,7 @@ class CatalogService {
       // 只有传输/解析类失败才拉低分数；没版权（blocked）是「这首歌」的问题，不是源的
       if (error instanceof ProviderError && (error.code === 'network' || error.code === 'parse')) {
         scoreboard.record(provider.info.id, Date.now() - started, false)
+        recordFailure(song, error.code, error.message, provider.info.id)
       }
       if (!autoSwitch) throw this.normalizeError(error, provider.info.name)
       const alternative = await this.findAlternative(song, quality)
@@ -372,6 +374,7 @@ class CatalogService {
     // 引擎单次搜索可能几十秒，无节制地遍历 15 个源会让「换源」变成「卡死」。
     // 用户显式指定的优先源压在最前——实测分数只是默认排序，不能盖过人工偏好。
     const preferred = new Set(settings.get().preferredSources)
+    const loggedIn = new Set(loggedInPriorities(settings.get()))
     const demoted = demotedSources()
     const candidates = providers
       .streamCandidates(song.platform)
@@ -379,6 +382,9 @@ class CatalogService {
       .sort((a, b) => {
         const byPrefer = Number(!preferred.has(a.info.id)) - Number(!preferred.has(b.info.id))
         if (byPrefer !== 0) return byPrefer
+        // 用户已登录的平台更可能播会员歌，但显式优先源仍然压过它
+        const byLogin = Number(!loggedIn.has(a.info.id)) - Number(!loggedIn.has(b.info.id))
+        if (byLogin !== 0) return byLogin
         // 巡检判定挂掉的源排最后：人工指定优先源仍然压过这条
         const byHealth = Number(demoted.has(a.info.id)) - Number(demoted.has(b.info.id))
         if (byHealth !== 0) return byHealth
@@ -431,6 +437,9 @@ class CatalogService {
         return { song: match, stream }
       } catch (error) {
         scoreboard.record(candidate.info.id, Date.now() - started, false)
+        if (error instanceof ProviderError && (error.code === 'network' || error.code === 'parse')) {
+          recordFailure(song, error.code, error.message, candidate.info.id)
+        }
         // 只有传输/解析层面的失败才熔断。blocked（没版权）、empty、unsupported 都是
         // 「这首歌不行」，熔断它们等于因为一首 VIP 歌把整个平台拉黑
         if (error instanceof ProviderError && (error.code === 'network' || error.code === 'parse')) {

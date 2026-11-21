@@ -108,10 +108,10 @@ export const useLibraryStore = defineStore('library', () => {
     app.toast(paths.length > 1 ? `已复制 ${paths.length} 条路径` : '路径已复制', 'success')
   }
 
-  /** 批量改标签：缺省字段保持原样，歌名不参与（逐首不同） */
+  /** 批量改标签：缺省字段保持原样；歌名只在单选时有效，封面可多选 */
   async function updateMetaMany(
     ids: string[],
-    patch: { artists?: string; album?: string }
+    patch: { artists?: string; album?: string; name?: string; coverPath?: string }
   ): Promise<LibraryOpReport | null> {
     if (!ids.length) return null
     const report = await window.api.updateLibraryMetaMany(ids, patch)

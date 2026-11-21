@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { RemotePlaylistPlatform } from '@shared/api'
-import type { Playlist, Song } from '@shared/types'
+import type { Playlist, RemoteSyncPlan, RemoteSyncResult, Song } from '@shared/types'
 import { FAVORITES_ID } from '@shared/types'
 import { useAppStore } from './app'
 import { plain } from '../core/plain'
@@ -104,6 +104,35 @@ export const usePlaylistStore = defineStore('playlists', () => {
     return items.value.find((item) => item[idField] === remoteId) ?? null
   }
 
+  async function planRemoteSync(
+    platform: RemotePlaylistPlatform,
+    name: string,
+    remoteId: string,
+    songs: Song[]
+  ): Promise<RemoteSyncPlan> {
+    return window.api.planRemoteSyncPlaylist({ platform, name, remoteId, songs: plain(songs) })
+  }
+
+  async function applyRemoteSync(
+    platform: RemotePlaylistPlatform,
+    name: string,
+    remoteId: string,
+    songs: Song[],
+    deleteRemoteMissing: boolean
+  ): Promise<RemoteSyncResult> {
+    const result = await window.api.applyRemoteSyncPlaylist({
+      platform,
+      name,
+      remoteId,
+      songs: plain(songs),
+      deleteRemoteMissing
+    })
+    items.value = await window.api.listPlaylists()
+    const idField = platform === 'qq' ? 'qqId' : 'neteaseId'
+    const playlist = items.value.find((item) => item[idField] === remoteId) ?? result.playlist
+    return { ...result, playlist }
+  }
+
   async function toggleFavorite(song: Song): Promise<void> {
     const result = await window.api.toggleFavorite(plain(song))
     items.value = result.list
@@ -141,6 +170,8 @@ export const usePlaylistStore = defineStore('playlists', () => {
     removeSongEverywhere,
     moveSong,
     syncRemote,
+    planRemoteSync,
+    applyRemoteSync,
     toggleFavorite,
     openPicker,
     closePicker
