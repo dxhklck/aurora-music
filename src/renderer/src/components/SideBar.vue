@@ -7,6 +7,7 @@ import { usePlayerStore } from '../stores/player'
 import { useDownloadStore } from '../stores/download'
 import { usePlaylistStore } from '../stores/playlists'
 import { useM3uFlow } from '../composables/m3u'
+import CloudPlaylistDialog from './CloudPlaylistDialog.vue'
 
 const app = useAppStore()
 const player = usePlayerStore()
@@ -18,6 +19,8 @@ const open = ref(false)
 const panel = ref<HTMLElement | null>(null)
 /* M3U 歌单导入：与歌单详情页 M3U 菜单共用一套流程（见 composables/m3u） */
 const m3u = useM3uFlow()
+/* 云端歌单导入对话框（网易云 / QQ 账号歌单） */
+const cloudOpen = ref(false)
 
 const navs = [
   { name: 'discover', to: '/', label: '发现音乐', icon: 'home' },
@@ -120,8 +123,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         </button>
         <button
           class="nav-item as-button"
-          title="从 M3U 文件导入歌单，按本地库里的文件匹配"
-          @click="m3u.importM3u()"
+          title="从网易云 / QQ 音乐账号或 M3U 文件导入歌单"
+          @click="cloudOpen = true"
         >
           <Icon name="export" :size="16" />
           <span>导入歌单</span>
@@ -182,6 +185,9 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         </div>
       </transition>
     </div>
+
+    <!-- 云端歌单导入：账号歌单（网易云 / QQ）与 M3U 文件两个入口 -->
+    <CloudPlaylistDialog :open="cloudOpen" @close="cloudOpen = false" @m3u="m3u.importM3u()" />
   </aside>
 </template>
 
