@@ -73,6 +73,12 @@ linux:
   synopsis: 跨平台桌面音乐播放器
   description: 多音源统一适配的沉浸式音乐播放器，支持搜索、榜单、下载与逐行歌词。
   artifactName: Aurora-Music-${version}-${arch}.${ext}
+  # 桌面入口 Exec 追加 --ozone-platform=x11：Electron 38+ 在 Wayland 会话默认原生
+  # Wayland，fcitx4（国产系统主流输入法框架，仅 XIM）无法接入 → 打不出中文。
+  # 强制 XWayland 一步到位；纯 X11 会话不受影响，无 XWayland 的极端环境由
+  # 主进程自愈逻辑兜底（见 src/main/index.ts 的 ozone 检测与重启）。
+  executableArgs:
+    - --ozone-platform=x11
   # Linux 应用菜单/任务栏图标：deb 需要 icons/ 下的多尺寸 PNG（freedesktop 规范），
   # 只给 1024 大图时部分桌面环境（麒麟 UKUI 等）不缩放，菜单里就是空白
   icon: build/icons
