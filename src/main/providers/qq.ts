@@ -417,7 +417,8 @@ export class QQProvider extends BaseProvider {
       throw new ProviderError('unsupported', '读取 QQ 音乐歌单失败，登录态可能已失效', this.info.id)
     }
     return (data.data?.disslist ?? [])
-      .filter((item) => item.tid != null && item.diss_name)
+      // tid=0 是「QZone 背景音乐 / 本地上传」等系统条目，不是真实歌单，导入必失败
+      .filter((item) => item.tid != null && Number(item.tid) > 0 && item.diss_name)
       .map((item) => ({
         id: String(item.tid),
         name: String(item.diss_name),
@@ -441,12 +442,19 @@ export class QQProvider extends BaseProvider {
           type: '1',
           json: '1',
           utf8: '1',
-          onlysong: '1',
+          // 实测（2026-11-24，扫码登录 Cookie）：onlysong=1 时 cdlist 返回空，
+          // onlysong=0 + g_tk + loginUin + platform=yqq 才返回全量曲目（含 songmid 等完整字段）
+          onlysong: '0',
           disstid: id,
           uin,
+          loginUin: uin,
+          g_tk: String(qqGtk()),
+          notice: '0',
+          needNewCode: '0',
+          platform: 'yqq',
           format: 'json'
         }).toString(),
-      { headers: { Referer: this.referer } }
+      { headers: { Referer: 'https://c.y.qq.com/' } }
     )
     if (data.code && data.code !== 0) {
       throw new ProviderError('unsupported', '读取 QQ 音乐歌单失败，登录态可能已失效', this.info.id)
