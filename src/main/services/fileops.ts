@@ -121,7 +121,9 @@ export async function openTrash(): Promise<void> {
     await run('open', [join(homedir(), '.Trash')]).catch(() => undefined)
     return
   }
-  await shell.openPath(homedir())
+  // Linux：xdg-open trash:/// 打开文件管理器的回收站视图（gvfs 提供，麒麟/统信自带）。
+  // 以前这里 openPath(homedir()) 打开的是主目录，用户会以为回收站丢了。
+  await run('xdg-open', ['trash:///']).catch(() => shell.openPath(homedir()))
 }
 
 function messageOf(error: unknown): string {

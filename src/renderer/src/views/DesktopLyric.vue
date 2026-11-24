@@ -117,11 +117,12 @@ function close(): void {
 }
 
 /* ---------------- 手动拖拽 ----------------
-   Windows：透明无边框窗口上 -webkit-app-region: drag 不可靠，
-   改为上报光标位移、主进程移动窗口（见 windows.ts lyricDragStart）。
-   Linux/Wayland（麒麟等）：Wayland 禁止程序自行挪窗口，setBounds 拖动无效，
-   但系统拖拽热区是合成器原生的、可靠——平台分治，非 win32 走 app-region。 */
-const manualDrag = window.api.platform === 'win32'
+   Windows 与麒麟/海思（XWayland）：透明无边框窗口上 -webkit-app-region: drag
+   不可靠（整块失效 / 只认有像素的位置），且窗口 setBounds 变高后热区会错位
+   （迷你条同源问题）。统一改手动拖拽：上报光标位移、主进程移动窗口——
+   应用跑 XWayland（index.ts 强制 --ozone-platform=x11），setBounds 有效。
+   darwin 仍走 app-region 系统热区。 */
+const manualDrag = window.api.platform === 'win32' || window.api.platform === 'linux'
 let dragging = false
 let dragStarted = false
 let dragStartX = 0
@@ -297,8 +298,7 @@ onBeforeUnmount(() => {
     @mousemove="onWinMouseMove"
     @mouseleave="onWinMouseLeave"
   >
-    <!-- 非 Windows（Wayland 等）：程序不能挪窗口，拖动交给系统热区；
-         Windows 保持 no-drag（手动 IPC 拖动），动态类由 App.vue 的 data-platform 决定 -->
+    <!-- darwin：拖动交给系统热区（.sys-drag）；win32/linux 手动 IPC 拖动，保持 no-drag -->
     <div class="toolbar" :class="{ 'sys-drag': !manualDrag }">
       <span class="grip">⋮⋮</span>
       <div class="tools">
@@ -399,8 +399,8 @@ onBeforeUnmount(() => {
   padding: 6px 18px;
   color: var(--ly-fg);
   /* 闲置时完全裸字：面板只在悬停时浮出（见下方 ::before）。
-     Windows 拖拽走手动 IPC（透明窗口上 -webkit-app-region 不可靠），不声明 drag 区；
-     Linux/Wayland 用 .sys-drag 系统热区拖动（Wayland 禁程序挪窗口）。
+     Windows/Linux 拖拽走手动 IPC（透明窗口上 -webkit-app-region 不可靠），不声明 drag 区；
+     darwin 用 .sys-drag 系统热区拖动。
      边框保留透明占位，避免悬停时因 border 出现导致内容位移 1px。 */
   background: transparent;
   border: 1px solid transparent;

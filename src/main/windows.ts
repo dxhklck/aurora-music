@@ -427,9 +427,11 @@ export function collapseMiniExtra(): void {
 }
 
 /* ---------------- 迷你窗口手动拖动 ----------------
- * Windows 上 -webkit-app-region: drag 的热区在窗口尺寸变化（setBounds 展开
- * 面板）后会与实际矩形错位，表现为「展开面板后拖不动窗口」。不再依赖系统
- * 拖拽：渲染层在按下时上报 pointer 屏幕坐标，move 期间主进程 setBounds 跟随。
+ * Windows 与麒麟/海思（XWayland）上 -webkit-app-region: drag 的热区在窗口
+ * 尺寸变化（setBounds 展开面板）后会与实际矩形错位，表现为「展开面板后拖不动
+ * 窗口」，webContents.invalidate() 重算也无效。不再依赖系统拖拽：渲染层在按下
+ * 时上报 pointer 屏幕坐标，move 期间主进程 setBounds 跟随（应用未启用 ozone，
+ * Linux 默认 XWayland，程序挪窗口不受 Wayland 限制）。
  */
 let miniDragOffset: { x: number; y: number } | null = null
 
@@ -886,8 +888,9 @@ export function setLyricHover(hover: boolean): void {
 }
 
 /* ---------------- 手动拖拽 ----------------
-   透明无边框窗口上 -webkit-app-region: drag 在 Windows 不可靠（拖拽区整块失效），
-   改为渲染层上报鼠标位移、主进程 setPosition —— 不依赖任何系统拖拽机制。 */
+   Windows 与麒麟/海思（XWayland）：透明无边框窗口上 -webkit-app-region: drag
+   不可靠（拖拽区整块失效 / 只认有像素的位置），改为渲染层上报鼠标位移、
+   主进程 setPosition —— 不依赖任何系统拖拽机制（应用跑 XWayland，挪窗口有效）。 */
 let dragOrigin: {
   winX: number
   winY: number

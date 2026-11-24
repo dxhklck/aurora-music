@@ -145,6 +145,23 @@ html[data-platform='darwin'] .win-controls {
   display: none !important;
 }
 
+/* 迷你条展开面板（歌词/队列）后窗口 setBounds 变高，系统拖拽热区会与实际矩形
+ * 错位——Windows 与麒麟/海思（XWayland）实测复现。展开期间关闭系统拖拽热区，
+ * 拖动改走 MiniPlayer.vue 的 pointer 手动实现（主进程 setBounds 跟随）。
+ * 注意必须写在全局样式：scoped 里 .a:global([b]).c .d 会被编译丢弃 .c 之后的
+ * 部分（1.10.3 的 win32 规则因此从未生效）。app-region 不按继承覆盖，
+ * 父级 no-drag 不影响显式 drag 的子级，bar/transport/actions/panel-head 逐个列出。 */
+html[data-platform='win32'] .mini-player.panel-open .bar,
+html[data-platform='linux'] .mini-player.panel-open .bar,
+html[data-platform='win32'] .mini-player.panel-open .transport,
+html[data-platform='linux'] .mini-player.panel-open .transport,
+html[data-platform='win32'] .mini-player.panel-open .actions,
+html[data-platform='linux'] .mini-player.panel-open .actions,
+html[data-platform='win32'] .mini-player.panel-open .panel-head,
+html[data-platform='linux'] .mini-player.panel-open .panel-head {
+  -webkit-app-region: no-drag;
+}
+
 /* 桌面歌词窗口：整窗透明 */
 html.lyric-window,
 html.lyric-window body,

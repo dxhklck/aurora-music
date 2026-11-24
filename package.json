@@ -1,10 +1,11 @@
 {
   "name": "aurora-music",
-  "version": "1.10.3",
+  "version": "1.10.7",
   "engines": {
     "node": ">=22.13.0"
   },
   "description": "Aurora Music - 沉浸式跨平台桌面音乐播放器",
+  "homepage": "https://github.com/dxhklck/aurora-music",
   "main": "./out/main/index.js",
   "author": {
     "name": "信息科技练老师",

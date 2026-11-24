@@ -6,6 +6,7 @@ import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
 import { useDownloadStore } from '../stores/download'
 import { usePlaylistStore } from '../stores/playlists'
+import { useM3uFlow } from '../composables/m3u'
 
 const app = useAppStore()
 const player = usePlayerStore()
@@ -15,6 +16,8 @@ const route = useRoute()
 const router = useRouter()
 const open = ref(false)
 const panel = ref<HTMLElement | null>(null)
+/* M3U 歌单导入：与歌单详情页 M3U 菜单共用一套流程（见 composables/m3u） */
+const m3u = useM3uFlow()
 
 const navs = [
   { name: 'discover', to: '/', label: '发现音乐', icon: 'home' },
@@ -114,6 +117,14 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         <button class="nav-item as-button" @click="createPlaylist">
           <Icon name="plus" :size="16" />
           <span>新建歌单</span>
+        </button>
+        <button
+          class="nav-item as-button"
+          title="从 M3U 文件导入歌单，按本地库里的文件匹配"
+          @click="m3u.importM3u()"
+        >
+          <Icon name="export" :size="16" />
+          <span>导入歌单</span>
         </button>
       </div>
     </div>

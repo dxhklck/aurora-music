@@ -275,10 +275,13 @@ function onKey(event: KeyboardEvent): void {
 }
 
 /* ---------------- 手动拖动 ----------------
- * Windows 上展开面板（窗口 setBounds 变高）后 -webkit-app-region: drag 的热区
- * 会与窗口实际矩形错位，表现为「展开后拖不动」，因此改走 pointer 事件自实现。
- * Linux（尤其 Wayland，麒麟/鲲鹏）不允许程序自行挪窗口，setBounds 拖动无效，
- * 但系统拖拽热区没有 Windows 的错位问题——平台分治：win32 手动拖，其余走系统。
+ * 展开面板（窗口 setBounds 变高）后 -webkit-app-region: drag 的热区会与窗口
+ * 实际矩形错位，表现为「展开后拖不动」。Windows 与麒麟/海思（XWayland）均实测
+ * 复现，主进程的 webContents.invalidate() 重算也救不回来。展开态因此改走
+ * pointer 事件自实现：渲染层上报屏幕坐标，主进程 setBounds 跟随。应用未启用
+ * ozone，Electron 在 Linux 上默认跑 XWayland，程序挪窗口不受 Wayland 限制。
+ * 收起态的系统拖拽热区没有错位问题，保持不动；Linux 仅在展开时接管手动拖动，
+ * 避免收起态 pointerdown 若落在系统拖拽区上时两套拖动同时生效互相打架。
  */
 let pressing = false
 let dragging = false
@@ -286,10 +289,14 @@ let dragging = false
 const DRAG_SLOP = 8
 let pressX = 0
 let pressY = 0
-const manualDrag = window.api.platform === 'win32'
+const platform = window.api.platform
+/** win32 一律手动拖；Linux 仅展开态接管（见上方说明），darwin 仍走系统拖拽 */
+const manualDrag = platform === 'win32' || platform === 'linux'
 
 function onBarPointerDown(event: PointerEvent): void {
   if (!manualDrag) return
+  // Linux 收起态仍走系统拖拽热区（见上方说明），此时不启用手动拖动
+  if (platform === 'linux' && !panelOpen.value) return
   // 每次按下先清掉上次状态：pointerup 丢在窗口外时，下一段鼠标掠过不能续着拖
   pressing = false
   dragging = false
@@ -530,13 +537,9 @@ onBeforeUnmount(() => {
   -webkit-app-region: drag;
   cursor: move;
 }
-/* 展开态热区在 Windows 会错位，拖动改由 pointer 事件手动实现（见 onBarPointerDown）；
- * Linux/Wayland 系统拖拽可靠且 setBounds 拖动无效，保留 app-region: drag。
- * 平台由 App.vue 写在 html[data-platform] 上（scoped 样式用 :global 匹配根） */
-.mini-player:global([data-platform='win32']).panel-open .bar,
-.mini-player:global([data-platform='win32']).panel-open .panel-head {
-  -webkit-app-region: no-drag;
-}
+/* 展开态热区在 Windows 与麒麟/海思（XWayland）都会错位：展开期间关闭系统拖拽
+ * 热区、拖动改由 pointer 事件手动实现。规则写在全局样式 main.css——scoped 里
+ * .a:global([b]).c .d 的写法编译时会丢弃 .c 之后的成分，等于没生效。 */
 
 .cover {
   flex: none;

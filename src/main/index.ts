@@ -25,6 +25,35 @@ import { logger } from './services/logger'
 import { parseJumpCommand, sendPlayCommand, setTaskbarProgress, setupJumpList } from './taskbar'
 import { clearShortcuts, reregisterShortcuts } from './shortcuts'
 
+/* ---------------- Linux：Wayland 会话强制回落 XWayland ----------------
+ * Electron 38 起 --ozone-platform 默认 auto：Wayland 会话里以原生 Wayland 运行。
+ * 原生 Wayland 对本应用有两个硬伤：
+ *   1. 输入法：麒麟/统信默认 fcitx4 只有 XIM 通道（不支持 Wayland text-input
+ *      协议），而 Chromium 原生 Wayland 不走 GTK 输入模块，GTK_IM_MODULE=fcitx
+ *      被无视——表现为「应用里打不出中文」；
+ *   2. 窗口：Wayland 协议不允许客户端自行定位，setBounds/setPosition 挪窗口
+ *      全部静默失效（迷你条手动拖动、窗口位置记忆都依赖它）。
+ * XWayland（--ozone-platform=x11）两条通道都恢复。注意 appendSwitch 对 ozone
+ * 平台无效——平台初始化早于 JS 入口——只能在启动参数里带上：检测到 Wayland
+ * 会话且未显式指定 ozone 平台时 relaunch 一次。X11 会话（无 WAYLAND_DISPLAY）
+ * 不受影响；DISPLAY 缺失（无 XWayland 可用）时留在 Wayland 并打开 text-input
+ * 协议开关，给 fcitx5/合成器输入法留活路。
+ */
+if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+  if (process.env.DISPLAY && !process.argv.some((arg) => arg.startsWith('--ozone-platform'))) {
+    // 带上原有参数重启，补上 x11 平台标记；重启后 argv 已含标记，不会再进这里
+    const relaunchArgs = process.argv.slice(1)
+    relaunchArgs.push('--ozone-platform=x11')
+    app.relaunch({ args: relaunchArgs })
+    app.exit(0)
+  }
+  if (!process.argv.some((arg) => arg.startsWith('--ozone-platform'))) {
+    // 兜底：XWayland 不可用或 relaunch 失败，留在原生 Wayland
+    app.commandLine.appendSwitch('enable-wayland-ime')
+    app.commandLine.appendSwitch('wayland-text-input-version', '3')
+  }
+}
+
 /**
  * 全局异常兜底：先落盘再决定怎么办。
  *

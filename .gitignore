@@ -34,3 +34,7 @@ dist-local/
 resources/bin/darwin/
 resources/bin/linux-*/
 !resources/bin/fpcalc.exe
+
+# 构建临时目录与沙箱回收站（打包缓存、shim、deb 脚本），永不入库
+.build-tmp/
+.Trash-0/

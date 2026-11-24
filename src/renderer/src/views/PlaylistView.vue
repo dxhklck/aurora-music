@@ -9,6 +9,7 @@ import { usePlaylistStore } from '../stores/playlists'
 import { usePlayerStore } from '../stores/player'
 import { useAppStore } from '../stores/app'
 import { useDownloadStore } from '../stores/download'
+import { useM3uFlow } from '../composables/m3u'
 import { formatDuration } from '@shared/lyric'
 
 const props = defineProps<{ id?: string }>()
@@ -185,31 +186,15 @@ async function exportM3u(): Promise<void> {
   )
 }
 
-async function importM3u(targetId?: string): Promise<void> {
-  menuOpen.value = false
-  const result = await window.api.importPlaylistM3u(targetId)
-  if (result.canceled) return
-  await playlists.load()
-  if (!result.total) {
-    app.toast('这个文件里没有可识别的曲目', 'error')
-    return
-  }
-  if (!result.matched) {
-    app.toast(`${result.total} 首都没有匹配到本地库里的文件`, 'error')
-    return
-  }
-  const verb = targetId ? '追加' : '导入'
-  app.toast(
-    result.missing
-      ? `已${verb} ${result.matched} 首；${result.missing} 首在本地库里找不到`
-      : `已${verb} ${result.matched} 首${targetId ? `到《${result.name}》` : ''}`,
-    result.missing ? 'info' : 'success'
-  )
-  if (!targetId && result.playlistId) void router.push(`/playlist/${result.playlistId}`)
-}
-
 /* M3U 菜单：把「导出 / 导入为新歌单 / 追加到本歌单」收在一个入口里，按钮行不再膨胀 */
 const menuOpen = ref(false)
+/* 导入流程（对话框、匹配、toast、跳转）与侧栏「导入歌单」共用，见 composables/m3u */
+const m3uFlow = useM3uFlow()
+
+async function importM3u(targetId?: string): Promise<void> {
+  menuOpen.value = false
+  await m3uFlow.importM3u(targetId)
+}
 </script>
 
 <template>
