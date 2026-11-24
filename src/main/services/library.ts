@@ -240,13 +240,14 @@ class LibraryService {
       if (existsSync(metaPath)) {
         payload = JSON.parse(await readFile(metaPath, 'utf8')) as Record<string, unknown>
       }
-      // 只覆盖用户改的三个字段：sidecar 里还存着原始平台、音质、下载时间，别一起冲掉
+      // 只覆盖用户改的字段：sidecar 里还存着原始平台、音质、下载时间，别一起冲掉
       const previous = (payload.song as Record<string, unknown> | undefined) ?? {}
       payload.song = {
         ...previous,
         name: track.song.name,
         artists: track.song.artists,
-        album: track.song.album
+        album: track.song.album,
+        coverUrl: track.song.coverUrl
       }
       await writeFile(metaPath, JSON.stringify(payload, null, 2), 'utf8')
       track.metaPath = metaPath
@@ -284,15 +285,28 @@ class LibraryService {
   }
 
   /**
-   * 批量改标签：只处理歌手/专辑（歌名逐首不同），缺省字段保持原样。
+   * 批量改标签：歌名只在单选时生效；封面按本地图片路径写入。
    * 索引统一落盘一次，文件标签逐首写——两百首也不会触发两百次全量 JSON 写。
    */
   async updateMetaMany(
     ids: string[],
-    patch: { artists?: string; album?: string }
+    patch: { artists?: string; album?: string; name?: string; coverPath?: string }
   ): Promise<LibraryOpReport> {
     const items: LibraryOpItem[] = []
     const dirty: LibraryTrack[] = []
+    let coverUrl: string | null = null
+    if (patch.coverPath) {
+      try {
+        const data = await readFile(patch.coverPath)
+        const ext = extname(patch.coverPath).toLowerCase()
+        coverUrl = await this.persistCover(patch.coverPath, {
+          data,
+          mime: ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+        })
+      } catch {
+        coverUrl = null
+      }
+    }
 
     for (const id of ids) {
       const track = this.findById(id)
@@ -300,7 +314,16 @@ class LibraryService {
         items.push({ id, name: id, ok: false, note: '条目已不在库中' })
         continue
       }
-      if (!this.mergeMeta(track, patch)) {
+      const metaPatch =
+        ids.length === 1
+          ? { name: patch.name, artists: patch.artists, album: patch.album }
+          : { artists: patch.artists, album: patch.album }
+      let changed = this.mergeMeta(track, metaPatch)
+      if (coverUrl && track.song.coverUrl !== coverUrl) {
+        track.song = { ...track.song, coverUrl }
+        changed = true
+      }
+      if (!changed) {
         items.push({ id, name: track.song.name, ok: true, action: 'meta', note: '内容未变化' })
         continue
       }

@@ -20,10 +20,16 @@ import type {
   QrLoginState,
   RecognitionResult,
   ProviderInfo,
+  RemotePlaylistSummary,
+  RemoteSyncPlan,
+  RemoteSyncResult,
   ResolvedTrack,
   SearchPage,
   Song
 } from './types'
+
+/** 支持导入账号歌单的平台 */
+export type RemotePlaylistPlatform = 'netease' | 'qq'
 
 /** 单个音源在本次运行期间的请求成败统计 */
 export interface EngineSourceHealthView {
@@ -66,6 +72,24 @@ export interface SourceHealthView {
   /** 是否正在巡检 */
   running: boolean
   items: SourceHealthItemView[]
+}
+
+/** 单曲在某平台的播放失败记录（仅展示，不改变自动换源规则） */
+export interface SourceFailureView {
+  key: string
+  name: string
+  artists: string[]
+  platform: string
+  code: string
+  message: string
+  at: number
+}
+
+/** 最近播放失败摘要 */
+export interface SourceFailuresView {
+  items: SourceFailureView[]
+  /** 是否优先尝试已登录的音源 */
+  preferLoggedIn: boolean
 }
 
 export interface SearchArgs {
@@ -127,6 +151,10 @@ export interface AuroraApi {
   sourceHealth(): Promise<SourceHealthView>
   /** 立刻巡检 15 个引擎音源，跑完返回（约 20-60 秒，期间不要重复点） */
   sourceHealthRefresh(): Promise<SourceHealthView>
+  /** 最近的单曲播放失败记录（不触发探测） */
+  sourceRecentFailures(): Promise<SourceFailuresView>
+  /** 上报一次单曲播放失败（内部过滤错误类型，不改变播放流程） */
+  reportSourceFailure(song: Song, error: unknown): Promise<void>
 
   listLibrary(): Promise<LibraryTrack[]>
   removeLibrary(id: string): Promise<LibraryTrack[]>
@@ -135,11 +163,13 @@ export interface AuroraApi {
     id: string,
     patch: { name?: string; artists?: string; album?: string }
   ): Promise<LibraryTrack | null>
-  /** 批量改标签：只支持歌手/专辑，缺省或空串表示该字段不动（歌名逐首不同，不参与批量） */
+  /** 批量改标签：歌名仅在单选时生效；封面按本地图片路径写入；缺省或空串表示该字段不动 */
   updateLibraryMetaMany(
     ids: string[],
-    patch: { artists?: string; album?: string }
+    patch: { artists?: string; album?: string; name?: string; coverPath?: string }
   ): Promise<LibraryOpReport>
+  /** 选一张本地图片用于批量封面，返回绝对路径；取消返回空串 */
+  chooseLibraryCover(): Promise<string>
   /** 把文件本身放进系统剪贴板（CF_HDROP / NSPasteboard），可粘贴到资源管理器或聊天窗口 */
   copyLibraryFiles(ids: string[]): Promise<{ ok: boolean; message?: string }>
   refreshLibrary(): Promise<LibraryTrack[]>
@@ -188,6 +218,8 @@ export interface AuroraApi {
   removePlaylist(id: string): Promise<Playlist[]>
   addPlaylistSongs(id: string, songs: Song[]): Promise<Playlist[]>
   removePlaylistSong(id: string, platform: string, songId: string): Promise<Playlist[]>
+  /** 把这首歌从所有歌单（含收藏夹）里清掉，用于播放失败后的死条目清理 */
+  removePlaylistSongEverywhere(platform: string, songId: string): Promise<Playlist[]>
   /** 歌单内换位：越界（已在顶/底）时原样返回 */
   movePlaylistSong(
     id: string,
@@ -203,6 +235,35 @@ export interface AuroraApi {
   exportPlaylistM3u(args: { id: string; name: string }): Promise<M3uExportResult>
   /** 从 M3U 导入成新歌单（会弹选择对话框），按路径匹配库内条目 */
   importPlaylistM3u(targetId?: string): Promise<M3uImportResult>
+  /** 当前账号下的远端歌单列表（需要该平台登录态） */
+  remotePlaylists(platform: RemotePlaylistPlatform): Promise<RemotePlaylistSummary[]>
+  /** 远端歌单的完整曲目（需要该平台登录态） */
+  remotePlaylistDetail(
+    platform: RemotePlaylistPlatform,
+    id: string
+  ): Promise<{ name: string; songs: Song[] }>
+  /** 把远端歌单同步为本地歌单，返回最新歌单列表 */
+  syncRemotePlaylist(payload: {
+    platform: RemotePlaylistPlatform
+    name: string
+    remoteId: string
+    songs: Song[]
+  }): Promise<Playlist[]>
+  /** 生成差异计划：不落盘，远端删歌默认保留 */
+  planRemoteSyncPlaylist(payload: {
+    platform: RemotePlaylistPlatform
+    name: string
+    remoteId: string
+    songs: Song[]
+  }): Promise<RemoteSyncPlan>
+  /** 按差异计划落盘；deleteRemoteMissing 为真才移除远端已删歌曲 */
+  applyRemoteSyncPlaylist(payload: {
+    platform: RemotePlaylistPlatform
+    name: string
+    remoteId: string
+    songs: Song[]
+    deleteRemoteMissing: boolean
+  }): Promise<RemoteSyncResult>
 
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>

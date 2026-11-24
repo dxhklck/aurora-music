@@ -53,10 +53,10 @@ function pushLyricState(): void {
     artist: song?.artists.join(' / ') ?? '',
     locked: app.settings?.desktopLyricLocked ?? false,
     style: app.settings?.desktopLyricStyle,
-    // 强调色随 250ms 推送实时联动桌面歌词窗口（独立窗口拿不到 shellStyle；
-    // 歌词窗口恒定深色，不推 themeMode）
+    // 强调色 / 主题随 250ms 推送实时联动桌面歌词窗口（独立窗口拿不到主窗口的 shellStyle）
     accent: app.accent[0],
-    accent2: app.accent[1]
+    accent2: app.accent[1],
+    theme: resolvedTheme.value
   }
   window.api.pushLyricState(plain(state))
 }
@@ -181,6 +181,11 @@ onMounted(async () => {
     if (command === 'toggle') void player.toggle()
     else if (command === 'next') player.next()
     else if (command === 'prev') player.prev()
+    else if (command === 'lyric') void window.api.toggleLyricWindow()
+    else if (command === 'drive') {
+      if (player.showDriving) player.closeDriving()
+      else player.openDriving()
+    }
   })
   // 歌词窗口的开关由主进程掌控（设置页、托盘、快捷键都能触发），只认它推来的标记
   offLyricState = window.api.onLyricWindowState((state) => {

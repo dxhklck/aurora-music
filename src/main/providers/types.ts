@@ -3,6 +3,7 @@ import type {
   Lyric,
   ProviderInfo,
   Quality,
+  RemotePlaylistSummary,
   SearchPage,
   Song,
   StreamInfo
@@ -54,4 +55,10 @@ export interface MusicProvider {
 
   /** 抓取歌词；无歌词返回 null，由 LyricResolver 走公共歌词库兜底 */
   lyric(song: Song): Promise<Lyric | null>
+
+  /** 当前登录账号的歌单摘要；不支持账号歌单的音源不实现 */
+  userPlaylists?(): Promise<RemotePlaylistSummary[]>
+
+  /** 单个账号歌单的完整曲目；不支持账号歌单的音源不实现 */
+  userPlaylistDetail?(id: string): Promise<{ name: string; songs: Song[] }>
 }

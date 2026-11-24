@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import CoverArt from '../components/CoverArt.vue'
 import Icon from '../components/Icon.vue'
 import { useStatsStore } from '../stores/stats'
@@ -7,16 +7,21 @@ import { usePlayerStore } from '../stores/player'
 import {
   activeDays,
   formatListenTime,
+  hourBuckets,
   lastDays,
   listenStreak,
+  monthListenMs,
   platformBreakdown,
-  topSongs
+  topArtists,
+  topSongs,
+  yearlyMonths
 } from './stats/aggregate'
 
 const stats = useStatsStore()
 const player = usePlayerStore()
 
-const heatmap = computed(() => lastDays(stats.data.days, 91))
+const snapshot = computed(() => stats.data as unknown as Parameters<typeof monthListenMs>[0])
+const heatmap = computed(() => lastDays(stats.data.days, 365))
 /** 13 列 × 7 行的最大值，用来给格子上色 */
 const heatMax = computed(() => Math.max(...heatmap.value.map((day) => day.ms), 1))
 const active = computed(() => activeDays(stats.data.days))
@@ -24,6 +29,16 @@ const streak = computed(() => listenStreak(stats.data.days))
 const monthlyTop = computed(() => topSongs(stats.data.songs, 20, 30))
 const sources = computed(() => platformBreakdown(stats.data.songs))
 const sourceMax = computed(() => Math.max(...sources.value.map((item) => item.count), 1))
+const thisYear = new Date().getFullYear()
+const thisMonth = new Date().getMonth() + 1
+const year = ref(thisYear)
+const selectedMonth = ref(thisMonth)
+const yearMonths = computed(() => yearlyMonths(snapshot.value, year.value))
+const selectedMonthMs = computed(() => monthListenMs(snapshot.value, year.value, selectedMonth.value - 1))
+const artists = computed(() => topArtists(stats.data.songs, 8))
+const artistMax = computed(() => Math.max(...artists.value.map((item) => item.count), 1))
+const hours = computed(() => hourBuckets(snapshot.value.hours))
+const hourMax = computed(() => Math.max(...hours.value.map((item) => item.count), 1))
 
 /** 五档强度：0 为没听，其余按当日时长占峰值的比例分档 */
 function level(ms: number): number {
@@ -58,7 +73,7 @@ function playTop(index: number): void {
       <div>
         <h1>收听报告</h1>
         <p class="sub">
-          数据只存在这台机器上（localStorage），封顶 300 首 / 90 天，不会上传到任何地方。
+          数据只存在这台机器上（localStorage），明细封顶 300 首 / 365 天，另存轻量月度汇总，不会上传。
         </p>
       </div>
       <div class="total">
@@ -88,10 +103,10 @@ function playTop(index: number): void {
 
     <section class="panel">
       <div class="panel-head">
-        <h2>最近 13 周</h2>
+        <h2>最近一年</h2>
         <span class="hint">每格一天，颜色越深听得越久</span>
       </div>
-      <div class="heatmap" role="img" aria-label="最近 13 周的收听热力图">
+      <div class="heatmap" role="img" aria-label="最近一年的收听热力图">
         <span
           v-for="day in heatmap"
           :key="day.key"
@@ -151,7 +166,67 @@ function playTop(index: number): void {
 
         <div class="hour-note">
           <Icon name="info" :size="13" />
-          <span>只记「谁听了多少次、哪天听了多久」，不记听了哪一秒、也不记设备信息。</span>
+          <span>只记「谁听了多少次、哪天听了多久、哪个小时开始听」，不记具体秒数，也不上传。</span>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>月度 / 年度</h2>
+        <label class="year-select">
+          年份
+          <select v-model.number="year">
+            <option v-for="offset in 5" :key="offset" :value="thisYear - offset + 1">
+              {{ thisYear - offset + 1 }}
+            </option>
+          </select>
+        </label>
+      </div>
+      <div class="year-grid">
+        <button
+          v-for="item in yearMonths"
+          :key="item.month"
+          class="year-month"
+          :class="{ active: selectedMonth === item.month }"
+          :disabled="!item.ms"
+          @click="selectedMonth = item.month"
+        >
+          <strong>{{ item.month }} 月</strong>
+          <small>{{ item.ms ? formatListenTime(item.ms) : '未听' }}</small>
+        </button>
+      </div>
+      <p class="hint year-total">{{ year }} 年 {{ selectedMonth }} 月：{{ formatListenTime(selectedMonthMs) }}</p>
+    </section>
+
+    <div class="two-col">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>歌手偏好</h2>
+          <span class="hint">按播放次数</span>
+        </div>
+        <div v-if="artists.length" class="bars">
+          <div v-for="item in artists" :key="item.name" class="bar-row">
+            <span class="bar-label">{{ item.name }}</span>
+            <span class="bar-track">
+              <span class="bar-fill" :style="{ width: `${(item.count / artistMax) * 100}%` }" />
+            </span>
+            <span class="bar-value">{{ item.count }}</span>
+          </div>
+        </div>
+        <p v-else class="empty">还没有足够的播放记录。</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>听歌时段</h2>
+          <span class="hint">按开始播放的时间</span>
+        </div>
+        <div class="hour-chart">
+          <div v-for="item in hours" :key="item.hour" class="hour-col" :title="`${item.hour} 点 · ${item.count} 次`">
+            <span class="hour-bar" :style="{ height: `${Math.max(3, (item.count / hourMax) * 100)}%` }" />
+            <small v-if="item.hour % 4 === 0">{{ item.hour }}</small>
+          </div>
         </div>
       </section>
     </div>
@@ -392,6 +467,81 @@ function playTop(index: number): void {
   font-variant-numeric: tabular-nums;
 }
 
+.year-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.year-select select {
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  padding: 0 6px;
+}
+.year-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+.year-month {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  text-align: left;
+}
+.year-month:disabled {
+  opacity: 0.45;
+}
+.year-month.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.year-month strong {
+  font-size: 11.5px;
+}
+.year-month small {
+  font-size: 10px;
+  color: var(--text-3);
+}
+.year-total {
+  margin-bottom: 0;
+}
+.hour-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 130px;
+  padding-top: 10px;
+}
+.hour-col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+}
+.hour-bar {
+  width: 100%;
+  min-height: 3px;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 35%, transparent));
+}
+.hour-col small {
+  font-size: 9px;
+  color: var(--text-3);
+}
 .hour-note {
   display: flex;
   gap: 6px;

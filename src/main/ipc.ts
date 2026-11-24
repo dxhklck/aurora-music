@@ -2,7 +2,7 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { AppSettings, LibraryTrack, MiniVolumeState, Song } from '@shared/types'
 import { setProviderCookies } from './providers/cookies'
-import type { TrayState } from '@shared/api'
+import type { RemotePlaylistPlatform, TrayState } from '@shared/api'
 import { updateTrayState } from './tray'
 import { providers, registerEngineProviders, unregisterEngineProviders } from './providers'
 import { catalog } from './services/catalog'
@@ -12,6 +12,7 @@ import { library } from './services/library'
 import { copyTracks, openTrash } from './services/fileops'
 import { copyFilesToClipboard } from './services/clipboard'
 import { playlists } from './services/playlists'
+import type { RemoteSyncApplyPayload, RemoteSyncPayload } from './services/remote-sync'
 import { exportPlaylistToM3u, importM3uFromFile } from './services/m3u-io'
 import { settings } from './services/settings'
 import { logger } from './services/logger'
@@ -26,6 +27,7 @@ import {
 import { loginCellphone, sendCaptcha } from './services/cellphone-login'
 import { musicdl } from './engine/musicdl'
 import { refresh as refreshSourceHealth, snapshot as sourceHealthSnapshot } from './services/source-health'
+import { recordUnknownFailure, snapshotFailures } from './services/source-failures'
 import { openLoginWindow, closeLoginWindow } from './services/weblogin'
 import { checkForUpdate, installUpdate } from './updater'
 import { cancelRecognize, recognizeBuffer, recognizeFile } from './services/recognize'
@@ -194,8 +196,19 @@ export function registerIpc(): void {
   })
   handle(
     IPC.libraryUpdateMetaMany,
-    (ids: string[], patch: { artists?: string; album?: string }) => library.updateMetaMany(ids, patch)
+    (
+      ids: string[],
+      patch: { artists?: string; album?: string; name?: string; coverPath?: string }
+    ) => library.updateMetaMany(ids, patch)
   )
+  handle(IPC.libraryChooseCover, async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择本地曲目封面',
+      properties: ['openFile'],
+      filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
+    })
+    return result.canceled || !result.filePaths.length ? '' : result.filePaths[0]
+  })
   handle(IPC.libraryCopyFiles, async (ids: string[]) => {
     const paths = ids
       .map((id) => library.findById(id)?.filePath)
@@ -292,12 +305,26 @@ export function registerIpc(): void {
   handle(IPC.playlistRemoveSong, (args: { id: string; platform: string; songId: string }) =>
     playlists.removeSong(args.id, args.platform, args.songId)
   )
+  handle(IPC.playlistRemoveSongEverywhere, (args: { platform: string; songId: string }) =>
+    playlists.removeSongEverywhere(args.platform, args.songId)
+  )
   handle(
     IPC.playlistMoveSong,
     (args: { id: string; platform: string; songId: string; direction: 'up' | 'down' }) =>
       playlists.moveSong(args.id, args.platform, args.songId, args.direction)
   )
   handle(IPC.playlistToggleFavorite, (song: Song) => playlists.toggleFavorite(song))
+  handle(IPC.playlistRemoteList, (platform: RemotePlaylistPlatform) =>
+    catalog.remotePlaylists(platform)
+  )
+  handle(IPC.playlistRemoteDetail, (args: { platform: RemotePlaylistPlatform; id: string }) =>
+    catalog.remotePlaylistDetail(args.platform, args.id)
+  )
+  handle(IPC.playlistSyncRemote, (payload: RemoteSyncPayload) => playlists.syncRemote(payload))
+  handle(IPC.playlistSyncPlan, (payload: RemoteSyncPayload) => playlists.planRemoteSync(payload))
+  handle(IPC.playlistSyncApply, (payload: RemoteSyncApplyPayload) =>
+    playlists.applyRemoteSync(payload)
+  )
   handle(IPC.playlistExportM3u, async (args: { id: string; name: string }) => {
     const win = BrowserWindow.getFocusedWindow() ?? undefined
     const options: Electron.SaveDialogOptions = {
@@ -375,6 +402,13 @@ export function registerIpc(): void {
   handle(IPC.engineRestart, () => musicdl.restart())
   handle(IPC.sourceHealth, () => sourceHealthSnapshot())
   handle(IPC.sourceHealthRefresh, () => refreshSourceHealth())
+  handle(IPC.sourceRecentFailures, () => {
+    const current = settings.get()
+    return snapshotFailures(Boolean(current.neteaseCookie || current.qqCookie))
+  })
+  handle(IPC.sourceReportFailure, (args: { song: Song; error: unknown }) =>
+    recordUnknownFailure(args.song, args.error)
+  )
 
   // ---------- 听歌识曲 ----------
   // 传进来的字节量很小（20 秒 48kHz 单声道 WAV 约 1.9MB），不需要开流式通道

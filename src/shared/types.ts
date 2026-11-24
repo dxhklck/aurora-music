@@ -267,6 +267,40 @@ export interface Playlist {
   songs: Song[]
   createdAt: number
   updatedAt: number
+  /** 从网易云同步来的歌单：记住远端 id，再次同步时原地更新而不是新建 */
+  neteaseId?: string
+  /** 从 QQ 音乐同步来的歌单：含义同 neteaseId，跨平台 id 不会互相串单 */
+  qqId?: string
+  /** 最近一次账号歌单同步时间（毫秒） */
+  lastSyncAt?: number
+}
+
+/** 账号歌单同步的纯计划：渲染层据此提示差异，不自行维护另一份歌单状态 */
+export interface RemoteSyncPlan {
+  playlist: Playlist
+  /** 远端新增、需要写入本地的曲目 */
+  added: Song[]
+  /** 本地有但远端已删除：默认保留，确认后才移除 */
+  keptMissing: Song[]
+  /** 远端已删除的曲目总数（用于确认弹窗） */
+  missingCount: number
+}
+
+/** 账号歌单同步结果 */
+export interface RemoteSyncResult {
+  playlist: Playlist
+  added: Song[]
+  keptMissing: Song[]
+  removed: Song[]
+}
+
+/** 账号歌单统一摘要（网易云 / QQ “导入歌单”列表用） */
+export interface RemotePlaylistSummary {
+  id: string
+  name: string
+  trackCount: number
+  coverUrl: string | null
+  creator: string
 }
 
 /**
@@ -327,7 +361,16 @@ export interface AppSettings {
    * 全局快捷键（Electron accelerator 字符串，如 Control+Alt+P）。
    * 空字符串 = 用平台默认值，这样老配置升级后仍然是原来那套组合键。
    */
-  shortcuts: { toggle: string; next: string; prev: string }
+  /**
+   * 全局快捷键。lyric / drive 为空表示不注册，避免抢占用户已有组合。
+   */
+  shortcuts: {
+    toggle: string
+    next: string
+    prev: string
+    lyric?: string
+    drive?: string
+  }
   /** 播放页样式：vinyl 黑胶经典 / lyrics 歌词大屏 / cover 封面沉浸 */
   nowPlayingStyle: 'vinyl' | 'lyrics' | 'cover'
   /**
@@ -515,6 +558,8 @@ export interface LyricWindowState {
   /** 主窗口强调色：桌面歌词窗口据此实时联动（旧推送可缺省） */
   accent?: string
   accent2?: string
+  /** 主窗口当前主题；桌面歌词跟随它，自定义颜色仍优先 */
+  theme?: 'dark' | 'light'
 }
 
 /* ---------------- 扫码登录 ---------------- */

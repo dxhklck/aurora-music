@@ -13,12 +13,14 @@ import { settings } from './services/settings'
  * 设置页据此提示「这一项被占用了」，而不是静默不生效。
  */
 
+export type ShortcutCommand = 'toggle' | 'next' | 'prev' | 'lyric' | 'drive'
+
 export interface ShortcutBinding {
   /** 设置里的键名 */
   key: keyof AppSettings['shortcuts']
   /** 真正交给 globalShortcut 的 accelerator */
   accelerator: string
-  command: 'toggle' | 'next' | 'prev'
+  command: ShortcutCommand
   /** 界面上的说法 */
   label: string
 }
@@ -37,12 +39,12 @@ export function defaultShortcuts(): AppSettings['shortcuts'] {
   const mod = platformModifier()
   // 用字面量 `,` `.` 而不是 Comma/Period：Electron 的 accelerator 只认字面符号，
   // 写成键名会直接被判非法（register 返回 false）
-  return { toggle: `${mod}+P`, prev: `${mod}+,`, next: `${mod}+.` }
+  return { toggle: `${mod}+P`, prev: `${mod}+,`, next: `${mod}+.`, lyric: '', drive: '' }
 }
 
 /** 设置里为空时回落到平台默认值，保证老配置升级后仍然可用 */
 export function resolveShortcuts(): ShortcutBinding[] {
-  const saved = settings.get().shortcuts ?? { toggle: '', next: '', prev: '' }
+  const saved = settings.get().shortcuts ?? defaultShortcuts()
   const fallback = defaultShortcuts()
   return [
     {
@@ -52,11 +54,21 @@ export function resolveShortcuts(): ShortcutBinding[] {
       label: '播放 / 暂停'
     },
     { key: 'prev', accelerator: saved.prev || fallback.prev, command: 'prev', label: '上一首' },
-    { key: 'next', accelerator: saved.next || fallback.next, command: 'next', label: '下一首' }
+    { key: 'next', accelerator: saved.next || fallback.next, command: 'next', label: '下一首' },
+    { key: 'lyric', accelerator: saved.lyric || '', command: 'lyric', label: '桌面歌词' },
+    { key: 'drive', accelerator: saved.drive || '', command: 'drive', label: '驾驶模式' }
   ]
 }
 
-function broadcast(command: 'toggle' | 'next' | 'prev'): void {
+function broadcast(command: ShortcutCommand): void {
+  // 桌面歌词开关由主进程窗口管理，避免让每个渲染进程各自 create/destroy
+  if (command === 'lyric') {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || win.webContents.isDestroyed()) continue
+      win.webContents.send(IPC.trayCommand, 'lyric')
+    }
+    return
+  }
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
       win.webContents.send(IPC.trayCommand, command)
@@ -76,6 +88,7 @@ export function reregisterShortcuts(): string[] {
 
   const bindings = resolveShortcuts()
   for (const binding of bindings) {
+    if (!binding.accelerator) continue
     let ok = false
     try {
       ok = globalShortcut.register(binding.accelerator, () => broadcast(binding.command))

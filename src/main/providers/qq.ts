@@ -3,6 +3,7 @@ import type {
   Lyric,
   ProviderInfo,
   Quality,
+  RemotePlaylistSummary,
   SearchPage,
   Song,
   StreamInfo
@@ -12,7 +13,7 @@ import { BaseProvider, DESKTOP_UA } from './base'
 import { ProviderError, type SearchArgs } from './types'
 import { mediaUrl } from '../media'
 import { decodeHtml } from '../utils'
-import { extractQQUin, qqCookieHeader } from './cookies'
+import { extractQQUin, qqCookieHeader, qqGtk } from './cookies'
 import { decryptQrc, extractQrcLyric } from './qrc'
 
 interface QQTrack {
@@ -42,6 +43,17 @@ const CHARTS = [
   { id: '4', name: '新歌榜', subtitle: '本周新上架单曲' },
   { id: '62', name: '飙升榜', subtitle: '播放增速最快' }
 ]
+
+/** 账号歌单详情（fcg_ucc_getcdinfo_byids_cp）的曲目结构 */
+interface QQPlaylistSong {
+  songmid?: string
+  songname?: string
+  singer?: Array<{ name: string }>
+  albumname?: string
+  albummid?: string
+  interval?: number
+  pay?: { payplay?: number }
+}
 
 /** 官方榜单目录条目（fcg_myqq_toplist） */
 interface QQTopListItem {
@@ -371,6 +383,91 @@ export class QQProvider extends BaseProvider {
       return buildLyric(lyric, decode(data.trans), this.info.name)
     } catch {
       return null
+    }
+  }
+
+  /* ---------------- 账号歌单同步 ---------------- */
+
+  /** QQ 音乐账号歌单列表；列表接口只给摘要，曲目在 userPlaylistDetail 里另取 */
+  async userPlaylists(): Promise<RemotePlaylistSummary[]> {
+    const uin = extractQQUin()
+    if (!uin) throw new ProviderError('unsupported', '请先登录 QQ 音乐账号', this.info.id)
+    const data = await this.json<{
+      code?: number
+      data?: {
+        disslist?: Array<{
+          tid?: string | number
+          diss_name?: string
+          song_cnt?: number
+          diss_cover?: string
+        }>
+      }
+    }>(
+      'https://c.y.qq.com/rsc/fcgi-bin/fcg_user_created_diss?' +
+        new URLSearchParams({
+          hostuin: uin,
+          sin: '0',
+          size: '100',
+          format: 'json',
+          g_tk: String(qqGtk())
+        }).toString(),
+      { headers: { Referer: this.referer } }
+    )
+    if (data.code && data.code !== 0) {
+      throw new ProviderError('unsupported', '读取 QQ 音乐歌单失败，登录态可能已失效', this.info.id)
+    }
+    return (data.data?.disslist ?? [])
+      .filter((item) => item.tid != null && item.diss_name)
+      .map((item) => ({
+        id: String(item.tid),
+        name: String(item.diss_name),
+        trackCount: item.song_cnt ?? 0,
+        coverUrl: item.diss_cover ? `https:${item.diss_cover.replace(/^https?:/, '')}` : null,
+        creator: ''
+      }))
+  }
+
+  /** QQ 音乐歌单曲目 */
+  async userPlaylistDetail(id: string): Promise<{ name: string; songs: Song[] }> {
+    const uin = extractQQUin() || '0'
+    const data = await this.json<{
+      code?: number
+      songlist?: QQPlaylistSong[]
+      songnum?: number
+      disstid?: string
+    }>(
+      'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?' +
+        new URLSearchParams({
+          type: '1',
+          json: '1',
+          utf8: '1',
+          onlysong: '1',
+          disstid: id,
+          uin,
+          format: 'json'
+        }).toString(),
+      { headers: { Referer: this.referer } }
+    )
+    if (data.code && data.code !== 0) {
+      throw new ProviderError('unsupported', '读取 QQ 音乐歌单失败，登录态可能已失效', this.info.id)
+    }
+    const list = data.songlist ?? []
+    if (!list.length && (data.songnum ?? 0) > 0) {
+      throw new ProviderError('unsupported', '这个 QQ 歌单歌曲过多或需要登录，换用应用内登录后重试', this.info.id)
+    }
+    return {
+      name: `QQ 音乐歌单 ${data.disstid || id}`,
+      songs: list.map((track) =>
+        this.mapTrack({
+          songmid: track.songmid ?? '',
+          songname: track.songname ?? '',
+          singer: track.singer,
+          albumname: track.albumname,
+          albummid: track.albummid,
+          interval: track.interval,
+          pay: track.pay
+        })
+      )
     }
   }
 

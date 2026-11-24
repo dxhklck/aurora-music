@@ -4,16 +4,19 @@ import type { Song } from '@shared/types'
 import { usePlayerStore } from './player'
 
 /**
- * 收听统计：只记「谁听了多少次、哪天听了多久」两件事。
+ * 收听统计：明细只记「谁听了多少次、哪天听了多久」，另存轻量月度汇总。
  * - songs：按 platform:id 聚合播放次数（点开即记，在播放成功点埋）
  * - days：按本地日期聚合收听时长（15 秒心跳，仅在真正出声时累计）
- * 数据量可控（歌曲封顶 300 条 / 天数封顶 90 条），localStorage 足够。
+ * - hours：按本地小时聚合开始播放次数，用来看听歌时段
+ * - monthly：按本地月份累计收听毫秒，长期保留，支撑月/年视图
+ * 明细封顶 300 首 / 365 天；月度汇总很小，不设删除。
  */
-const STATS_KEY = 'aurora.stats'
+const STATS_KEY = 'aurora.stats.v2'
+const LEGACY_KEY = 'aurora.stats'
 /** 心跳步长（毫秒）：颗粒度 15 秒，够用且不打扰 */
 const HEARTBEAT_MS = 15_000
 const MAX_SONGS = 300
-const MAX_DAYS = 90
+const MAX_DAYS = 365
 /** 一周口径：7 天内有收听的歌才进「本周最常听」 */
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -30,19 +33,32 @@ interface StatsData {
   songs: Record<string, SongStat>
   /** 本地日期 → 当日收听毫秒数 */
   days: Record<string, number>
+  /** 本地小时（0-23）→ 开始播放次数 */
+  hours: Record<string, number>
+  /** 本地月份 YYYY-MM → 收听毫秒数，长期保留 */
+  monthly: Record<string, number>
 }
 
 function emptyData(): StatsData {
-  return { songs: {}, days: {} }
+  return { songs: {}, days: {}, hours: {}, monthly: {} }
+}
+
+function monthKey(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
 function load(): StatsData {
   try {
-    const raw = localStorage.getItem(STATS_KEY)
+    const raw = localStorage.getItem(STATS_KEY) ?? localStorage.getItem(LEGACY_KEY)
     if (!raw) return emptyData()
-    const parsed = JSON.parse(raw) as StatsData
+    const parsed = JSON.parse(raw) as Partial<StatsData>
     if (!parsed.songs || !parsed.days) return emptyData()
-    return parsed
+    return {
+      songs: parsed.songs,
+      days: parsed.days,
+      hours: parsed.hours ?? {},
+      monthly: parsed.monthly ?? {}
+    }
   } catch {
     return emptyData()
   }
@@ -56,7 +72,7 @@ function dayKey(): string {
   return `${d.getFullYear()}-${m}-${day}`
 }
 
-/** 修剪：歌取最近 300 首，天留最近 90 天，防 localStorage 无限膨胀 */
+/** 修剪：歌取最近 300 首，天留最近 365 天；月度汇总不修剪 */
 function trim(data: StatsData): void {
   const songEntries = Object.entries(data.songs)
   if (songEntries.length > MAX_SONGS) {
@@ -77,6 +93,7 @@ export const useStatsStore = defineStore('stats', () => {
     trim(data.value)
     try {
       localStorage.setItem(STATS_KEY, JSON.stringify(data.value))
+      if (localStorage.getItem(LEGACY_KEY) !== null) localStorage.removeItem(LEGACY_KEY)
     } catch {
       /* 写不进去就只在内存里记着，不影响播放 */
     }
@@ -85,6 +102,8 @@ export const useStatsStore = defineStore('stats', () => {
   /** 播放成功点调用（player store 埋）：次数 +1，并启动时长心跳 */
   function recordPlay(song: Song): void {
     const key = `${song.platform}:${song.id}`
+    const hour = String(new Date().getHours())
+    data.value.hours[hour] = (data.value.hours[hour] ?? 0) + 1
     const prev = data.value.songs[key]
     data.value.songs[key] = {
       count: (prev?.count ?? 0) + 1,
@@ -106,6 +125,8 @@ export const useStatsStore = defineStore('stats', () => {
   function addListen(ms: number): void {
     const key = dayKey()
     data.value.days[key] = (data.value.days[key] ?? 0) + ms
+    const month = monthKey()
+    data.value.monthly[month] = (data.value.monthly[month] ?? 0) + ms
     // 心跳不需要每次落盘，10 次一写（2.5 分钟）足够，减少 localStorage 抖动
     const n = data.value.days[key]
     if (n % (HEARTBEAT_MS * 10) === 0 || n < HEARTBEAT_MS * 2) persist()

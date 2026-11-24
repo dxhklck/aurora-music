@@ -83,12 +83,32 @@ export const IPC = {
   playlistRemove: 'playlist:remove',
   playlistAddSongs: 'playlist:add-songs',
   playlistRemoveSong: 'playlist:remove-song',
+  /** 播放失败：把这首歌从所有歌单里一并清掉 */
+  playlistRemoveSongEverywhere: 'playlist:remove-song-everywhere',
   playlistMoveSong: 'playlist:move-song',
   playlistToggleFavorite: 'playlist:toggle-favorite',
   /** 导出为 M3U（只含本地曲目；在线曲目跳过并回报数量） */
   playlistExportM3u: 'playlist:export-m3u',
   /** 从 M3U 导入成新歌单（按路径匹配库内条目） */
   playlistImportM3u: 'playlist:import-m3u',
+  /** 远端账号下的歌单列表 */
+  playlistRemoteList: 'playlist:remote-list',
+  /** 远端账号下某个歌单的完整曲目 */
+  playlistRemoteDetail: 'playlist:remote-detail',
+  /** 把远端歌单同步为本地歌单（同平台 + 远端 id 原地更新） */
+  playlistSyncRemote: 'playlist:sync-remote',
+  /** 生成账号歌单差异计划，不落盘 */
+  playlistSyncPlan: 'playlist:sync-plan',
+  /** 按差异计划落盘，支持确认后删除远端已移除的歌曲 */
+  playlistSyncApply: 'playlist:sync-apply',
+
+  /** 选择本地图片用于批量封面 */
+  libraryChooseCover: 'library:choose-cover',
+
+  /** 最近的单曲播放失败记录 */
+  sourceRecentFailures: 'source:recent-failures',
+  /** 单曲播放失败上报 */
+  sourceReportFailure: 'source:report-failure',
 
   // 设置
   settingsGet: 'settings:get',

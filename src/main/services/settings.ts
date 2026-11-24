@@ -73,7 +73,13 @@ function normalizeLyricStyle(input: unknown): DesktopLyricStyle {  const source 
 function normalizeShortcuts(input: unknown): AppSettings['shortcuts'] {
   const source = (input ?? {}) as Record<string, unknown>
   const pick = (value: unknown): string => (typeof value === 'string' ? value.trim().slice(0, 60) : '')
-  return { toggle: pick(source.toggle), next: pick(source.next), prev: pick(source.prev) }
+  return {
+    toggle: pick(source.toggle),
+    next: pick(source.next),
+    prev: pick(source.prev),
+    lyric: pick(source.lyric),
+    drive: pick(source.drive)
+  }
 }
 
 /**
@@ -124,7 +130,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     bilingual: 'stack',
     karaokeColor: ''
   },
-  shortcuts: { toggle: '', next: '', prev: '' },
+  shortcuts: { toggle: '', next: '', prev: '', lyric: '', drive: '' },
   nowPlayingStyle: 'vinyl',
   driveModeTts: true,
   // 网易云风格的歌词页：模糊封面 + 白色歌词 + 红色进度条，作为新装用户的默认皮肤

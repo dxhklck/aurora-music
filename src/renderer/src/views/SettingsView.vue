@@ -7,7 +7,12 @@ import { useAppStore } from '../stores/app'
 import { useDownloadStore } from '../stores/download'
 import { useLibraryStore } from '../stores/library'
 import { formatBytes } from '@shared/lyric'
-import type { EngineStatusView, SourceHealthView, UpdateStatusView } from '@shared/api'
+import type {
+  EngineStatusView,
+  SourceFailuresView,
+  SourceHealthView,
+  UpdateStatusView
+} from '@shared/api'
 import { type QrLoginPlatform, type QrLoginState } from '@shared/types'
 import type { DesktopLyricStyle, NeteaseAccountInfo } from '@shared/types'
 import type { AppSettings } from '@shared/types'
@@ -141,6 +146,12 @@ async function pickOutput(deviceId: string): Promise<void> {
  * 用户分不清「没这首歌」还是「源挂了」，所以主进程定期给每个源发一次最小搜索，这里按源显色。
  */
 const health = ref<SourceHealthView | null>(null)
+const failures = ref<SourceFailuresView | null>(null)
+
+const failureCodeLabel: Record<string, string> = {
+  network: '网络',
+  parse: '解析'
+}
 
 const healthText = computed(() => {
   const s = health.value
@@ -304,7 +315,9 @@ type ShortcutKey = keyof AppSettings['shortcuts']
 const SHORTCUT_ITEMS: Array<{ key: ShortcutKey; label: string }> = [
   { key: 'toggle', label: '播放 / 暂停' },
   { key: 'prev', label: '上一首' },
-  { key: 'next', label: '下一首' }
+  { key: 'next', label: '下一首' },
+  { key: 'lyric', label: '桌面歌词' },
+  { key: 'drive', label: '驾驶模式' }
 ]
 const capturing = ref<ShortcutKey | ''>('')
 const isMac = window.api.platform === 'darwin'
@@ -315,7 +328,9 @@ function effectiveShortcut(key: ShortcutKey): string {
   if (saved) return saved
   const mod = isMac ? 'Control+Command' : 'Control+Alt'
   if (key === 'toggle') return `${mod}+P`
-  return key === 'prev' ? `${mod}+,` : `${mod}+.`
+  if (key === 'prev') return `${mod}+,`
+  if (key === 'next') return `${mod}+.`
+  return ''
 }
 
 const ACCEL_LABELS: Record<string, string> = {
@@ -403,7 +418,7 @@ async function onCaptureKey(event: KeyboardEvent): Promise<void> {
 }
 
 async function saveShortcut(key: ShortcutKey, accelerator: string): Promise<void> {
-  const current = settings.value?.shortcuts ?? { toggle: '', next: '', prev: '' }
+  const current = settings.value?.shortcuts ?? { toggle: '', next: '', prev: '', lyric: '', drive: '' }
   // 与另外两项撞车时直接拒绝：同一个组合注册两次必然有一项失效
   for (const item of SHORTCUT_ITEMS) {
     if (item.key !== key && effectiveShortcut(item.key) === accelerator) {
@@ -421,7 +436,7 @@ async function saveShortcut(key: ShortcutKey, accelerator: string): Promise<void
 }
 
 async function resetShortcuts(): Promise<void> {
-  await patch({ shortcuts: { toggle: '', next: '', prev: '' } })
+  await patch({ shortcuts: { toggle: '', next: '', prev: '', lyric: '', drive: '' } })
   await window.api.applyShortcuts()
   app.toast('已恢复默认快捷键', 'info')
 }
@@ -431,6 +446,7 @@ async function probe(): Promise<void> {
   try {
     engine.value = await window.api.engineStatus()
     health.value = await window.api.sourceHealth()
+    failures.value = await window.api.sourceRecentFailures()
   } catch (error) {
     app.toast(error instanceof Error ? error.message : String(error), 'error')
   } finally {
@@ -1455,6 +1471,15 @@ onBeforeUnmount(() => {
             <Icon name="refresh" :size="13" /> {{ probing ? '检测中…' : '重新检测' }}
           </button>
         </div>
+
+        <div v-if="failures?.items.length" class="failure-list">
+          <p class="hint">最近播放失败（只作提示；自动换源{{ failures.preferLoggedIn ? '会优先尝试已登录平台' : '未发现登录态' }}）</p>
+          <div v-for="item in failures.items.slice(0, 8)" :key="`${item.key}-${item.at}`" class="failure-row">
+            <span class="truncate">{{ item.name }} · {{ item.artists.join(' / ') }}</span>
+            <em>{{ item.platform }}</em>
+            <small>{{ failureCodeLabel[item.code] ?? item.code }}</small>
+          </div>
+        </div>
       </div>
 
       <p v-if="engineSources.length" class="hint">
@@ -2207,6 +2232,28 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
   margin-top: 10px;
+}
+.failure-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.failure-list .hint {
+  margin: 0 0 2px;
+}
+.failure-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.failure-row em,
+.failure-row small {
+  font-style: normal;
+  color: var(--text-3);
 }
 /* 上游巡检：每个源一个色点，红=请求失败、黄=能通但搜不到、灰=没巡检过 */
 .health-grid {

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from './Icon.vue'
+import ImportPlaylistPanel from './ImportPlaylistPanel.vue'
 import { useAppStore } from '../stores/app'
 import { usePlayerStore } from '../stores/player'
 import { useDownloadStore } from '../stores/download'
@@ -15,6 +16,7 @@ const playlists = usePlaylistStore()
 const route = useRoute()
 const router = useRouter()
 const open = ref(false)
+const showImport = ref(false)
 const panel = ref<HTMLElement | null>(null)
 /* M3U 歌单导入：与歌单详情页 M3U 菜单共用一套流程（见 composables/m3u） */
 const m3u = useM3uFlow()
@@ -95,7 +97,30 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
     </div>
 
     <div class="block">
-      <p class="block-title">我的歌单</p>
+      <div class="block-head">
+        <p class="block-title">我的歌单</p>
+        <div class="head-actions">
+          <button class="head-action" title="新建歌单" aria-label="新建歌单" @click="createPlaylist">
+            <Icon name="plus" :size="15" />
+          </button>
+          <button
+            class="head-action"
+            title="导入账号歌单"
+            aria-label="导入账号歌单"
+            @click="showImport = true"
+          >
+            <Icon name="download" :size="15" />
+          </button>
+          <button
+            class="head-action"
+            title="从 M3U 文件导入歌单，按本地库里的文件匹配"
+            aria-label="导入 M3U 文件"
+            @click="m3u.importM3u()"
+          >
+            <Icon name="export" :size="15" />
+          </button>
+        </div>
+      </div>
       <div class="playlist-list">
         <router-link
           v-for="item in playlists.custom"
@@ -114,18 +139,6 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
           <span class="truncate">{{ item.name }}</span>
           <em class="count">{{ item.songs.length }}</em>
         </router-link>
-        <button class="nav-item as-button" @click="createPlaylist">
-          <Icon name="plus" :size="16" />
-          <span>新建歌单</span>
-        </button>
-        <button
-          class="nav-item as-button"
-          title="从 M3U 文件导入歌单，按本地库里的文件匹配"
-          @click="m3u.importM3u()"
-        >
-          <Icon name="export" :size="16" />
-          <span>导入歌单</span>
-        </button>
       </div>
     </div>
 
@@ -182,6 +195,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
         </div>
       </transition>
     </div>
+
+    <ImportPlaylistPanel v-model:visible="showImport" />
   </aside>
 </template>
 
@@ -311,6 +326,39 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   text-transform: uppercase;
   color: var(--text-3);
   padding-left: 12px;
+  white-space: nowrap;
+}
+
+/* 「我的歌单」标题行：标题与新建/导入入口并列 */
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-right: 2px;
+}
+.block-head .block-title {
+  margin: 0;
+}
+.head-actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.head-action {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--text-3);
+  transition: all 0.15s var(--ease);
+}
+.head-action:hover {
+  background: var(--panel-strong);
+  color: var(--text);
 }
 
 .flex-1 {

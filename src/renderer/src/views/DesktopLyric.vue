@@ -7,9 +7,8 @@ import { plain } from '../core/plain'
 
 /**
  * 桌面歌词是独立窗口（绕开 App.vue 单独 mount）。
- * 配色恒定深色（--ly-* 深色调色板），不跟应用主题：它是浮在桌面壁纸上的
- * 组件，且半透明面板给拖拽区提供绘制像素（透明窗口的 drag 区只认有像素的位置）。
- * 强调色仍随音源实时联动（主窗口 250ms 状态推送）。
+ * 配色跟随应用主题：主窗口 250ms 推送 theme，这里切 html[data-theme] 让 --ly-* 变量
+ * 跟着换；用户在设置里填的自定义颜色仍通过 lineVars 覆盖。强调色也随音源实时联动。
  */
 
 const lines = ref<LyricLine[]>([])
@@ -62,6 +61,9 @@ const next = computed<LyricLine | null>(() => lines.value[index.value + 1] ?? nu
 function onState(payload: any): void {
   if (!payload || typeof payload !== 'object') return
   // 强调色随 250ms 推送实时联动（独立窗口拿不到主窗口的 shellStyle）
+  if (payload.theme === 'dark' || payload.theme === 'light') {
+    document.documentElement.dataset.theme = payload.theme
+  }
   if (payload.accent) {
     const root = document.documentElement.style
     root.setProperty('--accent', payload.accent)
