@@ -78,10 +78,6 @@ const api: AuroraApi = {
   toggleFavorite: (song) => ipcRenderer.invoke(IPC.playlistToggleFavorite, song),
   exportPlaylistM3u: (args) => ipcRenderer.invoke(IPC.playlistExportM3u, args),
   importPlaylistM3u: (targetId) => ipcRenderer.invoke(IPC.playlistImportM3u, targetId),
-  cloudAccount: (platform) => ipcRenderer.invoke(IPC.cloudAccount, platform),
-  cloudPlaylists: (platform) => ipcRenderer.invoke(IPC.cloudPlaylists, platform),
-  cloudPlaylistSongs: (platform, id) =>
-    ipcRenderer.invoke(IPC.cloudPlaylistSongs, { platform, id }),
 
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   setSettings: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),

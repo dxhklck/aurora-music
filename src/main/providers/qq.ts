@@ -1,6 +1,5 @@
 import type {
   ChartSummary,
-  CloudPlaylistInfo,
   Lyric,
   ProviderInfo,
   Quality,
@@ -242,94 +241,6 @@ export class QQProvider extends BaseProvider {
     }))
   }
 
-  /* ---------------- 云端歌单（需登录 Cookie） ---------------- */
-
-  /** 登录态摘要：Cookie 里取得到 uin 即视为已登录（昵称拿不到就用 uin 兜底） */
-  async cloudAccount(): Promise<{ id: string; name: string } | null> {
-    const uin = extractQQUin()
-    if (!uin) return null
-    return { id: uin, name: `QQ ${uin}` }
-  }
-
-  /**
-   * 账号下的歌单目录，走 musicu.fcg 的 get_playlist_by_uin。
-   * 该模块各版本返回字段名有差异（dissid/disstid、song_cnt/song_count…），
-   * 这里逐字段做兜底映射，别把整个功能绑死在某一个字段名上。
-   */
-  async cloudPlaylists(): Promise<CloudPlaylistInfo[]> {
-    const uin = extractQQUin()
-    if (!uin) return []
-    const data = await this.json<{
-      req?: {
-        code?: number
-        data?: Record<string, unknown>
-      }
-    }>(
-      'https://u.y.qq.com/cgi-bin/musicu.fcg',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Referer: this.referer },
-        body: JSON.stringify({
-          comm: { ct: 19, cv: 1859, uin, format: 'json' },
-          req: {
-            module: 'playlist.PlaylistSquare',
-            method: 'get_playlist_by_uin',
-            param: {
-              hostUin: uin,
-              uin,
-              needOtherPlaylist: 0,
-              needPassivePlaylist: 0,
-              needSummary: 1,
-              beginPage: 0,
-              pageSize: 100
-            }
-          }
-        })
-      },
-      1
-    )
-    const payload = (data.req?.data ?? {}) as Record<string, unknown>
-    const raw = ((payload.list ?? payload.items ?? payload.playlists ?? []) as Array<
-      Record<string, unknown>
-    >).filter((item) => item && (item.dissid ?? item.disstid ?? item.tid))
-    return raw.map((item) => {
-      const cover = item.imgurl ?? item.picurl ?? item.logo
-      return {
-        id: String(item.dissid ?? item.disstid ?? item.tid),
-        name: String(item.dissname ?? item.diss_name ?? item.title ?? '未命名歌单'),
-        count: Number(item.song_cnt ?? item.song_count ?? item.songnum ?? 0),
-        coverUrl:
-          typeof cover === 'string' && cover ? mediaUrl(cover, 'https://y.qq.com/') : null,
-        mine: true
-      }
-    })
-  }
-
-  /**
-   * 拉取一个歌单的全部曲目：qzone 的歌单详情接口（老而稳，带登录 Cookie 返回全量）。
-   * songlist 条目结构与榜单的 QQTrack 一致，直接复用 mapTrack。
-   */
-  async cloudPlaylistSongs(id: string): Promise<Song[]> {
-    const uin = extractQQUin()
-    const url =
-      'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?' +
-      new URLSearchParams({
-        type: '1',
-        json: '1',
-        utf8: '1',
-        onlysong: '0',
-        disstid: id,
-        uin: uin || '0',
-        loginUin: uin || '0',
-        format: 'json'
-      }).toString()
-    const data = await this.json<{
-      cdlist?: Array<{ songlist?: QQTrack[]; songnum?: number }>
-    }>(url, { headers: { Referer: this.referer } })
-    const cd = data.cdlist?.[0]
-    return (cd?.songlist ?? []).map((track) => this.mapTrack(track))
-  }
-
   async chartDetail({
     id,
     page,
@@ -338,7 +249,8 @@ export class QQProvider extends BaseProvider {
     id: string
     page: number
     limit: number
-  }): Promise<SearchPage> {    const url =
+  }): Promise<SearchPage> {
+    const url =
       'https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?' +
       new URLSearchParams({
         topid: id,

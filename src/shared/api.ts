@@ -7,8 +7,6 @@ import type {
   CellphoneLoginArgs,
   CellphoneLoginResult,
   ChartSummary,
-  CloudAccountInfo,
-  CloudPlaylistInfo,
   DownloadTask,
   DuplicateGroup,
   LibraryOpReport,
@@ -205,13 +203,6 @@ export interface AuroraApi {
   exportPlaylistM3u(args: { id: string; name: string }): Promise<M3uExportResult>
   /** 从 M3U 导入成新歌单（会弹选择对话框），按路径匹配库内条目 */
   importPlaylistM3u(targetId?: string): Promise<M3uImportResult>
-
-  /** 云端账号登录态（需在设置里登录过）；未登录返回 null，平台不支持也返回 null */
-  cloudAccount(platform: string): Promise<CloudAccountInfo | null>
-  /** 该账号下的云端歌单目录；未登录返回空数组 */
-  cloudPlaylists(platform: string): Promise<CloudPlaylistInfo[]>
-  /** 拉取一个云端歌单的全部曲目（在线曲目，可直接播放/收藏/下载） */
-  cloudPlaylistSongs(platform: string, id: string): Promise<Song[]>
 
   getSettings(): Promise<AppSettings>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>

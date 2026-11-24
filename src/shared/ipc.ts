@@ -90,13 +90,6 @@ export const IPC = {
   /** 从 M3U 导入成新歌单（按路径匹配库内条目） */
   playlistImportM3u: 'playlist:import-m3u',
 
-  /** 云端账号登录态（网易云 / QQ），未登录的平台为 null */
-  cloudAccount: 'cloud:account',
-  /** 账号下的云端歌单目录 */
-  cloudPlaylists: 'cloud:playlists',
-  /** 拉取某个云端歌单的全部曲目（Song[]，在线曲目可直接播放） */
-  cloudPlaylistSongs: 'cloud:playlist-songs',
-
   // 设置
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',

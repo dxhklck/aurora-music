@@ -1,6 +1,5 @@
 import type {
   ChartSummary,
-  CloudPlaylistInfo,
   Lyric,
   ProviderInfo,
   Quality,
@@ -223,53 +222,6 @@ export class NeteaseProvider extends BaseProvider {
       { headers: { Referer: this.referer } }
     )
     return (all.songs ?? []).map((song) => this.mapSong(song))
-  }
-
-  /* ---------------- 云端歌单（需登录 Cookie） ---------------- */
-
-  /** 登录态摘要：Cookie 里必须有 MUSIC_U 才能拿到 profile；未登录返回 null */
-  async cloudAccount(): Promise<{ id: string; name: string } | null> {
-    try {
-      const data = await this.json<{
-        profile?: { userId: number; nickname: string }
-        code?: number
-      }>('https://music.163.com/api/nuser/account/get', {
-        headers: { Referer: this.referer }
-      })
-      if (!data.profile?.userId) return null
-      return { id: String(data.profile.userId), name: data.profile.nickname }
-    } catch {
-      return null
-    }
-  }
-
-  /** 账号下的歌单目录（含本人创建与收藏的他人歌单，用 mine 区分） */
-  async cloudPlaylists(): Promise<CloudPlaylistInfo[]> {
-    const account = await this.cloudAccount()
-    if (!account) return []
-    const data = await this.json<{
-      playlist?: Array<{
-        id: number
-        name: string
-        trackCount?: number
-        coverImgUrl?: string
-        userId?: number
-      }>
-    }>(`https://music.163.com/api/user/playlist?uid=${account.id}&limit=100&offset=0`, {
-      headers: { Referer: this.referer }
-    })
-    return (data.playlist ?? []).map((item) => ({
-      id: String(item.id),
-      name: item.name,
-      count: item.trackCount ?? 0,
-      coverUrl: item.coverImgUrl ? mediaUrl(`${item.coverImgUrl}?param=120y120`, this.referer) : null,
-      mine: item.userId === Number(account.id)
-    }))
-  }
-
-  /** 拉取一个云端歌单的全部曲目（与榜单详情同一接口，登录态已带在 baseHeaders） */
-  async cloudPlaylistSongs(id: string): Promise<Song[]> {
-    return this.loadChartTracks(id)
   }
 
   async resolveStream(song: Song, quality: Quality): Promise<StreamInfo> {

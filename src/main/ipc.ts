@@ -1,13 +1,6 @@
 import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
-import type {
-  AppSettings,
-  CloudAccountInfo,
-  CloudPlaylistInfo,
-  LibraryTrack,
-  MiniVolumeState,
-  Song
-} from '@shared/types'
+import type { AppSettings, LibraryTrack, MiniVolumeState, Song } from '@shared/types'
 import { setProviderCookies } from './providers/cookies'
 import type { TrayState } from '@shared/api'
 import { updateTrayState } from './tray'
@@ -330,42 +323,6 @@ export function registerIpc(): void {
     }
     const result = await importM3uFromFile(picked.filePaths[0], targetId)
     return { canceled: false, ...result }
-  })
-
-  // ---------- 云端歌单（网易云 / QQ 账号） ----------
-  // 只有网易云与 QQ 适配器实现了 cloud* 方法；其它音源（酷我/本地/引擎）如实返回不支持
-  function cloudApi(platform: string):
-    | {
-        cloudAccount(): Promise<CloudAccountInfo | null>
-        cloudPlaylists(): Promise<CloudPlaylistInfo[]>
-        cloudPlaylistSongs(id: string): Promise<Song[]>
-      }
-    | null {
-    const provider = providers.get(platform)
-    if ('cloudPlaylists' in provider) {
-      return provider as unknown as {
-        cloudAccount(): Promise<CloudAccountInfo | null>
-        cloudPlaylists(): Promise<CloudPlaylistInfo[]>
-        cloudPlaylistSongs(id: string): Promise<Song[]>
-      }
-    }
-    return null
-  }
-
-  handle(IPC.cloudAccount, async (platform: string) => {
-    const api = cloudApi(platform)
-    if (!api) return null
-    return api.cloudAccount()
-  })
-  handle(IPC.cloudPlaylists, (platform: string) => {
-    const api = cloudApi(platform)
-    if (!api) return Promise.resolve([])
-    return api.cloudPlaylists()
-  })
-  handle(IPC.cloudPlaylistSongs, (args: { platform: string; id: string }) => {
-    const api = cloudApi(args.platform)
-    if (!api) return Promise.resolve([])
-    return api.cloudPlaylistSongs(String(args.id))
   })
 
   // ---------- 日志与诊断 ----------

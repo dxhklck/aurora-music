@@ -219,23 +219,6 @@ export interface M3uExportResult {
   path: string
 }
 
-/** 云端歌单目录条目（网易云 / QQ 音乐账号下的歌单） */
-export interface CloudPlaylistInfo {
-  id: string
-  name: string
-  /** 歌单曲目数（平台侧报告值） */
-  count: number
-  coverUrl: string | null
-  /** 是否本人创建（网易云会把自己收藏的别人的歌单也列出来） */
-  mine: boolean
-}
-
-/** 云端账号登录态摘要；未登录时对应平台为 null */
-export interface CloudAccountInfo {
-  id: string
-  name: string
-}
-
 /** M3U 导入结果（按路径匹配库内条目，匹配不上的如实计数） */
 export interface M3uImportResult {
   canceled: boolean
